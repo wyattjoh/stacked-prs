@@ -19,6 +19,6 @@
     "ink-testing-library": "npm:ink-testing-library@^4.0.0"
   },
   "fmt": {
-    "exclude": ["CHANGELOG.md"]
+    "exclude": ["CHANGELOG.md", "docs/superpowers/**"]
   }
 }
