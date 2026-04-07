@@ -14,26 +14,31 @@ data queries and metadata mutations, and `gh` for GitHub operations.
 
 ```
 .claude-plugin/plugin.json      # Plugin manifest (skills/ is auto-discovered)
+.github/workflows/
+├── ci.yml                      # Deno check/lint/test + plugin validate on PRs
+└── release.yml                 # release-please + marketplace update on push to main
 README.md                       # User-facing docs (install + /stacked-prs commands)
 CLAUDE.md                       # This file: development guide
+deno.json                       # Deno config: tasks, imports, fmt rules
+deno.lock
+release-please-config.json
+.release-please-manifest.json
+src/
+├── cli.ts                      # Unified CLI entry point (@cliffy/command router)
+├── lib/
+│   ├── stack.ts                # Core library: types, git config read/write, tree traversal
+│   ├── gh.ts                   # GitHub CLI wrapper with test fixture support (GH_MOCK_DIR)
+│   └── testdata/helpers.ts     # Test utilities (createTestRepo, addBranch, commitFile)
+└── commands/
+    ├── config.ts               # Metadata mutations (library, not a CLI subcommand)
+    ├── status.ts               # Stack state + PR info
+    ├── restack.ts              # Segment-based tree rebase
+    ├── nav.ts                  # PR navigation comment management
+    ├── verify-refs.ts          # Post-rebase branch ancestry verification
+    ├── import-discover.ts      # Chain detection: walks git graph to find branch trees
+    └── submit-plan.ts          # Computes full submit plan
 skills/stacked-prs/
 ├── SKILL.md                    # Runbook Claude follows for each sub-command
-├── deno.json                   # Standalone Deno config for the helper scripts
-├── deno.lock
-├── scripts/
-│   ├── cli.ts                  # Unified CLI entry point (@cliffy/command router)
-│   ├── lib/
-│   │   ├── stack.ts            # Core library: types, git config read/write, tree traversal
-│   │   ├── gh.ts               # GitHub CLI wrapper with test fixture support (GH_MOCK_DIR)
-│   │   └── testdata/helpers.ts # Test utilities (createTestRepo, addBranch, commitFile)
-│   └── commands/
-│       ├── config.ts           # Metadata mutations (library, not a CLI subcommand)
-│       ├── status.ts           # Stack state + PR info
-│       ├── restack.ts          # Segment-based tree rebase
-│       ├── nav.ts              # PR navigation comment management
-│       ├── verify-refs.ts      # Post-rebase branch ancestry verification
-│       ├── import-discover.ts  # Chain detection: walks git graph to find branch trees
-│       └── submit-plan.ts      # Computes full submit plan
 └── references/
     └── git-commands.md         # Git reference for rebase, --onto, conflict resolution
 ```
@@ -43,21 +48,21 @@ does not need a `skills` field.
 
 ## Commands
 
-All Deno commands run from `skills/stacked-prs/`:
+All Deno commands run from the repo root:
 
 ```bash
 # Full test suite (real git repos in tmp dirs + gh fixture mocks)
-deno test --allow-run=git,gh --allow-env --allow-read --allow-write
+deno task test
 
 # Single test file
 deno test --allow-run=git,gh --allow-env --allow-read --allow-write \
-  scripts/commands/restack.test.ts
+  src/commands/restack.test.ts
 
-# Type check
-deno check scripts/cli.ts
+# Type check, lint, fmt check
+deno task check
 
 # Invoke a CLI subcommand directly
-deno run --allow-run=git,gh --allow-env scripts/cli.ts status --json
+deno run --allow-run=git,gh --allow-env --allow-read src/cli.ts status --json
 ```
 
 Subcommands: `status`, `restack`, `nav`, `verify-refs`, `import-discover`,
@@ -92,17 +97,17 @@ Independent sibling segments continue even when one hits a conflict.
 
 ### Script roles
 
-| File                          | Role                                     | Invoked as                              |
-| ----------------------------- | ---------------------------------------- | --------------------------------------- |
-| `lib/stack.ts`                | Library only, not a CLI                  | Imported by all other scripts           |
-| `lib/gh.ts`                   | Library only, not a CLI                  | Imported by scripts needing GitHub data |
-| `commands/config.ts`          | Library functions for metadata mutations | Imported by other commands              |
-| `commands/status.ts`          | Read stack state + PR info               | `cli.ts status [--json]`                |
-| `commands/restack.ts`         | Segment-based tree rebase                | `cli.ts restack [--json]`               |
-| `commands/nav.ts`             | Navigation comments                      | `cli.ts nav [--dry-run]`                |
-| `commands/verify-refs.ts`     | Post-rebase verification                 | `cli.ts verify-refs`                    |
-| `commands/import-discover.ts` | Branch tree detection                    | `cli.ts import-discover`                |
-| `commands/submit-plan.ts`     | Submit planning                          | `cli.ts submit-plan`                    |
+| File                              | Role                                     | Invoked as                              |
+| --------------------------------- | ---------------------------------------- | --------------------------------------- |
+| `src/lib/stack.ts`                | Library only, not a CLI                  | Imported by all other scripts           |
+| `src/lib/gh.ts`                   | Library only, not a CLI                  | Imported by scripts needing GitHub data |
+| `src/commands/config.ts`          | Library functions for metadata mutations | Imported by other commands              |
+| `src/commands/status.ts`          | Read stack state + PR info               | `cli.ts status [--json]`                |
+| `src/commands/restack.ts`         | Segment-based tree rebase                | `cli.ts restack [--json]`               |
+| `src/commands/nav.ts`             | Navigation comments                      | `cli.ts nav [--dry-run]`                |
+| `src/commands/verify-refs.ts`     | Post-rebase verification                 | `cli.ts verify-refs`                    |
+| `src/commands/import-discover.ts` | Branch tree detection                    | `cli.ts import-discover`                |
+| `src/commands/submit-plan.ts`     | Submit planning                          | `cli.ts submit-plan`                    |
 
 ### Git config schema
 
@@ -151,6 +156,21 @@ when editing the runbook.
   `cli.ts restack` rather than constructing rebase commands manually.
 - When adding a new command, register it in the "Scripts" section of `SKILL.md`
   with its full `cli.ts` invocation.
+
+## CI and releases
+
+- **CI** (`.github/workflows/ci.yml`) runs on PRs to `main`: `deno fmt --check`,
+  `deno lint`, `deno check src/cli.ts`, `deno test ...`, plus
+  `claude plugin
+  validate .` in a second job.
+- **Release** (`.github/workflows/release.yml`) runs on push to `main`:
+  release-please opens release PRs and tags new versions as
+  `stacked-prs-v<version>`. On release, `wyattjoh/claude-code-marketplace@v1`
+  updates the listing in `wyattjoh/claude-code-marketplace`.
+- The only version source of truth is `.claude-plugin/plugin.json`. release-
+  please bumps it via the `extra-files` rule in `release-please-config.json`.
+- No JSR publishing. The skill always runs its source from
+  `${CLAUDE_PLUGIN_ROOT}/src/cli.ts`, so there is no library consumer.
 
 ## Keeping docs in sync
 
