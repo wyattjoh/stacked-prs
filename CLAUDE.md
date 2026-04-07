@@ -29,14 +29,19 @@ src/
 │   ├── stack.ts                # Core library: types, git config read/write, tree traversal
 │   ├── gh.ts                   # GitHub CLI wrapper with test fixture support (GH_MOCK_DIR)
 │   └── testdata/helpers.ts     # Test utilities (createTestRepo, addBranch, commitFile)
-└── commands/
-    ├── config.ts               # Metadata mutations (library, not a CLI subcommand)
-    ├── status.ts               # Stack state + PR info
-    ├── restack.ts              # Segment-based tree rebase
-    ├── nav.ts                  # PR navigation comment management
-    ├── verify-refs.ts          # Post-rebase branch ancestry verification
-    ├── import-discover.ts      # Chain detection: walks git graph to find branch trees
-    └── submit-plan.ts          # Computes full submit plan
+├── commands/
+│   ├── config.ts               # Metadata mutations (library, not a CLI subcommand)
+│   ├── status.ts               # Stack state + PR info
+│   ├── restack.ts              # Segment-based tree rebase
+│   ├── nav.ts                  # PR navigation comment management
+│   ├── verify-refs.ts          # Post-rebase branch ancestry verification
+│   ├── import-discover.ts      # Chain detection: walks git graph to find branch trees
+│   └── submit-plan.ts          # Computes full submit plan
+└── tui/                        # Ink-based interactive view (status -i)
+    ├── app.tsx
+    ├── components/
+    ├── state/
+    └── lib/
 skills/stacked-prs/
 ├── SKILL.md                    # Runbook Claude follows for each sub-command
 └── references/
@@ -156,6 +161,11 @@ when editing the runbook.
   `cli.ts restack` rather than constructing rebase commands manually.
 - When adding a new command, register it in the "Scripts" section of `SKILL.md`
   with its full `cli.ts` invocation.
+- Ink/TUI code lives under `src/tui/`, not `src/commands/`. The pure-function
+  rule for commands is preserved; the TUI is a view layer that owns stdout and
+  runs an event loop, which can't fit the command contract. State is managed via
+  a pure reducer (`state/reducer.ts`) so most logic remains unit-testable
+  without Ink.
 
 ## CI and releases
 

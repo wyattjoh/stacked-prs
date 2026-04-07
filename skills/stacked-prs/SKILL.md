@@ -286,6 +286,17 @@ Show current stack state. **No confirmation needed** (read-only).
          └── feature/auth-ui   (no PR)             up-to-date
    ```
 
+#### Interactive view
+
+Run `deno run ... cli.ts status -i` (or `--interactive`) to launch a read-only
+TUI. The TUI renders every configured stack as a horizontal left-to-right tree
+with per-stack colors, shows PR state and sync status per branch, and provides
+arrow-key navigation plus a live commit detail pane for the focused branch. The
+TUI never writes to the repo or GitHub, so it does not require confirmation
+gates.
+
+Key bindings: `?` shows the full list.
+
 ### `land`
 
 Handle cleanup after a PR merges. Auto-splits the stack if landing creates
@@ -443,6 +454,7 @@ command.
 - `gh pr list`, `gh pr view`, `gh repo view`
 - `deno run ... cli.ts status`
 - `deno run ... cli.ts status --json`
+- `deno run ... cli.ts status -i` / `--interactive`
 - `deno run ... cli.ts nav --dry-run`
 - `deno run ... cli.ts verify-refs`
 - `deno run ... cli.ts restack --json`
@@ -465,12 +477,14 @@ provided.
 ### `status`
 
 ```bash
-deno run --allow-run=git,gh --allow-env --allow-read ${CLAUDE_PLUGIN_ROOT}/src/cli.ts status \
-  [--stack-name=<name>] [--owner=<owner> --repo=<repo>] [--json]
+deno run --allow-run=git,gh,pbcopy,wl-copy,clip.exe --allow-env --allow-read ${CLAUDE_PLUGIN_ROOT}/src/cli.ts status \
+  [--stack-name=<name>] [--owner=<owner> --repo=<repo>] [--json] [-i|--interactive]
 ```
 
 Returns human-readable tree output by default. Pass `--json` for structured JSON
-with full stack state.
+with full stack state. Pass `-i` / `--interactive` to launch the read-only TUI
+that renders every stack as a horizontal tree with per-stack colors, PR state,
+sync status, and a live commit detail pane.
 
 ### `restack`
 

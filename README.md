@@ -201,6 +201,27 @@ Stack: auth-rework (squash merge)
       └── feature/auth-ui   (no PR)             up-to-date
 ```
 
+### Interactive view
+
+```
+deno run --allow-run=git,gh,pbcopy,wl-copy,clip.exe --allow-env --allow-read \
+  src/cli.ts status -i
+```
+
+Launches a terminal UI that shows every stack in the repo as a horizontal tree,
+with per-stack colors, PR state glyphs, sync-status connectors, and a live
+commit detail pane. Read-only: no rebases, no pushes, no PR edits.
+
+Common keys:
+
+- Arrow keys / `hjkl`: navigate the map
+- `tab` / `shift-tab`: switch tabs
+- `r`: refresh current tab
+- `o`: open focused PR in browser
+- `y` / `Y`: copy branch name / PR URL
+- `?`: toggle full key help
+- `q`: quit
+
 ### `/stacked-prs land`
 
 Clean up after a PR merges. Auto-splits the stack when landing creates multiple
