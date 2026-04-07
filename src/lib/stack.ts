@@ -485,3 +485,25 @@ export async function validateStackTree(
 
   return { valid: errors.length === 0, errors };
 }
+
+/** Enumerate all configured stack names in the repo, sorted alphabetically. */
+export async function listAllStacks(dir: string): Promise<string[]> {
+  const lines = await gitConfigGetRegexp(dir, "^branch\\..*\\.stack-name$");
+  const set = new Set<string>();
+  for (const [, value] of lines) set.add(value);
+  return [...set].sort();
+}
+
+/** Load every configured stack in the repo as a StackTree. */
+export async function getAllStackTrees(dir: string): Promise<StackTree[]> {
+  const names = await listAllStacks(dir);
+  const trees: StackTree[] = [];
+  for (const name of names) {
+    try {
+      trees.push(await getStackTree(dir, name));
+    } catch {
+      // Skip stacks with broken metadata; TUI will show them as errors later.
+    }
+  }
+  return trees;
+}

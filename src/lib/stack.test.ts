@@ -5,12 +5,14 @@ import type { TestRepo } from "./testdata/helpers.ts";
 import {
   findNode,
   getAllNodes,
+  getAllStackTrees,
   getBaseBranch,
   getLeaves,
   getMergeStrategy,
   getPathTo,
   getStackTree,
   getSubtree,
+  listAllStacks,
   removeStackBranch,
   renderTree,
   runGitCommand,
@@ -613,5 +615,68 @@ describe("renderTree", () => {
     expect(line).toContain("auth-tests");
     expect(line).toContain("PR #102 (draft)");
     expect(line).toContain("<- you are here");
+  });
+});
+
+describe("listAllStacks", () => {
+  let repo: TestRepo;
+
+  beforeEach(async () => {
+    repo = await createTestRepo();
+  });
+
+  afterEach(async () => {
+    await repo.cleanup();
+  });
+
+  test("returns empty list when no stacks configured", async () => {
+    const names = await listAllStacks(repo.dir);
+    expect(names).toEqual([]);
+  });
+
+  test("returns sorted unique stack names", async () => {
+    await addBranch(repo.dir, "feat/a", "main");
+    await addBranch(repo.dir, "feat/b", "main");
+    await addBranch(repo.dir, "feat/c", "main");
+
+    await setStackNode(repo.dir, "feat/a", "zebra", "main");
+    await setStackNode(repo.dir, "feat/b", "alpha", "main");
+    await setStackNode(repo.dir, "feat/c", "alpha", "main");
+    await setBaseBranch(repo.dir, "zebra", "main");
+    await setBaseBranch(repo.dir, "alpha", "main");
+
+    const names = await listAllStacks(repo.dir);
+    expect(names).toEqual(["alpha", "zebra"]);
+  });
+});
+
+describe("getAllStackTrees", () => {
+  let repo: TestRepo;
+
+  beforeEach(async () => {
+    repo = await createTestRepo();
+  });
+
+  afterEach(async () => {
+    await repo.cleanup();
+  });
+
+  test("returns empty list when no stacks", async () => {
+    const trees = await getAllStackTrees(repo.dir);
+    expect(trees).toEqual([]);
+  });
+
+  test("returns one StackTree per stack", async () => {
+    await addBranch(repo.dir, "feat/a", "main");
+    await addBranch(repo.dir, "feat/b", "main");
+
+    await setStackNode(repo.dir, "feat/a", "alpha", "main");
+    await setBaseBranch(repo.dir, "alpha", "main");
+    await setStackNode(repo.dir, "feat/b", "beta", "main");
+    await setBaseBranch(repo.dir, "beta", "main");
+
+    const trees = await getAllStackTrees(repo.dir);
+    expect(trees).toHaveLength(2);
+    expect(trees.map((t) => t.stackName).sort()).toEqual(["alpha", "beta"]);
   });
 });
