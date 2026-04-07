@@ -36,8 +36,49 @@ export function fixtureKey(args: string[]): string {
     .replace(/^-|-$/g, ""); // trim leading/trailing dashes
 }
 
-/** Run a gh command. Returns stdout as string. */
-export async function gh(...args: string[]): Promise<string> {
+/** Options accepted by the `gh` function's overloaded form. */
+export interface GhOptions {
+  signal?: AbortSignal;
+}
+
+function isGhOptions(x: unknown): x is GhOptions {
+  return typeof x === "object" && x !== null && !Array.isArray(x) &&
+    !(x instanceof String);
+}
+
+/**
+ * Run a gh command. Returns stdout as string.
+ *
+ * Two call shapes are supported:
+ *   gh("repo", "view")                              // existing rest-arg form
+ *   gh({ signal }, "repo", "view")                  // with cancellation
+ */
+export function gh(...args: string[]): Promise<string>;
+export function gh(
+  options: GhOptions,
+  ...args: string[]
+): Promise<string>;
+export async function gh(
+  optionsOrFirstArg: GhOptions | string,
+  ...rest: string[]
+): Promise<string> {
+  let signal: AbortSignal | undefined;
+  let args: string[];
+  if (typeof optionsOrFirstArg === "string") {
+    args = [optionsOrFirstArg, ...rest];
+  } else if (isGhOptions(optionsOrFirstArg)) {
+    signal = optionsOrFirstArg.signal;
+    args = rest;
+  } else {
+    args = [String(optionsOrFirstArg), ...rest];
+  }
+
+  if (signal?.aborted) {
+    const err = new Error("gh call aborted");
+    err.name = "AbortError";
+    throw err;
+  }
+
   const mockDir = getMockDir();
 
   if (mockDir) {
@@ -54,6 +95,7 @@ export async function gh(...args: string[]): Promise<string> {
     args,
     stdout: "piped",
     stderr: "piped",
+    signal,
   });
   const { stdout, success, stderr } = await cmd.output();
   if (!success) {

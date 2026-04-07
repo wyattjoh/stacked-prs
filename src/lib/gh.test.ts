@@ -83,3 +83,19 @@ describe("gh mock mode", () => {
     expect(JSON.parse(result)).toEqual(fixture);
   });
 });
+
+describe("gh with AbortSignal", () => {
+  test("throws AbortError when signal is already aborted", async () => {
+    const controller = new AbortController();
+    controller.abort();
+
+    let threw = false;
+    try {
+      await gh({ signal: controller.signal }, "repo", "view");
+    } catch (err) {
+      threw = true;
+      expect((err as Error).name).toBe("AbortError");
+    }
+    expect(threw).toBe(true);
+  });
+});
