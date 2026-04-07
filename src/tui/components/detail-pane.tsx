@@ -34,7 +34,7 @@ function headerLine(
 export function DetailPane(props: DetailPaneProps): React.ReactElement {
   if (!props.branch) {
     return (
-      <Box borderStyle="single" flexDirection="column" height={8}>
+      <Box borderStyle="single" flexDirection="column" height={3}>
         <Text dimColor>no branch selected</Text>
       </Box>
     );

@@ -81,11 +81,24 @@ await new Command()
       const { render } = await import("ink");
       const React = await import("react");
       const { App } = await import("./tui/app.tsx");
+      const process = (await import("node:process")).default;
+
+      // Deno's node compat doesn't always mark stdio as TTY even when
+      // running interactively. Force it so Ink uses cursor-based redraws
+      // instead of appending each frame.
+      if (process.stdout && !process.stdout.isTTY) {
+        (process.stdout as unknown as { isTTY: boolean }).isTTY = true;
+      }
+      if (process.stdin && !process.stdin.isTTY) {
+        (process.stdin as unknown as { isTTY: boolean }).isTTY = true;
+      }
+
       const theme = options.theme === "light" || options.theme === "dark"
         ? options.theme
         : undefined;
       const { waitUntilExit } = render(
         React.createElement(App, { dir, theme }),
+        { stdout: process.stdout, stdin: process.stdin, exitOnCtrlC: true },
       );
       await waitUntilExit();
       return;
