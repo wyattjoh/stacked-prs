@@ -82,7 +82,7 @@ function renderRow(
 
 export function StackBand(props: StackBandProps): React.ReactElement {
   const header = props.mergeStrategy
-    ? `Stack: ${props.stackName} (${props.mergeStrategy} merge)`
+    ? `Stack: ${props.stackName} (${props.mergeStrategy})`
     : `Stack: ${props.stackName}`;
 
   // Group cells by row.

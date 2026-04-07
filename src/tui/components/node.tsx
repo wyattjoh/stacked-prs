@@ -9,6 +9,7 @@ export interface NodeProps {
   prCell: PrCellState | undefined;
 }
 
+const NODE_WIDTH = 16;
 const SPINNER = "⠋";
 
 function glyphFor(pr: PrInfo | null): string {
@@ -27,20 +28,28 @@ function stateLabel(pr: PrInfo | null): string {
 }
 
 function bottomLine(cell: PrCellState | undefined): string {
-  if (!cell || cell.status === "loading") return `${SPINNER} loading...`;
+  if (!cell || cell.status === "loading") return `${SPINNER} loading`;
   if (cell.status === "error") return "gh error";
   const pr = cell.pr;
   if (!pr) return "○ no PR";
   return `#${pr.number} ${glyphFor(pr)} ${stateLabel(pr)}`;
 }
 
+function truncate(s: string, width: number): string {
+  if (s.length <= width) return s;
+  if (width <= 1) return "…";
+  return s.slice(0, width - 1) + "…";
+}
+
 export function Node(props: NodeProps): React.ReactElement {
   const topStyle = props.focused ? { inverse: true } : {};
   const bottomStyle = props.focused ? { inverse: true } : {};
+  const top = truncate(props.branch, NODE_WIDTH);
+  const bottom = truncate(bottomLine(props.prCell), NODE_WIDTH);
   return (
-    <Box flexDirection="column">
-      <Text {...topStyle}>{props.branch}</Text>
-      <Text {...bottomStyle}>{bottomLine(props.prCell)}</Text>
+    <Box width={NODE_WIDTH} flexShrink={0} flexDirection="column">
+      <Text {...topStyle}>{top.padEnd(NODE_WIDTH)}</Text>
+      <Text {...bottomStyle}>{bottom.padEnd(NODE_WIDTH)}</Text>
     </Box>
   );
 }
