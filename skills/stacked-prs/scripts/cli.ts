@@ -1,0 +1,221 @@
+#!/usr/bin/env -S deno run --allow-run=git,gh --allow-env
+import { Command } from "@cliffy/command";
+import { getStackTree, renderTree, runGitCommand } from "./lib/stack.ts";
+import { gh } from "./lib/gh.ts";
+import { getStackStatus } from "./commands/status.ts";
+import { restack } from "./commands/restack.ts";
+import { buildNavPlan, executeNavAction } from "./commands/nav.ts";
+import { verifyRefs } from "./commands/verify-refs.ts";
+import { discoverChain } from "./commands/import-discover.ts";
+import { computeSubmitPlan } from "./commands/submit-plan.ts";
+
+/** Resolve stack name from current branch's git config, with --stack-name override. */
+async function resolveStackName(
+  dir: string,
+  explicit?: string,
+): Promise<string> {
+  if (explicit) return explicit;
+
+  const { code, stdout } = await runGitCommand(dir, "branch", "--show-current");
+  if (code !== 0 || !stdout) {
+    console.error(
+      "Could not detect stack name. Use --stack-name or switch to a stack branch.",
+    );
+    Deno.exit(1);
+  }
+
+  const { code: configCode, stdout: stackName } = await runGitCommand(
+    dir,
+    "config",
+    `branch.${stdout}.stack-name`,
+  );
+  if (configCode !== 0 || !stackName) {
+    console.error(
+      "Could not detect stack name. Use --stack-name or switch to a stack branch.",
+    );
+    Deno.exit(1);
+  }
+
+  return stackName;
+}
+
+/** Resolve owner/repo from gh CLI, with --owner/--repo override. */
+async function resolveRepo(
+  explicitOwner?: string,
+  explicitRepo?: string,
+): Promise<{ owner: string; repo: string }> {
+  if (explicitOwner && explicitRepo) {
+    return { owner: explicitOwner, repo: explicitRepo };
+  }
+
+  const result = await gh("repo", "view", "--json", "owner,name");
+  const parsed = JSON.parse(result) as {
+    owner: { login: string };
+    name: string;
+  };
+  return { owner: parsed.owner.login, repo: parsed.name };
+}
+
+const dir = Deno.cwd();
+
+await new Command()
+  .name("stacked-prs")
+  .version("1.0.0")
+  .description("Manage stacked branches and pull requests")
+  // --- status ---
+  .command("status", "Show current stack state with PR and sync info")
+  .option(
+    "--stack-name <name:string>",
+    "Stack name (auto-detected from current branch)",
+  )
+  .option("--owner <owner:string>", "GitHub repo owner")
+  .option("--repo <repo:string>", "GitHub repo name")
+  .option("--json", "Output as JSON")
+  .action(async (options) => {
+    const stackName = await resolveStackName(dir, options.stackName);
+    let owner = options.owner;
+    let repo = options.repo;
+    if (!owner || !repo) {
+      try {
+        const resolved = await resolveRepo(owner, repo);
+        owner = resolved.owner;
+        repo = resolved.repo;
+      } catch {
+        // PR info will be unavailable, that's ok for status
+      }
+    }
+    const status = await getStackStatus(dir, stackName, owner, repo);
+    if (options.json) {
+      console.log(JSON.stringify(status, null, 2));
+    } else {
+      console.log(status.display);
+    }
+  })
+  // --- restack ---
+  .command("restack", "Rebase the stack tree (no fetch, no push)")
+  .option(
+    "--stack-name <name:string>",
+    "Stack name (auto-detected from current branch)",
+  )
+  .option(
+    "--upstack-from <branch:string>",
+    "Rebase only this branch and its descendants",
+  )
+  .option(
+    "--downstack-from <branch:string>",
+    "Rebase only ancestors of this branch",
+  )
+  .option("--only <branch:string>", "Rebase only this single branch segment")
+  .option("--resume", "Resume after resolving conflicts")
+  .option("--json", "Output as JSON")
+  .action(async (options) => {
+    const stackName = await resolveStackName(dir, options.stackName);
+    const result = await restack(dir, stackName, {
+      upstackFrom: options.upstackFrom,
+      downstackFrom: options.downstackFrom,
+      only: options.only,
+    });
+
+    if (options.json) {
+      console.log(JSON.stringify(result, null, 2));
+    } else {
+      const tree = await getStackTree(dir, stackName);
+      const statusIcons = new Map<string, string>();
+      for (const seg of result.segments) {
+        const icon = seg.exitCode === 0 ? "✓" : "✗";
+        statusIcons.set(seg.tip, icon);
+        for (const b of seg.branches) statusIcons.set(b, icon);
+      }
+      for (const s of result.skipped) {
+        statusIcons.set(s.tip, "⊘");
+        for (const b of s.branches) statusIcons.set(b, "⊘");
+      }
+      console.log(renderTree(tree, { statusIcons }));
+
+      if (!result.ok && result.error === "conflict") {
+        console.error("\nConflict detected. To resolve:");
+        console.error(`  ${result.recovery?.resolve}`);
+        console.error(`  Then: ${result.recovery?.resume}`);
+        console.error(`  Or abort: ${result.recovery?.abort}`);
+      }
+    }
+
+    if (!result.ok) Deno.exit(1);
+  })
+  // --- nav ---
+  .command("nav", "Create or update stack navigation comments on PRs")
+  .option(
+    "--stack-name <name:string>",
+    "Stack name (auto-detected from current branch)",
+  )
+  .option("--owner <owner:string>", "GitHub repo owner")
+  .option("--repo <repo:string>", "GitHub repo name")
+  .option("--dry-run", "Preview without writing")
+  .action(async (options) => {
+    const stackName = await resolveStackName(dir, options.stackName);
+    const { owner, repo } = await resolveRepo(options.owner, options.repo);
+    const plan = await buildNavPlan(dir, stackName, owner, repo);
+
+    if (options.dryRun) {
+      console.log(JSON.stringify(plan, null, 2));
+      return;
+    }
+
+    for (const action of plan) {
+      await executeNavAction(owner, repo, action);
+      if (action.action === "create") {
+        console.log(`Created nav comment on PR #${action.prNumber}`);
+      } else {
+        console.log(
+          `Updated nav comment on PR #${action.prNumber} (comment ${action.commentId})`,
+        );
+      }
+    }
+  })
+  // --- verify-refs ---
+  .command("verify-refs", "Verify branch ancestry and detect duplicate patches")
+  .option(
+    "--stack-name <name:string>",
+    "Stack name (auto-detected from current branch)",
+  )
+  .action(async (options) => {
+    const stackName = await resolveStackName(dir, options.stackName);
+    const result = await verifyRefs(dir, stackName);
+    console.log(JSON.stringify(result, null, 2));
+    if (!result.valid) Deno.exit(1);
+  })
+  // --- import-discover ---
+  .command("import-discover", "Discover existing branch chains for import")
+  .option("--branch <name:string>", "Starting branch (default: current)")
+  .option("--owner <owner:string>", "GitHub repo owner")
+  .option("--repo <repo:string>", "GitHub repo name")
+  .action(async (options) => {
+    let owner = options.owner;
+    let repo = options.repo;
+    if (!owner || !repo) {
+      try {
+        const resolved = await resolveRepo(owner, repo);
+        owner = resolved.owner;
+        repo = resolved.repo;
+      } catch {
+        // Will proceed without PR data
+      }
+    }
+    const result = await discoverChain(dir, options.branch, owner, repo);
+    console.log(JSON.stringify(result, null, 2));
+  })
+  // --- submit-plan ---
+  .command("submit-plan", "Compute the submit plan for a stack")
+  .option(
+    "--stack-name <name:string>",
+    "Stack name (auto-detected from current branch)",
+  )
+  .option("--owner <owner:string>", "GitHub repo owner")
+  .option("--repo <repo:string>", "GitHub repo name")
+  .action(async (options) => {
+    const stackName = await resolveStackName(dir, options.stackName);
+    const { owner, repo } = await resolveRepo(options.owner, options.repo);
+    const plan = await computeSubmitPlan(dir, stackName, owner, repo);
+    console.log(JSON.stringify(plan, null, 2));
+  })
+  .parse(Deno.args);

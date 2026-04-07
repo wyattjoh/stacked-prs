@@ -1,0 +1,11 @@
+{
+  "name": "stacked-prs",
+  "version": "1.0.0",
+  "description": "Manage stacked branches and pull requests with git config metadata, Deno helper scripts, and the gh CLI.",
+  "author": {
+    "name": "Wyatt Johnson"
+  },
+  "repository": "https://github.com/wyattjoh/stacked-prs",
+  "license": "MIT",
+  "keywords": ["git", "github", "pull-requests", "stacked-prs", "rebase"]
+}

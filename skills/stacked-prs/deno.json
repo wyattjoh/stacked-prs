@@ -1,0 +1,10 @@
+{
+  "name": "@wyattjoh/skill-stacked-prs",
+  "version": "1.0.0",
+  "exports": "./scripts/lib/stack.ts",
+  "imports": {
+    "@cliffy/command": "jsr:@cliffy/command@^1",
+    "@std/testing": "jsr:@std/testing@^1",
+    "@std/expect": "jsr:@std/expect@^1"
+  }
+}

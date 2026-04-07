@@ -1,0 +1,337 @@
+import { afterEach, beforeEach, describe, it as test } from "@std/testing/bdd";
+import { expect } from "@std/expect";
+import {
+  addBranch,
+  commitFile,
+  createTestRepo,
+  runGit,
+} from "../lib/testdata/helpers.ts";
+import type { TestRepo } from "../lib/testdata/helpers.ts";
+import {
+  setBaseBranch,
+  setStackNode,
+  type StackNode,
+  type StackTree,
+} from "../lib/stack.ts";
+import { decomposeSegments, restack } from "./restack.ts";
+
+// ---------------------------------------------------------------------------
+// Helpers to build minimal StackTree objects for pure-logic unit tests
+// ---------------------------------------------------------------------------
+
+function makeTree(
+  baseBranch: string,
+  roots: StackNode[],
+): StackTree {
+  return {
+    stackName: "test",
+    baseBranch,
+    mergeStrategy: undefined,
+    roots,
+  };
+}
+
+function makeNode(
+  branch: string,
+  parent: string,
+  children: StackNode[] = [],
+): StackNode {
+  return { branch, stackName: "test", parent, children };
+}
+
+// ---------------------------------------------------------------------------
+// Unit tests: decomposeSegments (no git required)
+// ---------------------------------------------------------------------------
+
+describe("decomposeSegments", () => {
+  test("linear chain produces a single segment", () => {
+    // main -> a -> b -> c
+    const tree = makeTree("main", [
+      makeNode("a", "main", [
+        makeNode("b", "a", [
+          makeNode("c", "b"),
+        ]),
+      ]),
+    ]);
+
+    const segments = decomposeSegments(tree);
+
+    expect(segments).toHaveLength(1);
+    expect(segments[0]).toEqual({
+      tip: "c",
+      base: "main",
+      branches: ["a", "b", "c"],
+    });
+  });
+
+  test("fork produces multiple segments", () => {
+    // main -> auth -> auth-tests -> auth-ui
+    //                            -> auth-api  (fork at auth)
+    const tree = makeTree("main", [
+      makeNode("auth", "main", [
+        makeNode("auth-tests", "auth", [
+          makeNode("auth-ui", "auth-tests"),
+        ]),
+        makeNode("auth-api", "auth"),
+      ]),
+    ]);
+
+    const segments = decomposeSegments(tree);
+
+    expect(segments).toHaveLength(3);
+
+    const seg1 = segments.find((s) => s.tip === "auth");
+    expect(seg1).toEqual({ tip: "auth", base: "main", branches: ["auth"] });
+
+    const seg2 = segments.find((s) => s.tip === "auth-ui");
+    expect(seg2).toEqual({
+      tip: "auth-ui",
+      base: "auth",
+      branches: ["auth-tests", "auth-ui"],
+    });
+
+    const seg3 = segments.find((s) => s.tip === "auth-api");
+    expect(seg3).toEqual({
+      tip: "auth-api",
+      base: "auth",
+      branches: ["auth-api"],
+    });
+  });
+
+  test("deep fork (fork from fork) produces correct segments", () => {
+    // main -> a -> b -> c
+    //                -> d -> e
+    //                     -> f
+    const tree = makeTree("main", [
+      makeNode("a", "main", [
+        makeNode("b", "a", [
+          makeNode("c", "b"),
+          makeNode("d", "b", [
+            makeNode("e", "d"),
+            makeNode("f", "d"),
+          ]),
+        ]),
+      ]),
+    ]);
+
+    const segments = decomposeSegments(tree);
+
+    // Expected segments:
+    // 1. {tip: "b", base: "main", branches: ["a", "b"]}
+    // 2. {tip: "c", base: "b", branches: ["c"]}
+    // 3. {tip: "d", base: "b", branches: ["d"]}
+    // 4. {tip: "e", base: "d", branches: ["e"]}
+    // 5. {tip: "f", base: "d", branches: ["f"]}
+    expect(segments).toHaveLength(5);
+
+    expect(segments.find((s) => s.tip === "b")).toEqual({
+      tip: "b",
+      base: "main",
+      branches: ["a", "b"],
+    });
+    expect(segments.find((s) => s.tip === "c")).toEqual({
+      tip: "c",
+      base: "b",
+      branches: ["c"],
+    });
+    expect(segments.find((s) => s.tip === "d")).toEqual({
+      tip: "d",
+      base: "b",
+      branches: ["d"],
+    });
+    expect(segments.find((s) => s.tip === "e")).toEqual({
+      tip: "e",
+      base: "d",
+      branches: ["e"],
+    });
+    expect(segments.find((s) => s.tip === "f")).toEqual({
+      tip: "f",
+      base: "d",
+      branches: ["f"],
+    });
+  });
+
+  test("single root node produces single segment", () => {
+    const tree = makeTree("main", [makeNode("feature", "main")]);
+    const segments = decomposeSegments(tree);
+
+    expect(segments).toHaveLength(1);
+    expect(segments[0]).toEqual({
+      tip: "feature",
+      base: "main",
+      branches: ["feature"],
+    });
+  });
+
+  test("empty tree produces no segments", () => {
+    const tree = makeTree("main", []);
+    const segments = decomposeSegments(tree);
+    expect(segments).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Integration tests: restack against real git repos
+// ---------------------------------------------------------------------------
+
+async function setupStack(
+  dir: string,
+  stackName: string,
+  baseBranch: string,
+): Promise<void> {
+  await setBaseBranch(dir, stackName, baseBranch);
+}
+
+async function addStackBranch(
+  dir: string,
+  stackName: string,
+  branch: string,
+  parent: string,
+): Promise<void> {
+  await addBranch(dir, branch, parent);
+  await setStackNode(dir, branch, stackName, parent);
+}
+
+describe("restack integration", () => {
+  let repo: TestRepo;
+
+  beforeEach(async () => {
+    repo = await createTestRepo();
+  });
+
+  afterEach(async () => {
+    await repo.cleanup();
+  });
+
+  test("linear chain already synced returns ok with no rebases", async () => {
+    await addStackBranch(repo.dir, "my-stack", "feature/a", "main");
+    await addStackBranch(repo.dir, "my-stack", "feature/b", "feature/a");
+    await setupStack(repo.dir, "my-stack", "main");
+
+    const result = await restack(repo.dir, "my-stack");
+
+    expect(result.ok).toBe(true);
+    expect(result.error).toBeUndefined();
+    expect(result.skipped).toHaveLength(0);
+  });
+
+  test("successful restack of a linear chain after base moves", async () => {
+    await addStackBranch(repo.dir, "my-stack", "feature/a", "main");
+    await addStackBranch(repo.dir, "my-stack", "feature/b", "feature/a");
+    await setupStack(repo.dir, "my-stack", "main");
+
+    // Advance main to make feature/a stale
+    await runGit(repo.dir, "checkout", "main");
+    await commitFile(repo.dir, "main-update.txt", "main update\n");
+
+    // feature/a should now be rebased onto updated main
+    const result = await restack(repo.dir, "my-stack");
+
+    expect(result.ok).toBe(true);
+    expect(result.segments).toHaveLength(1);
+    expect(result.segments[0].exitCode).toBe(0);
+    expect(result.skipped).toHaveLength(0);
+  });
+
+  test("successful restack of a forked tree", async () => {
+    // main -> auth -> auth-a
+    //              -> auth-b
+    await addStackBranch(repo.dir, "my-stack", "auth", "main");
+    await addStackBranch(repo.dir, "my-stack", "auth-a", "auth");
+    await addStackBranch(repo.dir, "my-stack", "auth-b", "auth");
+    await setupStack(repo.dir, "my-stack", "main");
+
+    // Advance main so auth becomes stale
+    await runGit(repo.dir, "checkout", "main");
+    await commitFile(repo.dir, "main-update.txt", "main update\n");
+
+    const result = await restack(repo.dir, "my-stack");
+
+    expect(result.ok).toBe(true);
+    expect(result.skipped).toHaveLength(0);
+    // Segments: auth segment (stale), auth-a (already synced after rebase), auth-b (already synced)
+    const failed = result.segments.filter((s) => s.exitCode !== 0);
+    expect(failed).toHaveLength(0);
+  });
+
+  test("--upstack-from filters to subtree only", async () => {
+    // main -> a -> b -> c
+    await addStackBranch(repo.dir, "my-stack", "a", "main");
+    await addStackBranch(repo.dir, "my-stack", "b", "a");
+    await addStackBranch(repo.dir, "my-stack", "c", "b");
+    await setupStack(repo.dir, "my-stack", "main");
+
+    // Advance 'a' to make b and c stale (but a is still synced with main)
+    await runGit(repo.dir, "checkout", "a");
+    await commitFile(repo.dir, "a-update.txt", "a update\n");
+    await runGit(repo.dir, "checkout", "main");
+
+    const result = await restack(repo.dir, "my-stack", { upstackFrom: "b" });
+
+    expect(result.ok).toBe(true);
+    // Should only process segments with tip "c" (b+c in one segment since linear)
+    // The single segment covers b and c (tip=c, base=a)
+    const processedTips = result.segments.map((s) => s.tip);
+    expect(processedTips).toContain("c");
+    // Should not have processed the auth/a segment
+    expect(processedTips).not.toContain("a");
+  });
+
+  test("conflict detection and reporting", async () => {
+    // Set up a branch that will conflict during rebase
+    await addStackBranch(repo.dir, "my-stack", "feature", "main");
+    await setupStack(repo.dir, "my-stack", "main");
+
+    // Add a conflicting change to main on the same file
+    await runGit(repo.dir, "checkout", "main");
+    await commitFile(repo.dir, "feature.txt", "main version of file\n");
+
+    // Also modify the same file on feature (addBranch already created feature.txt)
+    await runGit(repo.dir, "checkout", "feature");
+    // feature.txt was created as "Branch: feature\n" by addBranch
+    // Now main has a different feature.txt commit; rebase will conflict
+    // Overwrite with yet another version to guarantee conflict
+    await commitFile(repo.dir, "feature.txt", "feature version of file\n");
+    await runGit(repo.dir, "checkout", "main");
+
+    const result = await restack(repo.dir, "my-stack");
+
+    expect(result.ok).toBe(false);
+    expect(result.error).toBe("conflict");
+    expect(result.recovery).toBeDefined();
+    expect(result.recovery?.abort).toContain("git rebase --abort");
+    expect(result.recovery?.resolve).toContain("git rebase --continue");
+
+    // Abort the rebase so the repo is clean for teardown
+    await runGit(repo.dir, "rebase", "--abort").catch(() => {});
+  });
+
+  test("segments dependent on failed base are skipped", async () => {
+    // main -> auth -> auth-a
+    //              -> auth-b
+    // auth will conflict; auth-a and auth-b should be skipped
+    await addStackBranch(repo.dir, "my-stack", "auth", "main");
+    await addStackBranch(repo.dir, "my-stack", "auth-a", "auth");
+    await addStackBranch(repo.dir, "my-stack", "auth-b", "auth");
+    await setupStack(repo.dir, "my-stack", "main");
+
+    // Make auth stale with a conflict on auth.txt
+    await runGit(repo.dir, "checkout", "main");
+    await commitFile(repo.dir, "auth.txt", "main version\n");
+
+    await runGit(repo.dir, "checkout", "auth");
+    await commitFile(repo.dir, "auth.txt", "auth version\n");
+    await runGit(repo.dir, "checkout", "main");
+
+    const result = await restack(repo.dir, "my-stack");
+
+    expect(result.ok).toBe(false);
+    expect(result.error).toBe("conflict");
+    // auth-a and auth-b should be in skipped
+    const skippedTips = result.skipped.map((s) => s.tip);
+    expect(skippedTips).toContain("auth-a");
+    expect(skippedTips).toContain("auth-b");
+
+    await runGit(repo.dir, "rebase", "--abort").catch(() => {});
+  });
+});
