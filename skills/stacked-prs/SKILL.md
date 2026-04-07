@@ -240,11 +240,11 @@ reorganization before reviewing the diff.
 
 Create or update PRs for all branches, add/update stack navigation comments.
 
-**Draft policy:** A PR's draft state is a function of its position in the
-stack. PRs whose parent is the stack's base branch (e.g. `main`) are submitted
-as ready for review. All other PRs in the stack are kept as drafts so they
-cannot be merged out of order. The submit plan reconciles drift on every run
-via the `desiredDraft` and `draftAction` fields per branch.
+**Draft policy:** A PR's draft state is a function of its position in the stack.
+PRs whose parent is the stack's base branch (e.g. `main`) are submitted as ready
+for review. All other PRs in the stack are kept as drafts so they cannot be
+merged out of order. The submit plan reconciles drift on every run via the
+`desiredDraft` and `draftAction` fields per branch.
 
 1. Determine repo owner/name from `gh repo view --json owner,name`
 2. Run `submit-plan.ts --stack-name=<name> --owner=<owner> --repo=<repo>`
@@ -254,18 +254,17 @@ via the `desiredDraft` and `draftAction` fields per branch.
    - Git: branches to push
    - GitHub: PRs to create (branches with action "create"; show base + suggest
      title; flag `--draft` for any branch where `desiredDraft` is true)
-   - GitHub: PRs to update base (branches with action "update-base"; show old
-     -> new base)
-   - GitHub: PRs to flip draft state (branches with `draftAction` of
-     "to-draft" or "to-ready"; show the transition and the reason, e.g.
-     "parent is feat/a, not main")
+   - GitHub: PRs to update base (branches with action "update-base"; show old ->
+     new base)
+   - GitHub: PRs to flip draft state (branches with `draftAction` of "to-draft"
+     or "to-ready"; show the transition and the reason, e.g. "parent is feat/a,
+     not main")
    - Comments: nav comments to create/update (from navComments array)
 5. **Wait for confirmation**
 6. `git push --force-with-lease origin <all-branches>`
 7. Create/update PRs:
-   - For action "create": run `gh pr create --base <parent> ...`. Pass
-     `--draft` when `desiredDraft` is true (i.e., parent is not the stack's
-     base branch)
+   - For action "create": run `gh pr create --base <parent> ...`. Pass `--draft`
+     when `desiredDraft` is true (i.e., parent is not the stack's base branch)
    - For action "update-base": run `gh pr edit <num> --base <new-parent>`
    - For draftAction "to-draft": run `gh pr ready <num> --undo`
    - For draftAction "to-ready": run `gh pr ready <num>`
@@ -315,9 +314,9 @@ multiple roots.
     - If this creates multiple roots, `land-cleanup` calls `split-stack`
       automatically. Report each new stack with tree output.
 12. `git push --force-with-lease origin <remaining-branches>`
-13. `gh pr edit <next-pr> --base main` then `gh pr ready <next-pr>` (the
-    next PR now targets the base branch and must leave draft state per the
-    submit draft policy)
+13. `gh pr edit <next-pr> --base main` then `gh pr ready <next-pr>` (the next PR
+    now targets the base branch and must leave draft state per the submit draft
+    policy)
 14. Execute nav plan via `nav.ts`
 15. `git branch -d <merged-branch>`
 

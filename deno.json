@@ -1,10 +1,14 @@
 {
-  "name": "@wyattjoh/skill-stacked-prs",
-  "version": "1.0.0",
-  "exports": "./scripts/lib/stack.ts",
+  "tasks": {
+    "check": "deno fmt --check && deno lint && deno check src/cli.ts",
+    "test": "deno test --allow-run=git,gh --allow-env --allow-read --allow-write"
+  },
   "imports": {
     "@cliffy/command": "jsr:@cliffy/command@^1",
     "@std/testing": "jsr:@std/testing@^1",
     "@std/expect": "jsr:@std/expect@^1"
+  },
+  "fmt": {
+    "exclude": ["CHANGELOG.md"]
   }
 }

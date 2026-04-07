@@ -1,20 +1,34 @@
 # Repo restructure Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use
+> superpowers:subagent-driven-development (recommended) or
+> superpowers:executing-plans to implement this plan task-by-task. Steps use
+> checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Hoist `src/` and `deno.json` to the repo root, wire up release-please-driven CI / release automation, and bootstrap the plugin in `wyattjoh/claude-code-marketplace` — without changing any skill behavior.
+**Goal:** Hoist `src/` and `deno.json` to the repo root, wire up
+release-please-driven CI / release automation, and bootstrap the plugin in
+`wyattjoh/claude-code-marketplace` — without changing any skill behavior.
 
-**Architecture:** Physical relocation of the Deno project out of `skills/stacked-prs/scripts/` into top-level `src/`, followed by addition of `.github/workflows/{ci,release}.yml`, release-please config, and a marketplace listing PR against a sibling repo. `SKILL.md` CLI invocations are rewritten to address `${CLAUDE_PLUGIN_ROOT}/src/cli.ts`. JSR publishing is intentionally not part of this work.
+**Architecture:** Physical relocation of the Deno project out of
+`skills/stacked-prs/scripts/` into top-level `src/`, followed by addition of
+`.github/workflows/{ci,release}.yml`, release-please config, and a marketplace
+listing PR against a sibling repo. `SKILL.md` CLI invocations are rewritten to
+address `${CLAUDE_PLUGIN_ROOT}/src/cli.ts`. JSR publishing is intentionally not
+part of this work.
 
-**Tech Stack:** Deno 2.x, `@cliffy/command`, `googleapis/release-please-action@v4`, `wyattjoh/claude-code-marketplace@v1`, GitHub Actions.
+**Tech Stack:** Deno 2.x, `@cliffy/command`,
+`googleapis/release-please-action@v4`, `wyattjoh/claude-code-marketplace@v1`,
+GitHub Actions.
 
-**Reference spec:** [2026-04-07-repo-restructure-design.md](../specs/2026-04-07-repo-restructure-design.md)
+**Reference spec:**
+[2026-04-07-repo-restructure-design.md](../specs/2026-04-07-repo-restructure-design.md)
 
 **Working directory:** All commands run from the repo root
 `/Users/wyatt.johnson/Code/github.com/wyattjoh/stacked-prs` unless otherwise
 noted.
 
-**Conventional commits:** Use the types `chore`, `feat`, `ci`, `docs`, `refactor`, `build` appropriately. No `feat!` / breaking changes.
+**Conventional commits:** Use the types `chore`, `feat`, `ci`, `docs`,
+`refactor`, `build` appropriately. No `feat!` / breaking changes.
 
 ---
 
@@ -51,15 +65,18 @@ stacked-prs/
     └── references/git-commands.md       (unchanged)
 ```
 
-Internal relative imports inside the moved tree (`./lib/...`, `../lib/...`) stay valid because the entire directory is moved as a unit.
+Internal relative imports inside the moved tree (`./lib/...`, `../lib/...`) stay
+valid because the entire directory is moved as a unit.
 
 ---
 
 ## Task 1: Relocate the Deno project to `src/`
 
 **Files:**
+
 - Move: `skills/stacked-prs/scripts/**` → `src/**`
-- Move: `skills/stacked-prs/deno.json` → `deno.json` (will be rewritten in Task 2)
+- Move: `skills/stacked-prs/deno.json` → `deno.json` (will be rewritten in
+  Task 2)
 - Move: `skills/stacked-prs/deno.lock` → `deno.lock`
 
 - [ ] **Step 1: Verify current layout matches expectations**
@@ -72,9 +89,14 @@ ls skills/stacked-prs/scripts/lib/testdata/
 ```
 
 Expected contents:
+
 - `scripts/`: `cli.ts`, `commands/`, `lib/`
-- `scripts/lib/`: `gh.ts`, `gh.test.ts`, `stack.ts`, `stack.test.ts`, `testdata/`
-- `scripts/commands/`: `config.ts`, `config.test.ts`, `import-discover.ts`, `import-discover.test.ts`, `nav.ts`, `nav.test.ts`, `restack.ts`, `restack.test.ts`, `status.ts`, `status.test.ts`, `submit-plan.ts`, `submit-plan.test.ts`, `verify-refs.ts`, `verify-refs.test.ts`
+- `scripts/lib/`: `gh.ts`, `gh.test.ts`, `stack.ts`, `stack.test.ts`,
+  `testdata/`
+- `scripts/commands/`: `config.ts`, `config.test.ts`, `import-discover.ts`,
+  `import-discover.test.ts`, `nav.ts`, `nav.test.ts`, `restack.ts`,
+  `restack.test.ts`, `status.ts`, `status.test.ts`, `submit-plan.ts`,
+  `submit-plan.test.ts`, `verify-refs.ts`, `verify-refs.test.ts`
 - `scripts/lib/testdata/`: `helpers.ts`
 
 - [ ] **Step 2: Move the directory tree with git mv**
@@ -96,7 +118,8 @@ test -f deno.json && echo "deno.json at root"
 test -f deno.lock && echo "deno.lock at root"
 ```
 
-Expected: all three echoes print; `src/` has the same contents as the old `scripts/` directory.
+Expected: all three echoes print; `src/` has the same contents as the old
+`scripts/` directory.
 
 - [ ] **Step 4: Confirm internal imports still resolve**
 
@@ -104,9 +127,12 @@ Expected: all three echoes print; `src/` has the same contents as the old `scrip
 grep -rn 'from "\.' src/ | head -20
 ```
 
-Expected: all imports start with `./` or `../` targeting files that still exist under `src/`. No import should reference `scripts/` or paths that no longer exist.
+Expected: all imports start with `./` or `../` targeting files that still exist
+under `src/`. No import should reference `scripts/` or paths that no longer
+exist.
 
-- [ ] **Step 5: Commit the move (without tests yet; deno.json still has old shape but is runnable)**
+- [ ] **Step 5: Commit the move (without tests yet; deno.json still has old
+      shape but is runnable)**
 
 ```bash
 git add -A
@@ -118,6 +144,7 @@ git commit -m "refactor: move Deno project from skills/stacked-prs/scripts to sr
 ## Task 2: Rewrite root `deno.json`
 
 **Files:**
+
 - Modify: `deno.json`
 
 - [ ] **Step 1: Replace contents of `deno.json`**
@@ -141,7 +168,8 @@ Overwrite `deno.json` with exactly this content:
 }
 ```
 
-Removed from the original file: `name` (`@wyattjoh/skill-stacked-prs`), `version`, `exports`.
+Removed from the original file: `name` (`@wyattjoh/skill-stacked-prs`),
+`version`, `exports`.
 
 - [ ] **Step 2: Run the test task from the repo root**
 
@@ -149,7 +177,8 @@ Removed from the original file: `name` (`@wyattjoh/skill-stacked-prs`), `version
 deno task test
 ```
 
-Expected: all tests pass. If you see "Module not found" errors it means the directory move in Task 1 was not clean — fix Task 1 before continuing.
+Expected: all tests pass. If you see "Module not found" errors it means the
+directory move in Task 1 was not clean — fix Task 1 before continuing.
 
 - [ ] **Step 3: Run the check task**
 
@@ -157,7 +186,8 @@ Expected: all tests pass. If you see "Module not found" errors it means the dire
 deno task check
 ```
 
-Expected: fmt, lint, and check all pass. If `deno fmt --check` fails, run `deno fmt` and re-run the check.
+Expected: fmt, lint, and check all pass. If `deno fmt --check` fails, run
+`deno fmt` and re-run the check.
 
 - [ ] **Step 4: Commit**
 
@@ -171,9 +201,12 @@ git commit -m "build: rewrite deno.json for root layout, drop JSR fields"
 ## Task 3: Rewrite `SKILL.md` CLI invocations
 
 **Files:**
+
 - Modify: `skills/stacked-prs/SKILL.md`
 
-The runbook currently references the CLI as `$SKILL_DIR/scripts/cli.ts` (Scripts section) and `cli.ts` (inside narrative steps). Both need updating. The new invocation form is:
+The runbook currently references the CLI as `$SKILL_DIR/scripts/cli.ts` (Scripts
+section) and `cli.ts` (inside narrative steps). Both need updating. The new
+invocation form is:
 
 ```
 deno run --allow-run=git,gh --allow-env --allow-read ${CLAUDE_PLUGIN_ROOT}/src/cli.ts <subcommand> [flags]
@@ -191,12 +224,14 @@ submit-plan).
 Example (status):
 
 Before:
+
 ```
 deno run --allow-run=git,gh --allow-env $SKILL_DIR/scripts/cli.ts status \
   [--stack-name=<name>] [--owner=<owner> --repo=<repo>] [--json]
 ```
 
 After:
+
 ```
 deno run --allow-run=git,gh --allow-env --allow-read ${CLAUDE_PLUGIN_ROOT}/src/cli.ts status \
   [--stack-name=<name>] [--owner=<owner> --repo=<repo>] [--json]
@@ -207,11 +242,13 @@ Apply the same transformation to the five other blocks.
 - [ ] **Step 2: Update the intro line in the Scripts section**
 
 Replace:
+
 ```
 deno run --allow-run=git,gh --allow-env $SKILL_DIR/scripts/cli.ts <subcommand> [flags]
 ```
 
 With:
+
 ```
 deno run --allow-run=git,gh --allow-env --allow-read ${CLAUDE_PLUGIN_ROOT}/src/cli.ts <subcommand> [flags]
 ```
@@ -220,7 +257,9 @@ deno run --allow-run=git,gh --allow-env --allow-read ${CLAUDE_PLUGIN_ROOT}/src/c
 
 In the Scripts section there is a line describing where config operations live:
 
-> Config operations (set-branch, remove-branch, set-strategy, get, validate, land-cleanup, insert-branch, fold-branch, move-branch, split-stack) are library functions in `scripts/commands/config.ts`, not CLI subcommands.
+> Config operations (set-branch, remove-branch, set-strategy, get, validate,
+> land-cleanup, insert-branch, fold-branch, move-branch, split-stack) are
+> library functions in `scripts/commands/config.ts`, not CLI subcommands.
 
 Change `scripts/commands/config.ts` to `src/commands/config.ts`.
 
@@ -247,13 +286,16 @@ git commit -m "docs(skill): update CLI paths to use \${CLAUDE_PLUGIN_ROOT}/src"
 ## Task 4: Update `CLAUDE.md` for the new layout
 
 **Files:**
+
 - Modify: `CLAUDE.md`
 
-The file has three sections that reference the old layout: Layout, Commands, and the Script roles table.
+The file has three sections that reference the old layout: Layout, Commands, and
+the Script roles table.
 
 - [ ] **Step 1: Replace the Layout block**
 
-Find the fenced block that starts with `.claude-plugin/plugin.json` and ends with `references/git-commands.md`. Replace it with:
+Find the fenced block that starts with `.claude-plugin/plugin.json` and ends
+with `references/git-commands.md`. Replace it with:
 
 ```
 .claude-plugin/plugin.json      # Plugin manifest (skills/ is auto-discovered)
@@ -288,7 +330,8 @@ skills/stacked-prs/
 
 - [ ] **Step 2: Replace the Commands section**
 
-Find the section that starts with `## Commands` and ends just before `## Architecture`. Replace the body (leaving the `## Commands` heading) with:
+Find the section that starts with `## Commands` and ends just before
+`## Architecture`. Replace the body (leaving the `## Commands` heading) with:
 
 ````markdown
 All Deno commands run from the repo root:
@@ -315,7 +358,8 @@ try to invoke it via `cli.ts`.
 
 - [ ] **Step 3: Update the Script roles table**
 
-Find the table whose first column header is `File`. Change the `File` column entries so they reference `src/` paths:
+Find the table whose first column header is `File`. Change the `File` column
+entries so they reference `src/` paths:
 
 - `lib/stack.ts` → `src/lib/stack.ts`
 - `lib/gh.ts` → `src/lib/gh.ts`
@@ -329,13 +373,15 @@ Find the table whose first column header is `File`. Change the `File` column ent
 
 - [ ] **Step 4: Add a CI/Release section**
 
-After the existing `## Development rules` section and before `## Keeping docs in sync`, insert a new section:
+After the existing `## Development rules` section and before
+`## Keeping docs in sync`, insert a new section:
 
 ```markdown
 ## CI and releases
 
 - **CI** (`.github/workflows/ci.yml`) runs on PRs to `main`: `deno fmt --check`,
-  `deno lint`, `deno check src/cli.ts`, `deno test ...`, plus `claude plugin
+  `deno lint`, `deno check src/cli.ts`, `deno test ...`, plus
+  `claude plugin
   validate .` in a second job.
 - **Release** (`.github/workflows/release.yml`) runs on push to `main`:
   release-please opens release PRs and tags new versions as
@@ -369,18 +415,23 @@ git commit -m "docs: update CLAUDE.md for root src layout and new workflows"
 ## Task 5: Update `README.md` for the new layout
 
 **Files:**
+
 - Modify: `README.md`
 
-Two blocks need updating: the "Safety guarantees" table references `cli.ts` without a path (fine as-is), and the "Helper scripts" section explicitly references `skills/stacked-prs/scripts/`.
+Two blocks need updating: the "Safety guarantees" table references `cli.ts`
+without a path (fine as-is), and the "Helper scripts" section explicitly
+references `skills/stacked-prs/scripts/`.
 
 - [ ] **Step 1: Replace the Helper scripts paragraph**
 
-Find the paragraph under `## Helper scripts` that begins "The skill ships Deno scripts in `skills/stacked-prs/scripts/`". Replace the paragraph and the fenced `deno run` block that follows it with:
+Find the paragraph under `## Helper scripts` that begins "The skill ships Deno
+scripts in `skills/stacked-prs/scripts/`". Replace the paragraph and the fenced
+`deno run` block that follows it with:
 
 ````markdown
 The skill ships Deno scripts in `src/` that Claude runs for data queries and
-metadata mutations. You generally do not need to run them directly, but they
-can be useful for debugging. All commands go through a single entry point:
+metadata mutations. You generally do not need to run them directly, but they can
+be useful for debugging. All commands go through a single entry point:
 
 ```bash
 deno run --allow-run=git,gh --allow-env --allow-read \
@@ -411,9 +462,11 @@ git commit -m "docs: update README for root src layout"
 ## Task 6: Add the CI workflow
 
 **Files:**
+
 - Create: `.github/workflows/ci.yml`
 
-- [ ] **Step 1: Create `.github/workflows/` if it does not exist and add `ci.yml`**
+- [ ] **Step 1: Create `.github/workflows/` if it does not exist and add
+      `ci.yml`**
 
 ```bash
 mkdir -p .github/workflows
@@ -474,7 +527,9 @@ jobs:
 deno fmt --check .github/workflows/ci.yml
 ```
 
-Expected: this will likely be a no-op since deno does not own YAML. If it errors because yaml is unsupported, that is fine — deno fmt skips unknown files. The real validation happens when the workflow runs on GitHub.
+Expected: this will likely be a no-op since deno does not own YAML. If it errors
+because yaml is unsupported, that is fine — deno fmt skips unknown files. The
+real validation happens when the workflow runs on GitHub.
 
 - [ ] **Step 3: Commit**
 
@@ -488,6 +543,7 @@ git commit -m "ci: add PR workflow running deno checks and plugin validate"
 ## Task 7: Add release-please configuration
 
 **Files:**
+
 - Create: `release-please-config.json`
 - Create: `.release-please-manifest.json`
 
@@ -517,8 +573,12 @@ Exact content:
 ```
 
 Notes for reviewers:
-- `release-type: simple` because there is no package.json or published deno.json version. `plugin.json` is the only versioned artifact.
-- `include-component-in-tag: true` with `component: stacked-prs` produces tags of the form `stacked-prs-v1.0.0`, matching `op-remote` and `jmap-mcp` conventions so the marketplace action can find them.
+
+- `release-type: simple` because there is no package.json or published deno.json
+  version. `plugin.json` is the only versioned artifact.
+- `include-component-in-tag: true` with `component: stacked-prs` produces tags
+  of the form `stacked-prs-v1.0.0`, matching `op-remote` and `jmap-mcp`
+  conventions so the marketplace action can find them.
 
 - [ ] **Step 2: Write `.release-please-manifest.json`**
 
@@ -530,7 +590,9 @@ Exact content:
 }
 ```
 
-The plugin is already at version `1.0.0` in `.claude-plugin/plugin.json`, so the manifest matches. The first release-please PR after this lands will then propose bumping to whatever the accumulated conventional commits warrant.
+The plugin is already at version `1.0.0` in `.claude-plugin/plugin.json`, so the
+manifest matches. The first release-please PR after this lands will then propose
+bumping to whatever the accumulated conventional commits warrant.
 
 - [ ] **Step 3: Verify JSON is valid**
 
@@ -552,6 +614,7 @@ git commit -m "ci: add release-please config targeting plugin.json version"
 ## Task 8: Add the release workflow
 
 **Files:**
+
 - Create: `.github/workflows/release.yml`
 
 - [ ] **Step 1: Write `.github/workflows/release.yml`**
@@ -601,8 +664,12 @@ jobs:
 ```
 
 Reviewer notes:
+
 - No publish job. JSR publishing is explicitly out of scope per the spec.
-- `MARKETPLACE_PAT` must already exist as a repo secret on `wyattjoh/stacked-prs` with `contents:write` on `wyattjoh/claude-code-marketplace`. This is the same secret used by `op-remote` and `jmap-mcp`.
+- `MARKETPLACE_PAT` must already exist as a repo secret on
+  `wyattjoh/stacked-prs` with `contents:write` on
+  `wyattjoh/claude-code-marketplace`. This is the same secret used by
+  `op-remote` and `jmap-mcp`.
 
 - [ ] **Step 2: Commit**
 
@@ -631,7 +698,8 @@ listings on release) and a minor bump to 1.1.0 is the right outcome.
 git status
 ```
 
-Expected: working tree clean, branch ahead of main by the commits from tasks 1-8.
+Expected: working tree clean, branch ahead of main by the commits from tasks
+1-8.
 
 - [ ] **Step 2: Re-run full Deno pipeline from scratch**
 
@@ -649,9 +717,11 @@ grep -rn "skills/stacked-prs/scripts" . --exclude-dir=.git --exclude-dir=docs
 grep -rn "\$SKILL_DIR" . --exclude-dir=.git --exclude-dir=docs
 ```
 
-Expected: both return zero matches. (The `docs/` exclusion is because the spec file itself will contain the old path as historical reference.)
+Expected: both return zero matches. (The `docs/` exclusion is because the spec
+file itself will contain the old path as historical reference.)
 
-- [ ] **Step 4: Verify plugin.json still validates as JSON and version is 1.0.0**
+- [ ] **Step 4: Verify plugin.json still validates as JSON and version is
+      1.0.0**
 
 ```bash
 deno eval 'const m = JSON.parse(Deno.readTextFileSync(".claude-plugin/plugin.json")); console.log(m.version)'
@@ -677,7 +747,8 @@ No commit here — this task is verification only.
 
 - [ ] **Step 1: Push the branch**
 
-If you are already on a feature branch, push it. If you are on `main` locally, create a branch first:
+If you are already on a feature branch, push it. If you are on `main` locally,
+create a branch first:
 
 ```bash
 git branch --show-current
@@ -688,7 +759,8 @@ git push -u origin HEAD
 
 - [ ] **Step 2: Draft the PR title and body, present for review**
 
-Per the user's global guidelines, do NOT run `gh pr create` without approval. Present this draft in chat:
+Per the user's global guidelines, do NOT run `gh pr create` without approval.
+Present this draft in chat:
 
 ```
 Title: chore: restructure repo with root src/ layout and release automation
@@ -736,17 +808,23 @@ EOF
 
 - [ ] **Step 4: Report the PR URL to the user**
 
-`gh pr create` prints the URL on success. Share it with the user and pause until the PR is merged before moving to Task 11.
+`gh pr create` prints the URL on success. Share it with the user and pause until
+the PR is merged before moving to Task 11.
 
 ---
 
 ## Task 11: Bootstrap the marketplace listing
 
-**Working directory:** `/Users/wyatt.johnson/Code/github.com/wyattjoh/claude-code-marketplace`
+**Working directory:**
+`/Users/wyatt.johnson/Code/github.com/wyattjoh/claude-code-marketplace`
 
-**Ordering constraint:** This task must happen AFTER Task 10's PR merges, but BEFORE the release-please PR opened by the release workflow is merged. The reason: the marketplace update action only modifies an existing entry; it will fail on the first release if the entry does not yet exist.
+**Ordering constraint:** This task must happen AFTER Task 10's PR merges, but
+BEFORE the release-please PR opened by the release workflow is merged. The
+reason: the marketplace update action only modifies an existing entry; it will
+fail on the first release if the entry does not yet exist.
 
 **Files:**
+
 - Modify: `.claude-plugin/marketplace.json`
 
 - [ ] **Step 1: Confirm the stacked-prs PR has merged**
@@ -768,16 +846,18 @@ git checkout -b add-stacked-prs
 ```
 
 **Note on the initial `ref`:** The entry below uses `stacked-prs-v1.0.0` as a
-placeholder even though that tag does not yet exist (the first
-release-please run in Task 12 will produce `stacked-prs-v1.1.0` because of the
-`feat:` commit from Task 8). The `update-marketplace` job will overwrite both
-`version` and `ref` as soon as the release PR merges, so the temporary
-mismatch only lasts the few minutes between Task 11 landing and Task 12
-completing. This matches how `op-remote` and `jmap-mcp` were bootstrapped.
+placeholder even though that tag does not yet exist (the first release-please
+run in Task 12 will produce `stacked-prs-v1.1.0` because of the `feat:` commit
+from Task 8). The `update-marketplace` job will overwrite both `version` and
+`ref` as soon as the release PR merges, so the temporary mismatch only lasts the
+few minutes between Task 11 landing and Task 12 completing. This matches how
+`op-remote` and `jmap-mcp` were bootstrapped.
 
 - [ ] **Step 3: Append the stacked-prs entry to `marketplace.json`**
 
-Add a new object to the `plugins` array in `.claude-plugin/marketplace.json`. Insert it after the last existing entry, following the formatting of the surrounding entries (two-space indent, trailing newline at end of file).
+Add a new object to the `plugins` array in `.claude-plugin/marketplace.json`.
+Insert it after the last existing entry, following the formatting of the
+surrounding entries (two-space indent, trailing newline at end of file).
 
 ```json
 {
@@ -859,13 +939,15 @@ EOF
 
 - [ ] **Step 8: Report the PR URL and pause**
 
-Share the URL with the user. Wait for this PR to merge before proceeding to Task 12.
+Share the URL with the user. Wait for this PR to merge before proceeding to
+Task 12.
 
 ---
 
 ## Task 12: Merge the first release-please PR and verify
 
-**Working directory:** `/Users/wyatt.johnson/Code/github.com/wyattjoh/stacked-prs`
+**Working directory:**
+`/Users/wyatt.johnson/Code/github.com/wyattjoh/stacked-prs`
 
 - [ ] **Step 1: Confirm release-please has opened a PR against main**
 
@@ -873,7 +955,8 @@ Share the URL with the user. Wait for this PR to merge before proceeding to Task
 gh pr list --search "release-please" --state open
 ```
 
-Expected: one PR titled something like "chore(main): release stacked-prs 1.0.0" (or a higher version if conventional commits in this work warranted a bump).
+Expected: one PR titled something like "chore(main): release stacked-prs 1.0.0"
+(or a higher version if conventional commits in this work warranted a bump).
 
 - [ ] **Step 2: Review the release-please PR**
 
@@ -881,7 +964,8 @@ Expected: one PR titled something like "chore(main): release stacked-prs 1.0.0" 
 gh pr view <number>
 ```
 
-Expected: the PR bumps `.claude-plugin/plugin.json` version and updates `CHANGELOG.md`. Confirm no unexpected files are touched.
+Expected: the PR bumps `.claude-plugin/plugin.json` version and updates
+`CHANGELOG.md`. Confirm no unexpected files are touched.
 
 - [ ] **Step 3: Present the merge decision to the user**
 
@@ -893,7 +977,8 @@ Do NOT merge without approval. Share the PR URL and wait for approval.
 gh pr merge <number> --squash --delete-branch
 ```
 
-(Use whatever merge strategy the user prefers; `--squash` matches the default for single-commit release-please PRs.)
+(Use whatever merge strategy the user prefers; `--squash` matches the default
+for single-commit release-please PRs.)
 
 - [ ] **Step 5: Verify the tag exists and the marketplace update ran**
 
@@ -903,7 +988,9 @@ git tag -l "stacked-prs-v*"
 gh run list --workflow release.yml --limit 5
 ```
 
-Expected: a tag `stacked-prs-v<version>` exists and the most recent release workflow run shows both `release-please` and `update-marketplace` jobs succeeded.
+Expected: a tag `stacked-prs-v<version>` exists and the most recent release
+workflow run shows both `release-please` and `update-marketplace` jobs
+succeeded.
 
 - [ ] **Step 6: Verify the marketplace entry was updated**
 
@@ -913,7 +1000,9 @@ git pull --ff-only origin main
 deno eval 'const m = JSON.parse(Deno.readTextFileSync(".claude-plugin/marketplace.json")); const e = m.plugins.find(p => p.name === "stacked-prs"); console.log(e.version, e.source.ref)'
 ```
 
-Expected: prints the new version and the new tag ref. If the output still shows `1.0.0` / `stacked-prs-v1.0.0` and the release PR bumped to a higher version, investigate the `update-marketplace` job logs.
+Expected: prints the new version and the new tag ref. If the output still shows
+`1.0.0` / `stacked-prs-v1.0.0` and the release PR bumped to a higher version,
+investigate the `update-marketplace` job logs.
 
 No commit in this task — the work is complete.
 
@@ -923,12 +1012,16 @@ No commit in this task — the work is complete.
 
 Before declaring this plan complete, run through:
 
-1. **Repo layout matches Task 1's target:** `src/` exists at root, `skills/stacked-prs/scripts/` is gone, `deno.json` and `deno.lock` are at the root.
+1. **Repo layout matches Task 1's target:** `src/` exists at root,
+   `skills/stacked-prs/scripts/` is gone, `deno.json` and `deno.lock` are at the
+   root.
 2. **`deno task test` passes from root** with no warnings or errors.
 3. **`deno task check` passes from root.**
 4. **SKILL.md has no references to `scripts/cli.ts` or `$SKILL_DIR`.**
-5. **CI workflow ran successfully on the PR** (all four checks green plus plugin validate).
-6. **Release workflow ran successfully** after merging the release-please PR, and produced a tag of the form `stacked-prs-v<version>`.
+5. **CI workflow ran successfully on the PR** (all four checks green plus plugin
+   validate).
+6. **Release workflow ran successfully** after merging the release-please PR,
+   and produced a tag of the form `stacked-prs-v<version>`.
 7. **Marketplace listing exists and is at the new version / ref.**
 
 If any of these fail, diagnose and fix before treating the plan as done.

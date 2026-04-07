@@ -1,9 +1,9 @@
 # stacked-prs
 
-A Claude Code plugin for managing stacked branches and pull requests. Instead
-of a standalone CLI, this plugin works _through_ Claude: you issue natural
-language requests or `/stacked-prs <subcommand>`, and Claude orchestrates git,
-gh, and Deno helper scripts on your behalf.
+A Claude Code plugin for managing stacked branches and pull requests. Instead of
+a standalone CLI, this plugin works _through_ Claude: you issue natural language
+requests or `/stacked-prs <subcommand>`, and Claude orchestrates git, gh, and
+Deno helper scripts on your behalf.
 
 ## Installation
 
@@ -42,13 +42,13 @@ stack.<stack-name>.merge-strategy = squash
 stack.<stack-name>.base-branch    = main
 ```
 
-No files are added to the working tree. Metadata is per-repo and survives
-branch switches, stashes, and worktree changes.
+No files are added to the working tree. Metadata is per-repo and survives branch
+switches, stashes, and worktree changes.
 
 ### Tree model
 
-Stacks are **tree-shaped**, not strictly linear. Multiple branches can share
-the same parent, creating a fork:
+Stacks are **tree-shaped**, not strictly linear. Multiple branches can share the
+same parent, creating a fork:
 
 ```
 main
@@ -107,9 +107,9 @@ once.
 
 ### `/stacked-prs create`
 
-Add a new child branch off the current branch. The new branch becomes a child
-of the current branch in the stack tree. If you have staged changes, Claude
-offers to commit them.
+Add a new child branch off the current branch. The new branch becomes a child of
+the current branch in the stack tree. If you have staged changes, Claude offers
+to commit them.
 
 ### `/stacked-prs insert`
 
@@ -128,9 +128,9 @@ Split a branch's content into two branches. Two modes:
 
 ### `/stacked-prs fold`
 
-Merge a branch into its parent (inverse of split). Appends commits to the
-parent (fast-forward or squash), reparents children, removes the branch from
-the stack, and deletes the git branch.
+Merge a branch into its parent (inverse of split). Appends commits to the parent
+(fast-forward or squash), reparents children, removes the branch from the stack,
+and deletes the git branch.
 
 ### `/stacked-prs move`
 
@@ -162,14 +162,14 @@ want to rebase locally before reviewing the diff. Accepts the same
 
 Create or update PRs for all branches in the stack:
 
-- **Creates PRs** for branches without one (targeting the correct parent;
-  marked draft when the parent is not the stack's base branch)
+- **Creates PRs** for branches without one (targeting the correct parent; marked
+  draft when the parent is not the stack's base branch)
 - **Updates PR bases** when the parent branch has changed
 - **Reconciles draft state** so PRs whose parent is the base branch are ready
-  for review and all other PRs in the stack remain drafts. This prevents
-  merging stacked PRs out of order.
-- **Adds/updates navigation comments** on each PR so reviewers can navigate
-  the stack
+  for review and all other PRs in the stack remain drafts. This prevents merging
+  stacked PRs out of order.
+- **Adds/updates navigation comments** on each PR so reviewers can navigate the
+  stack
 
 Navigation comments are rendered as a nested markdown list of bare `#N` PR
 references so GitHub auto-links each entry and shows the PR title on hover:
@@ -251,23 +251,23 @@ git checkout feature/auth
 ## Helper scripts
 
 The skill ships Deno scripts in `skills/stacked-prs/scripts/` that Claude runs
-for data queries and metadata mutations. You generally do not need to run
-them directly, but they can be useful for debugging. All commands go through a
-single entry point:
+for data queries and metadata mutations. You generally do not need to run them
+directly, but they can be useful for debugging. All commands go through a single
+entry point:
 
 ```bash
 deno run --allow-run=git,gh --allow-env \
   skills/stacked-prs/scripts/cli.ts <subcommand> [flags]
 ```
 
-| Subcommand                       | Purpose                                                              |
-| -------------------------------- | -------------------------------------------------------------------- |
-| `cli.ts status [--json]`         | Tree output (or JSON) with PR info and sync status                   |
-| `cli.ts restack [--json]`        | Segment-based tree rebase; handles conflicts across segments         |
-| `cli.ts nav [--dry-run]`         | Builds and executes navigation comment plans                         |
-| `cli.ts verify-refs`             | Checks branch ancestry after rebase, outputs repair commands         |
-| `cli.ts import-discover`         | Discovers branch trees between a branch and main                     |
-| `cli.ts submit-plan`             | Computes the full submit plan (PRs to create/update, nav changes)    |
+| Subcommand                | Purpose                                                           |
+| ------------------------- | ----------------------------------------------------------------- |
+| `cli.ts status [--json]`  | Tree output (or JSON) with PR info and sync status                |
+| `cli.ts restack [--json]` | Segment-based tree rebase; handles conflicts across segments      |
+| `cli.ts nav [--dry-run]`  | Builds and executes navigation comment plans                      |
+| `cli.ts verify-refs`      | Checks branch ancestry after rebase, outputs repair commands      |
+| `cli.ts import-discover`  | Discovers branch trees between a branch and main                  |
+| `cli.ts submit-plan`      | Computes the full submit plan (PRs to create/update, nav changes) |
 
 `--stack-name` auto-detects from the current branch's git config when omitted.
 `--owner` and `--repo` auto-detect from `gh repo view` when omitted.
@@ -291,8 +291,7 @@ rebase strategy automatically during `land`.
 ### Forking
 
 You can branch off any point in the stack. For example, with
-`auth -> auth-tests -> auth-ui`, adding `auth-api` as a sibling of
-`auth-tests`:
+`auth -> auth-tests -> auth-ui`, adding `auth-api` as a sibling of `auth-tests`:
 
 ```
 git checkout feature/auth
@@ -317,8 +316,8 @@ root of a new stack, with names derived by stripping common prefixes.
 
 ### Rebase segments
 
-`sync` and `restack` use segment-based rebasing. A segment is a linear path
-from a fork point (or root) to a leaf. Each segment is rebased with a single
+`sync` and `restack` use segment-based rebasing. A segment is a linear path from
+a fork point (or root) to a leaf. Each segment is rebased with a single
 `git rebase --update-refs` call. Independent sibling segments continue even if
 one has a conflict, so a conflict in one branch does not block unrelated
 branches.
@@ -363,8 +362,8 @@ git rebase --continue
 ```
 
 Then ask Claude to resume: `/stacked-prs restack` (it will use `--resume` to
-pick up from where it left off). Independent sibling segments unaffected by
-the conflict are already complete.
+pick up from where it left off). Independent sibling segments unaffected by the
+conflict are already complete.
 
 ### Stack looks wrong after migration from old format
 

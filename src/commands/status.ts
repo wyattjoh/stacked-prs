@@ -1,6 +1,5 @@
 import {
   getAllNodes,
-  getMergeStrategy,
   getStackTree,
   renderTree,
   runGitCommand,

@@ -1,6 +1,7 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+This file provides guidance to Claude Code (claude.ai/code) when working with
+code in this repository.
 
 ## Repository purpose
 
@@ -37,8 +38,8 @@ skills/stacked-prs/
     └── git-commands.md         # Git reference for rebase, --onto, conflict resolution
 ```
 
-`skills/` at the plugin root is auto-discovered by Claude Code, so
-`plugin.json` does not need a `skills` field.
+`skills/` at the plugin root is auto-discovered by Claude Code, so `plugin.json`
+does not need a `skills` field.
 
 ## Commands
 
@@ -67,8 +68,8 @@ try to invoke it via `cli.ts`.
 
 ### Execution model
 
-`SKILL.md` is a runbook Claude follows step-by-step. Deno scripts handle
-**data queries** and **metadata mutations**, while Claude itself executes the
+`SKILL.md` is a runbook Claude follows step-by-step. Deno scripts handle **data
+queries** and **metadata mutations**, while Claude itself executes the
 destructive git/gh commands (rebase, push, PR create/edit, comments) after
 presenting a plan to the user.
 
@@ -91,17 +92,17 @@ Independent sibling segments continue even when one hits a conflict.
 
 ### Script roles
 
-| File                          | Role                                     | Invoked as                               |
-| ----------------------------- | ---------------------------------------- | ---------------------------------------- |
-| `lib/stack.ts`                | Library only, not a CLI                  | Imported by all other scripts            |
-| `lib/gh.ts`                   | Library only, not a CLI                  | Imported by scripts needing GitHub data  |
-| `commands/config.ts`          | Library functions for metadata mutations | Imported by other commands               |
-| `commands/status.ts`          | Read stack state + PR info               | `cli.ts status [--json]`                 |
-| `commands/restack.ts`         | Segment-based tree rebase                | `cli.ts restack [--json]`                |
-| `commands/nav.ts`             | Navigation comments                      | `cli.ts nav [--dry-run]`                 |
-| `commands/verify-refs.ts`     | Post-rebase verification                 | `cli.ts verify-refs`                     |
-| `commands/import-discover.ts` | Branch tree detection                    | `cli.ts import-discover`                 |
-| `commands/submit-plan.ts`     | Submit planning                          | `cli.ts submit-plan`                     |
+| File                          | Role                                     | Invoked as                              |
+| ----------------------------- | ---------------------------------------- | --------------------------------------- |
+| `lib/stack.ts`                | Library only, not a CLI                  | Imported by all other scripts           |
+| `lib/gh.ts`                   | Library only, not a CLI                  | Imported by scripts needing GitHub data |
+| `commands/config.ts`          | Library functions for metadata mutations | Imported by other commands              |
+| `commands/status.ts`          | Read stack state + PR info               | `cli.ts status [--json]`                |
+| `commands/restack.ts`         | Segment-based tree rebase                | `cli.ts restack [--json]`               |
+| `commands/nav.ts`             | Navigation comments                      | `cli.ts nav [--dry-run]`                |
+| `commands/verify-refs.ts`     | Post-rebase verification                 | `cli.ts verify-refs`                    |
+| `commands/import-discover.ts` | Branch tree detection                    | `cli.ts import-discover`                |
+| `commands/submit-plan.ts`     | Submit planning                          | `cli.ts submit-plan`                    |
 
 ### Git config schema
 
@@ -119,19 +120,19 @@ removing `stack-order` keys after validating the tree.
 ### Testing
 
 Tests use real git repos in temp directories (`testdata/helpers.ts` provides
-`createTestRepo`). GitHub CLI calls are mocked via `gh.ts`'s fixture system:
-set `GH_MOCK_DIR` or call `setMockDir()`, and `gh()` reads
+`createTestRepo`). GitHub CLI calls are mocked via `gh.ts`'s fixture system: set
+`GH_MOCK_DIR` or call `setMockDir()`, and `gh()` reads
 `<mockDir>/<fixtureKey>.json` instead of shelling out.
 
 ## Confirmation gates
 
 `SKILL.md` defines a strict list of operations that must never run without
 showing a plan and waiting for user confirmation: any `git push`, `git rebase`,
-`git branch -d`, `gh pr create|edit|ready|comment`, and
-`gh api --method PATCH`. Read-only operations (`git status`, `git log`,
-`git fetch`, `gh pr list|view`, `gh repo view`, `cli.ts status`,
-`cli.ts verify-refs`, `cli.ts nav --dry-run`, `cli.ts restack --json`) run
-without confirmation. Preserve this distinction when editing the runbook.
+`git branch -d`, `gh pr create|edit|ready|comment`, and `gh api --method PATCH`.
+Read-only operations (`git status`, `git log`, `git fetch`, `gh pr list|view`,
+`gh repo view`, `cli.ts status`, `cli.ts verify-refs`, `cli.ts nav --dry-run`,
+`cli.ts restack --json`) run without confirmation. Preserve this distinction
+when editing the runbook.
 
 ## Development rules
 
@@ -142,14 +143,14 @@ without confirmation. Preserve this distinction when editing the runbook.
 - `cli.ts` is the only CLI entry point. Do not add `import.meta.main` blocks to
   command files.
 - Command functions must be pure: no `Deno.args`, no `console.log`, no
-  `Deno.exit`. They receive typed options and return structured results. The
-  CLI layer (`cli.ts`) owns all I/O: parsing, printing, exit codes.
+  `Deno.exit`. They receive typed options and return structured results. The CLI
+  layer (`cli.ts`) owns all I/O: parsing, printing, exit codes.
 - `commands/config.ts` is a library of metadata mutation functions, not a CLI
   with sub-commands. Import its functions directly.
 - `commands/restack.ts` owns all rebase logic. Claude calls it via
   `cli.ts restack` rather than constructing rebase commands manually.
-- When adding a new command, register it in the "Scripts" section of
-  `SKILL.md` with its full `cli.ts` invocation.
+- When adding a new command, register it in the "Scripts" section of `SKILL.md`
+  with its full `cli.ts` invocation.
 
 ## Keeping docs in sync
 
@@ -159,5 +160,5 @@ When making changes, update:
    add/remove scripts, or modify CLI flags.
 2. **`README.md`** (root) if you change user-facing behavior, add commands, or
    modify the workflow.
-3. **This file** if you change the architecture, add scripts, or modify the
-   git config schema.
+3. **This file** if you change the architecture, add scripts, or modify the git
+   config schema.

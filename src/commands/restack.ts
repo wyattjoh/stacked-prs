@@ -2,7 +2,6 @@ import {
   findNode,
   getAllNodes,
   getStackTree,
-  renderTree,
   runGitCommand,
   type StackNode,
   type StackTree,

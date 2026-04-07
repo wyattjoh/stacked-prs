@@ -1,6 +1,5 @@
 import {
   getAllNodes,
-  getBaseBranch,
   getMergeStrategy,
   getStackTree,
   type MergeStrategy,
@@ -9,7 +8,6 @@ import {
   setMergeStrategy,
   setStackNode,
   type StackTree,
-  validateStackTree,
 } from "../lib/stack.ts";
 
 export interface SetBranchOpts {

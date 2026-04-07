@@ -1,7 +1,6 @@
 # Repo restructure: src/ layout, CI, and release automation
 
-**Date:** 2026-04-07
-**Status:** Approved
+**Date:** 2026-04-07 **Status:** Approved
 
 ## Summary
 
@@ -24,8 +23,8 @@ matches the conventions used by sibling plugins (`op-remote`, `jmap-mcp`).
 At the same time, the plugin has no release automation. Version bumps are
 manual, the marketplace listing in `wyattjoh/claude-code-marketplace` does not
 exist yet, and there is no CI gate on PRs. This spec addresses both in one
-change since the layout move invalidates any existing script paths the
-workflows would reference.
+change since the layout move invalidates any existing script paths the workflows
+would reference.
 
 ## Non-goals
 
@@ -110,9 +109,9 @@ config for a private (non-published) project:
 }
 ```
 
-No `name`, no `version`, no `exports`, no `publish` block. The `fmt.exclude`
-for `CHANGELOG.md` prevents release-please's output from being reformatted on
-the next `deno fmt` run.
+No `name`, no `version`, no `exports`, no `publish` block. The `fmt.exclude` for
+`CHANGELOG.md` prevents release-please's output from being reformatted on the
+next `deno fmt` run.
 
 ### `skills/stacked-prs/SKILL.md`
 
@@ -246,8 +245,8 @@ Notes:
   `deno.json` version to bump. `plugin.json` is the single source of truth.
 - `include-component-in-tag: true` with `component: stacked-prs` produces tags
   of the form `stacked-prs-v1.0.0`, matching the convention used by sibling
-  plugins in `wyattjoh/claude-code-marketplace` (for example
-  `jmap-mcp-v0.6.1`, `op-remote-v0.4.1`).
+  plugins in `wyattjoh/claude-code-marketplace` (for example `jmap-mcp-v0.6.1`,
+  `op-remote-v0.4.1`).
 - Only `plugin.json` is listed in `extra-files`. `SKILL.md` stays version-free
   because the skill always runs against its own bundled source, so there is no
   version string embedded in the runbook to update.
@@ -299,9 +298,9 @@ broken state where CI references paths that no longer exist or release-please
 fires before the workflow files are in place.
 
 1. **Move source files.** `skills/stacked-prs/scripts/*` to `src/*`,
-   `skills/stacked-prs/deno.json` and `skills/stacked-prs/deno.lock` to the
-   repo root. Verify `deno test` and `deno check src/cli.ts` still pass from
-   the new layout.
+   `skills/stacked-prs/deno.json` and `skills/stacked-prs/deno.lock` to the repo
+   root. Verify `deno test` and `deno check src/cli.ts` still pass from the new
+   layout.
 2. **Rewrite `SKILL.md`** command invocations to use
    `${CLAUDE_PLUGIN_ROOT}/src/cli.ts` with `--allow-read`.
 3. **Update `CLAUDE.md` and `README.md`** for the new layout.
@@ -312,21 +311,19 @@ fires before the workflow files are in place.
 7. **Add release workflow** (`release.yml`).
 8. **Open PR against `stacked-prs`** containing all of the above. CI runs,
    validates the new layout, and the plugin validator confirms the manifest.
-9. **Merge the restructure PR.** The `release.yml` workflow fires on the push
-   to `main` and release-please opens its first release PR. This release PR
-   does not auto-merge, so there is a safe gap before any marketplace action
-   runs.
-10. **Open PR against `claude-code-marketplace`** adding the `stacked-prs`
-    entry shown above. Merge it. This bootstraps the marketplace listing.
-11. **Merge the release-please PR.** This creates tag `stacked-prs-v1.0.0`
-    and triggers `update-marketplace`, which finds the existing entry and
-    updates its version and ref.
+9. **Merge the restructure PR.** The `release.yml` workflow fires on the push to
+   `main` and release-please opens its first release PR. This release PR does
+   not auto-merge, so there is a safe gap before any marketplace action runs.
+10. **Open PR against `claude-code-marketplace`** adding the `stacked-prs` entry
+    shown above. Merge it. This bootstraps the marketplace listing.
+11. **Merge the release-please PR.** This creates tag `stacked-prs-v1.0.0` and
+    triggers `update-marketplace`, which finds the existing entry and updates
+    its version and ref.
 
 The ordering constraint is that step 10 must complete before step 11. The
-marketplace action only updates an existing entry; it will fail if the
-listing does not yet exist. Steps 8 and 9 are safe to run first because
-release-please opens its release PR as a draft PR that waits for human
-merge.
+marketplace action only updates an existing entry; it will fail if the listing
+does not yet exist. Steps 8 and 9 are safe to run first because release-please
+opens its release PR as a draft PR that waits for human merge.
 
 ## Testing strategy
 
@@ -350,8 +347,8 @@ merge.
   before committing.
 - **Marketplace action fails on first run.** If step 10 is skipped or the
   marketplace entry has a typo, the first release job errors. Mitigation:
-  sequence the marketplace PR before the release-please PR merge; re-running
-  the release job after fixing the entry is idempotent.
+  sequence the marketplace PR before the release-please PR merge; re-running the
+  release job after fixing the entry is idempotent.
 - **`--allow-read` scope.** Adding `--allow-read` without a path grants full
   read access. Mitigation: the skill already runs inside user-owned git
   repositories and needs to read arbitrary source files; this matches the
