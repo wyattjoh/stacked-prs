@@ -12,7 +12,7 @@ export interface StackBandProps {
   prData: Map<string, PrCellState>;
 }
 
-const NODE_WIDTH = 18;
+const NODE_WIDTH = 16;
 
 function connectorChars(style: ConnectorStyle, span: number): string {
   const ch = style === "dashed" ? "╌" : style === "double" ? "═" : "─";
