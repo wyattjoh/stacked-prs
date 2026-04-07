@@ -494,16 +494,23 @@ export async function listAllStacks(dir: string): Promise<string[]> {
   return [...set].sort();
 }
 
-/** Load every configured stack in the repo as a StackTree. */
+/** Load every configured stack in the repo as a StackTree.
+ *
+ * Broken stacks (missing base branch, unresolvable parents, etc.) are
+ * skipped silently; only successfully loaded trees are returned. Callers
+ * that need to distinguish "stack is broken" from "stack does not exist"
+ * should call `getStackTree` directly per name from `listAllStacks`.
+ */
 export async function getAllStackTrees(dir: string): Promise<StackTree[]> {
   const names = await listAllStacks(dir);
-  const trees: StackTree[] = [];
-  for (const name of names) {
-    try {
-      trees.push(await getStackTree(dir, name));
-    } catch {
-      // Skip stacks with broken metadata; TUI will show them as errors later.
-    }
-  }
-  return trees;
+  const results = await Promise.all(
+    names.map(async (name) => {
+      try {
+        return await getStackTree(dir, name);
+      } catch {
+        return undefined;
+      }
+    }),
+  );
+  return results.filter((tree): tree is StackTree => tree !== undefined);
 }

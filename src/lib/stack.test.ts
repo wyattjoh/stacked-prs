@@ -679,4 +679,20 @@ describe("getAllStackTrees", () => {
     expect(trees).toHaveLength(2);
     expect(trees.map((t) => t.stackName).sort()).toEqual(["alpha", "beta"]);
   });
+
+  test("skips stacks with broken metadata", async () => {
+    await addBranch(repo.dir, "feat/a", "main");
+    await addBranch(repo.dir, "feat/b", "main");
+
+    // Valid stack
+    await setStackNode(repo.dir, "feat/a", "alpha", "main");
+    await setBaseBranch(repo.dir, "alpha", "main");
+
+    // Broken stack: has stack-name metadata but no base-branch configured
+    await setStackNode(repo.dir, "feat/b", "broken", "main");
+
+    const trees = await getAllStackTrees(repo.dir);
+    expect(trees).toHaveLength(1);
+    expect(trees[0].stackName).toBe("alpha");
+  });
 });
