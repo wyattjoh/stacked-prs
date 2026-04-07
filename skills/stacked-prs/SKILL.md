@@ -455,7 +455,7 @@ re-present the remaining operations before continuing.
 All scripts are accessed through a single unified CLI entry point:
 
 ```bash
-deno run --allow-run=git,gh --allow-env $SKILL_DIR/scripts/cli.ts <subcommand> [flags]
+deno run --allow-run=git,gh --allow-env --allow-read ${CLAUDE_PLUGIN_ROOT}/src/cli.ts <subcommand> [flags]
 ```
 
 `--stack-name` is auto-detected from the current branch's git config when not
@@ -465,7 +465,7 @@ provided.
 ### `status`
 
 ```bash
-deno run --allow-run=git,gh --allow-env $SKILL_DIR/scripts/cli.ts status \
+deno run --allow-run=git,gh --allow-env --allow-read ${CLAUDE_PLUGIN_ROOT}/src/cli.ts status \
   [--stack-name=<name>] [--owner=<owner> --repo=<repo>] [--json]
 ```
 
@@ -475,7 +475,7 @@ with full stack state.
 ### `restack`
 
 ```bash
-deno run --allow-run=git,gh --allow-env $SKILL_DIR/scripts/cli.ts restack \
+deno run --allow-run=git,gh --allow-env --allow-read ${CLAUDE_PLUGIN_ROOT}/src/cli.ts restack \
   [--stack-name=<name>] \
   [--upstack-from=<branch>] \
   [--downstack-from=<branch>] \
@@ -493,7 +493,7 @@ structured output (used by `sync` and `restack` sub-commands).
 ### `nav`
 
 ```bash
-deno run --allow-run=git,gh --allow-env $SKILL_DIR/scripts/cli.ts nav \
+deno run --allow-run=git,gh --allow-env --allow-read ${CLAUDE_PLUGIN_ROOT}/src/cli.ts nav \
   [--stack-name=<name>] [--owner=<owner> --repo=<repo>] [--dry-run]
 ```
 
@@ -503,7 +503,7 @@ without writing.
 ### `verify-refs`
 
 ```bash
-deno run --allow-run=git,gh --allow-env $SKILL_DIR/scripts/cli.ts verify-refs \
+deno run --allow-run=git,gh --allow-env --allow-read ${CLAUDE_PLUGIN_ROOT}/src/cli.ts verify-refs \
   [--stack-name=<name>]
 ```
 
@@ -516,7 +516,7 @@ Exits with code 1 if any branches are stale or duplicates are found.
 ### `import-discover`
 
 ```bash
-deno run --allow-run=git,gh --allow-env $SKILL_DIR/scripts/cli.ts import-discover \
+deno run --allow-run=git,gh --allow-env --allow-read ${CLAUDE_PLUGIN_ROOT}/src/cli.ts import-discover \
   [--branch=<name>] [--owner=<owner> --repo=<repo>]
 ```
 
@@ -527,7 +527,7 @@ base branch, and any warnings (e.g., PR base mismatches).
 ### `submit-plan`
 
 ```bash
-deno run --allow-run=git,gh --allow-env $SKILL_DIR/scripts/cli.ts submit-plan \
+deno run --allow-run=git,gh --allow-env --allow-read ${CLAUDE_PLUGIN_ROOT}/src/cli.ts submit-plan \
   [--stack-name=<name>] [--owner=<owner> --repo=<repo>]
 ```
 
@@ -539,7 +539,7 @@ order. Returns JSON with per-branch actions and an `isNoOp` flag.
 
 Config operations (set-branch, remove-branch, set-strategy, get, validate,
 land-cleanup, insert-branch, fold-branch, move-branch, split-stack) are library
-functions in `scripts/commands/config.ts`, not CLI subcommands. They are called
+functions in `src/commands/config.ts`, not CLI subcommands. They are called
 internally by the other subcommands and are not invoked directly.
 
 ## References
