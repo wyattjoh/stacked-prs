@@ -71,7 +71,26 @@ await new Command()
   .option("--owner <owner:string>", "GitHub repo owner")
   .option("--repo <repo:string>", "GitHub repo name")
   .option("--json", "Output as JSON")
+  .option("-i, --interactive", "Launch the interactive TUI")
+  .option(
+    "--theme <theme:string>",
+    "Force light or dark theme (auto-detected)",
+  )
   .action(async (options) => {
+    if (options.interactive) {
+      const { render } = await import("ink");
+      const React = await import("react");
+      const { App } = await import("./tui/app.tsx");
+      const theme = options.theme === "light" || options.theme === "dark"
+        ? options.theme
+        : undefined;
+      const { waitUntilExit } = render(
+        React.createElement(App, { dir, theme }),
+      );
+      await waitUntilExit();
+      return;
+    }
+
     const stackName = await resolveStackName(dir, options.stackName);
     let owner = options.owner;
     let repo = options.repo;
