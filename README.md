@@ -250,14 +250,13 @@ git checkout feature/auth
 
 ## Helper scripts
 
-The skill ships Deno scripts in `skills/stacked-prs/scripts/` that Claude runs
-for data queries and metadata mutations. You generally do not need to run them
-directly, but they can be useful for debugging. All commands go through a single
-entry point:
+The skill ships Deno scripts in `src/` that Claude runs for data queries and
+metadata mutations. You generally do not need to run them directly, but they can
+be useful for debugging. All commands go through a single entry point:
 
 ```bash
-deno run --allow-run=git,gh --allow-env \
-  skills/stacked-prs/scripts/cli.ts <subcommand> [flags]
+deno run --allow-run=git,gh --allow-env --allow-read \
+  src/cli.ts <subcommand> [flags]
 ```
 
 | Subcommand                | Purpose                                                           |
