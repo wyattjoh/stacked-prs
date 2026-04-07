@@ -41,11 +41,6 @@ export interface GhOptions {
   signal?: AbortSignal;
 }
 
-function isGhOptions(x: unknown): x is GhOptions {
-  return typeof x === "object" && x !== null && !Array.isArray(x) &&
-    !(x instanceof String);
-}
-
 /**
  * Run a gh command. Returns stdout as string.
  *
@@ -66,11 +61,9 @@ export async function gh(
   let args: string[];
   if (typeof optionsOrFirstArg === "string") {
     args = [optionsOrFirstArg, ...rest];
-  } else if (isGhOptions(optionsOrFirstArg)) {
+  } else {
     signal = optionsOrFirstArg.signal;
     args = rest;
-  } else {
-    args = [String(optionsOrFirstArg), ...rest];
   }
 
   if (signal?.aborted) {
