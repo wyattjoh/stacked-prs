@@ -1,12 +1,22 @@
 {
   "tasks": {
     "check": "deno fmt --check && deno lint && deno check src/cli.ts",
-    "test": "deno test --allow-run=git,gh --allow-env --allow-read --allow-write"
+    "test": "deno test --allow-run=git,gh,pbcopy,wl-copy,clip.exe,xclip --allow-env --allow-read --allow-write",
+    "tui": "deno run --allow-run=git,gh,pbcopy,wl-copy,clip.exe,xclip --allow-env --allow-read src/cli.ts status -i"
+  },
+  "compilerOptions": {
+    "jsx": "react",
+    "jsxFactory": "React.createElement",
+    "jsxFragmentFactory": "React.Fragment",
+    "lib": ["deno.ns", "dom"]
   },
   "imports": {
     "@cliffy/command": "jsr:@cliffy/command@^1",
     "@std/testing": "jsr:@std/testing@^1",
-    "@std/expect": "jsr:@std/expect@^1"
+    "@std/expect": "jsr:@std/expect@^1",
+    "react": "npm:react@^18.3.1",
+    "ink": "npm:ink@^5.0.1",
+    "ink-testing-library": "npm:ink-testing-library@^4.0.0"
   },
   "fmt": {
     "exclude": ["CHANGELOG.md"]
