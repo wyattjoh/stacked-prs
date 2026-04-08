@@ -83,24 +83,110 @@ await new Command()
       const { App } = await import("./tui/app.tsx");
       const process = (await import("node:process")).default;
 
-      // Deno's node compat doesn't always mark stdio as TTY even when
-      // running interactively. Force it so Ink uses cursor-based redraws
-      // instead of appending each frame.
-      if (process.stdout && !process.stdout.isTTY) {
-        (process.stdout as unknown as { isTTY: boolean }).isTTY = true;
-      }
-      if (process.stdin && !process.stdin.isTTY) {
-        (process.stdin as unknown as { isTTY: boolean }).isTTY = true;
+      // Deno's node:process compat layer doesn't populate isTTY / columns /
+      // rows on stdio the way Node does, even when attached to a real
+      // terminal. Ink relies on all three:
+      //   - isTTY gates cursor-based rendering vs append mode.
+      //   - rows gates the "frame taller than viewport => clear + redraw"
+      //     fallback (ink.js: `if (outputHeight >= stdout.rows)`). With
+      //     rows=undefined the comparison is always false, so any re-render
+      //     of a tall frame stacks previous output into scrollback because
+      //     log-update's eraseLines() can only reach the visible viewport.
+      // We fill these in from Deno.consoleSize() and keep them fresh on
+      // SIGWINCH, emitting a 'resize' event so Ink recalculates layout.
+      const stdoutAny = process.stdout as unknown as {
+        isTTY: boolean;
+        columns: number;
+        rows: number;
+        emit?: (event: string) => void;
+      };
+      const stdinAny = process.stdin as unknown as { isTTY: boolean };
+      if (!stdoutAny.isTTY) stdoutAny.isTTY = true;
+      if (!stdinAny.isTTY) stdinAny.isTTY = true;
+
+      const refreshConsoleSize = () => {
+        try {
+          const { columns, rows } = Deno.consoleSize();
+          stdoutAny.columns = columns;
+          stdoutAny.rows = rows;
+        } catch {
+          // stdio isn't a real tty (piped/redirected). Fall back to
+          // conservative defaults so Ink's clearTerminal path can still
+          // fire when the frame would exceed them.
+          stdoutAny.columns ??= 80;
+          stdoutAny.rows ??= 24;
+        }
+      };
+      refreshConsoleSize();
+
+      const onResize = () => {
+        refreshConsoleSize();
+        try {
+          stdoutAny.emit?.("resize");
+        } catch {
+          // ignore
+        }
+      };
+      try {
+        Deno.addSignalListener("SIGWINCH", onResize);
+      } catch {
+        // SIGWINCH isn't supported on this platform; static size is fine.
       }
 
       const theme = options.theme === "light" || options.theme === "dark"
         ? options.theme
         : undefined;
-      const { waitUntilExit } = render(
-        React.createElement(App, { dir, theme }),
-        { stdout: process.stdout, stdin: process.stdin, exitOnCtrlC: true },
-      );
-      await waitUntilExit();
+
+      // Enter the alternate screen buffer so the TUI takes over the terminal
+      // and previous frames don't end up in scrollback. We restore on exit
+      // (including Ctrl+C / signals) so the user's shell history is intact.
+      const ENTER_ALT_SCREEN = "\x1b[?1049h";
+      const LEAVE_ALT_SCREEN = "\x1b[?1049l";
+      const HIDE_CURSOR = "\x1b[?25l";
+      const SHOW_CURSOR = "\x1b[?25h";
+
+      let restored = false;
+      const restore = () => {
+        if (restored) return;
+        restored = true;
+        try {
+          process.stdout.write(SHOW_CURSOR);
+          process.stdout.write(LEAVE_ALT_SCREEN);
+        } catch {
+          // ignore
+        }
+      };
+
+      process.stdout.write(ENTER_ALT_SCREEN);
+      process.stdout.write(HIDE_CURSOR);
+
+      const onSignal = () => {
+        restore();
+        Deno.exit(130);
+      };
+      Deno.addSignalListener("SIGINT", onSignal);
+      Deno.addSignalListener("SIGTERM", onSignal);
+
+      try {
+        const { waitUntilExit } = render(
+          React.createElement(App, { dir, theme }),
+          { stdout: process.stdout, stdin: process.stdin, exitOnCtrlC: true },
+        );
+        await waitUntilExit();
+      } finally {
+        try {
+          Deno.removeSignalListener("SIGINT", onSignal);
+          Deno.removeSignalListener("SIGTERM", onSignal);
+        } catch {
+          // ignore
+        }
+        try {
+          Deno.removeSignalListener("SIGWINCH", onResize);
+        } catch {
+          // ignore
+        }
+        restore();
+      }
       return;
     }
 

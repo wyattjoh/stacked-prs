@@ -259,7 +259,14 @@ export function App(props: AppProps): React.ReactElement {
   const stackNames = state.trees.map((t: StackTree) => t.stackName);
 
   return (
-    <Box flexDirection="column">
+    // overflowX="hidden" is critical: stack bands render each row as a
+    // horizontal Box whose children can exceed terminal width. Without
+    // clipping, the terminal physically wraps those rows, but Ink's
+    // log-update tracks lines by counting '\n' in the rendered string, so
+    // previousLineCount undercounts. On re-render, log-update's eraseLines
+    // can't reach the wrapped tail, and each new frame stacks below the
+    // un-erased portion of the previous one.
+    <Box flexDirection="column" overflowX="hidden">
       <TabBar
         stacks={stackNames}
         activeTab={state.activeTab}
