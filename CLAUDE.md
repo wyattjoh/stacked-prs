@@ -63,16 +63,28 @@ deno task test
 deno test --allow-run=git,gh --allow-env --allow-read --allow-write \
   src/commands/restack.test.ts
 
+# Single TUI component test (same allow flags; Ink + ink-testing-library
+# don't need anything beyond what the task test flags already grant)
+deno test --allow-env --allow-read src/tui/components/node.test.tsx
+
 # Type check, lint, fmt check
 deno task check
 
 # Invoke a CLI subcommand directly
 deno run --allow-run=git,gh --allow-env --allow-read src/cli.ts status --json
+
+# Launch the interactive TUI from this repo
+deno task tui
+
+# Install a global `stacked-prs` binary into ~/.deno/bin (or mise's deno bin
+# dir) so the TUI can be run from any other git repo. Uses absolute paths so
+# the installed wrapper always reads the live source and deno.json.
+deno task install
 ```
 
-Subcommands: `status`, `restack`, `nav`, `verify-refs`, `import-discover`,
-`submit-plan`. `commands/config.ts` is a library; import its functions, do not
-try to invoke it via `cli.ts`.
+Subcommands: `status` (add `-i`/`--interactive` to launch the TUI), `restack`,
+`nav`, `verify-refs`, `import-discover`, `submit-plan`. `commands/config.ts` is
+a library; import its functions, do not try to invoke it via `cli.ts`.
 
 ## Architecture
 
@@ -102,17 +114,18 @@ Independent sibling segments continue even when one hits a conflict.
 
 ### Script roles
 
-| File                              | Role                                     | Invoked as                              |
-| --------------------------------- | ---------------------------------------- | --------------------------------------- |
-| `src/lib/stack.ts`                | Library only, not a CLI                  | Imported by all other scripts           |
-| `src/lib/gh.ts`                   | Library only, not a CLI                  | Imported by scripts needing GitHub data |
-| `src/commands/config.ts`          | Library functions for metadata mutations | Imported by other commands              |
-| `src/commands/status.ts`          | Read stack state + PR info               | `cli.ts status [--json]`                |
-| `src/commands/restack.ts`         | Segment-based tree rebase                | `cli.ts restack [--json]`               |
-| `src/commands/nav.ts`             | Navigation comments                      | `cli.ts nav [--dry-run]`                |
-| `src/commands/verify-refs.ts`     | Post-rebase verification                 | `cli.ts verify-refs`                    |
-| `src/commands/import-discover.ts` | Branch tree detection                    | `cli.ts import-discover`                |
-| `src/commands/submit-plan.ts`     | Submit planning                          | `cli.ts submit-plan`                    |
+| File                              | Role                                       | Invoked as                              |
+| --------------------------------- | ------------------------------------------ | --------------------------------------- |
+| `src/lib/stack.ts`                | Library only, not a CLI                    | Imported by all other scripts           |
+| `src/lib/gh.ts`                   | Library only, not a CLI                    | Imported by scripts needing GitHub data |
+| `src/commands/config.ts`          | Library functions for metadata mutations   | Imported by other commands              |
+| `src/commands/status.ts`          | Read stack state + PR info                 | `cli.ts status [--json]`                |
+| `src/commands/restack.ts`         | Segment-based tree rebase                  | `cli.ts restack [--json]`               |
+| `src/commands/nav.ts`             | Navigation comments                        | `cli.ts nav [--dry-run]`                |
+| `src/commands/verify-refs.ts`     | Post-rebase verification                   | `cli.ts verify-refs`                    |
+| `src/commands/import-discover.ts` | Branch tree detection                      | `cli.ts import-discover`                |
+| `src/commands/submit-plan.ts`     | Submit planning                            | `cli.ts submit-plan`                    |
+| `src/tui/app.tsx`                 | Root Ink component, owns reducer + effects | Launched by `cli.ts status -i`          |
 
 ### Git config schema
 
@@ -127,12 +140,38 @@ stack.<stack-name>.base-branch     # Base branch name, e.g. "main" or "master"
 `stack-parent` relationships. `getStackTree` auto-migrates old configs by
 removing `stack-order` keys after validating the tree.
 
+### TUI layer (`src/tui/`)
+
+The TUI is an Ink + React app launched by `cli.ts status -i`. It reads the same
+data sources as non-interactive `status` (`getAllStackTrees`, `git merge-base`,
+`gh pr list`), and does not write anything. The code is split along a strict
+purity boundary so most of it is testable without Ink:
+
+- Pure (`lib/layout.ts`, `lib/colors.ts`, `state/reducer.ts`,
+  `state/navigation.ts`) — unit tested with synthetic inputs, no Ink, no git.
+- Impure (`state/loader.ts`, `lib/clipboard.ts`, `components/*.tsx`, `app.tsx`)
+  — loader uses the existing `gh.ts` fixture system, components are tested with
+  `ink-testing-library`, and `app.tsx` gets an integration test that spins up a
+  real temp repo.
+
+`cli.ts` dynamically imports Ink/React/App only when `-i` is set so the
+non-interactive `status` path doesn't pay the Ink load cost. It also forces
+`process.stdout.isTTY = true` before calling `render()` because Deno's
+`node:process` compat layer doesn't always set it correctly, which otherwise
+makes Ink fall back to append-mode rendering.
+
 ### Testing
 
 Tests use real git repos in temp directories (`testdata/helpers.ts` provides
 `createTestRepo`). GitHub CLI calls are mocked via `gh.ts`'s fixture system: set
 `GH_MOCK_DIR` or call `setMockDir()`, and `gh()` reads
 `<mockDir>/<fixtureKey>.json` instead of shelling out.
+
+**Ink + Deno gotcha:** every `ink-testing-library` test must destructure
+`unmount` and call it before the test returns, otherwise Deno's leak detector
+flags signal-handler leaks from Ink and fails the suite. Also, Ink's `Text` and
+any custom Ink component reject a `key` prop in TypeScript; mapped JSX needs
+`<Box key={...}>` wrappers around the mapped element.
 
 ## Confirmation gates
 
