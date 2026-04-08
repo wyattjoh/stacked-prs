@@ -7,9 +7,10 @@ export interface NodeProps {
   stackColor: string;
   focused: boolean;
   prCell: PrCellState | undefined;
+  width?: number;
 }
 
-const NODE_WIDTH = 16;
+const DEFAULT_NODE_WIDTH = 16;
 const SPINNER = "⠋";
 
 function glyphFor(pr: PrInfo | null): string {
@@ -35,21 +36,22 @@ function bottomLine(cell: PrCellState | undefined): string {
   return `#${pr.number} ${glyphFor(pr)} ${stateLabel(pr)}`;
 }
 
-function truncate(s: string, width: number): string {
-  if (s.length <= width) return s;
-  if (width <= 1) return "…";
-  return s.slice(0, width - 1) + "…";
-}
-
 export function Node(props: NodeProps): React.ReactElement {
   const topStyle = props.focused ? { inverse: true } : {};
   const bottomStyle = props.focused ? { inverse: true } : {};
-  const top = truncate(props.branch, NODE_WIDTH);
-  const bottom = truncate(bottomLine(props.prCell), NODE_WIDTH);
+  const top = props.branch;
+  const bottom = bottomLine(props.prCell);
+  // Never truncate: expand to fit the longest line, and honour the width
+  // passed down from the band so sibling nodes align.
+  const width = Math.max(
+    props.width ?? DEFAULT_NODE_WIDTH,
+    top.length,
+    bottom.length,
+  );
   return (
-    <Box width={NODE_WIDTH} flexShrink={0} flexDirection="column">
-      <Text {...topStyle}>{top.padEnd(NODE_WIDTH)}</Text>
-      <Text {...bottomStyle}>{bottom.padEnd(NODE_WIDTH)}</Text>
+    <Box width={width} flexShrink={0} flexDirection="column">
+      <Text {...topStyle}>{top.padEnd(width)}</Text>
+      <Text {...bottomStyle}>{bottom.padEnd(width)}</Text>
     </Box>
   );
 }

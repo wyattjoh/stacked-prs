@@ -10,9 +10,10 @@ export interface StackBandProps {
   cells: GridCell[];
   focusedBranch: string | null;
   prData: Map<string, PrCellState>;
+  nodeWidth?: number;
 }
 
-const NODE_WIDTH = 16;
+const DEFAULT_NODE_WIDTH = 16;
 
 function connectorChars(style: ConnectorStyle, span: number): string {
   const ch = style === "dashed" ? "╌" : style === "double" ? "═" : "─";
@@ -25,6 +26,7 @@ function renderRow(
   focusedBranch: string | null,
   prData: Map<string, PrCellState>,
   isForkRow: boolean,
+  nodeWidth: number,
 ): React.ReactElement {
   const sorted = [...cells].sort((a, b) => a.col - b.col);
   const parts: React.ReactNode[] = [];
@@ -56,7 +58,7 @@ function renderRow(
     if (i > 0) {
       const prev = sorted[i - 1];
       const gap = cell.col - prev.col - 1;
-      const line = connectorChars(cell.connectorStyle, 3 + gap * NODE_WIDTH);
+      const line = connectorChars(cell.connectorStyle, 3 + gap * nodeWidth);
       parts.push(
         <Box key={`c${i}`}>
           <Text color={color}>
@@ -72,6 +74,7 @@ function renderRow(
           stackColor={color}
           focused={focusedBranch === cell.branch}
           prCell={prData.get(cell.branch)}
+          width={nodeWidth}
         />
       </Box>,
     );
@@ -85,6 +88,13 @@ export function StackBand(props: StackBandProps): React.ReactElement {
     ? `Stack: ${props.stackName} (${props.mergeStrategy})`
     : `Stack: ${props.stackName}`;
 
+  // Fall back to a width wide enough to hold every branch name in this band
+  // so the App can omit nodeWidth in isolated tests.
+  const nodeWidth = props.nodeWidth ?? Math.max(
+    DEFAULT_NODE_WIDTH,
+    ...props.cells.map((c) => c.branch.length),
+  );
+
   // Group cells by row.
   const rows = new Map<number, GridCell[]>();
   for (const cell of props.cells) {
@@ -95,16 +105,17 @@ export function StackBand(props: StackBandProps): React.ReactElement {
   const sortedRows = [...rows.entries()].sort(([a], [b]) => a - b);
 
   return (
-    <Box flexDirection="column" marginBottom={1}>
+    <Box flexDirection="column" marginBottom={1} flexShrink={0}>
       <Text>{header}</Text>
       {sortedRows.map(([row, cells], i) => (
-        <Box key={row}>
+        <Box key={row} flexShrink={0}>
           {renderRow(
             cells,
             props.color,
             props.focusedBranch,
             props.prData,
             i > 0,
+            nodeWidth,
           )}
         </Box>
       ))}

@@ -1,4 +1,4 @@
-import React, { useEffect, useReducer, useRef } from "react";
+import React, { useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { Box, Text, useApp, useInput, useStdout } from "ink";
 import type { State, TabId } from "./types.ts";
 import type { StackTree } from "../lib/stack.ts";
@@ -47,6 +47,13 @@ export function App(props: AppProps): React.ReactElement {
   const { exit } = useApp();
   const { stdout } = useStdout();
   const abortRef = useRef<AbortController | null>(null);
+  const [termSize, setTermSize] = useState<{ cols: number; rows: number }>(
+    () => ({
+      cols: stdout?.columns ?? 80,
+      rows: stdout?.rows ?? 24,
+    }),
+  );
+  const [scrollX, setScrollX] = useState(0);
 
   const runRunGit = (
     ...args: string[]
@@ -125,14 +132,15 @@ export function App(props: AppProps): React.ReactElement {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state.cursor?.branch]);
 
-  // Terminal-width guard.
+  // Track terminal size so the outer layout can stretch to fill the window,
+  // and update the too-narrow guard on the same resize event.
   useEffect(() => {
     const minWidth = 40;
     const check = () => {
-      dispatch({
-        type: "TERMINAL_SIZE",
-        tooNarrow: (stdout?.columns ?? 80) < minWidth,
-      });
+      const cols = stdout?.columns ?? 80;
+      const rows = stdout?.rows ?? 24;
+      setTermSize({ cols, rows });
+      dispatch({ type: "TERMINAL_SIZE", tooNarrow: cols < minWidth });
     };
     check();
     stdout?.on("resize", check);
@@ -140,6 +148,34 @@ export function App(props: AppProps): React.ReactElement {
       stdout?.off("resize", check);
     };
   }, [stdout]);
+
+  // Compute a single node width wide enough for every branch name so rows
+  // stay column-aligned and names are never truncated.
+  const nodeWidth = useMemo(() => {
+    let max = 16;
+    for (const cell of state.grid.cells) {
+      if (cell.branch.length > max) max = cell.branch.length;
+    }
+    return max + 1;
+  }, [state.grid]);
+
+  // Keep the cursor's approximate x position inside the visible viewport.
+  // Columns are a coarse proxy (col * (nodeWidth + connector)) but good
+  // enough to drive horizontal scroll.
+  useEffect(() => {
+    if (!state.cursor) return;
+    const cell = state.grid.byBranch.get(state.cursor.branch);
+    if (!cell) return;
+    const slot = nodeWidth + 5;
+    const x = cell.col * slot;
+    const right = x + nodeWidth;
+    const viewportW = termSize.cols;
+    setScrollX((prev: number) => {
+      if (x < prev) return Math.max(0, x);
+      if (right > prev + viewportW) return Math.max(0, right - viewportW);
+      return prev;
+    });
+  }, [state.cursor?.branch, nodeWidth, termSize.cols, state.grid]);
 
   useInput((input, key) => {
     if (state.showHelp && input !== "?") {
@@ -259,6 +295,9 @@ export function App(props: AppProps): React.ReactElement {
   const stackNames = state.trees.map((t: StackTree) => t.stackName);
 
   return (
+    // Stretch to the full terminal so the stack map gets the remaining
+    // vertical space via flexGrow.
+    //
     // overflowX="hidden" is critical: stack bands render each row as a
     // horizontal Box whose children can exceed terminal width. Without
     // clipping, the terminal physically wraps those rows, but Ink's
@@ -266,7 +305,12 @@ export function App(props: AppProps): React.ReactElement {
     // previousLineCount undercounts. On re-render, log-update's eraseLines
     // can't reach the wrapped tail, and each new frame stacks below the
     // un-erased portion of the previous one.
-    <Box flexDirection="column" overflowX="hidden">
+    <Box
+      flexDirection="column"
+      overflowX="hidden"
+      width={termSize.cols}
+      height={termSize.rows}
+    >
       <TabBar
         stacks={stackNames}
         activeTab={state.activeTab}
@@ -276,7 +320,12 @@ export function App(props: AppProps): React.ReactElement {
       {state.ghUnavailable && (
         <Text dimColor>gh unavailable - showing topology only</Text>
       )}
-      <StackMap state={state} />
+      <StackMap
+        state={state}
+        viewportWidth={termSize.cols}
+        scrollX={scrollX}
+        nodeWidth={nodeWidth}
+      />
       <DetailPane
         branch={focusedBranch}
         prCell={focusedBranch ? state.prData.get(focusedBranch) : undefined}
