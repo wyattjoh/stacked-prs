@@ -36,15 +36,9 @@ export function reducer(state: State, action: Action): State {
     case "LOCAL_LOADED": {
       const initial: Cursor | null = action.currentBranch &&
           action.grid.byBranch.has(action.currentBranch)
-        ? {
-          branch: action.currentBranch,
-          preferredCol: action.grid.byBranch.get(action.currentBranch)!.col,
-        }
+        ? { branch: action.currentBranch }
         : (action.grid.cells[0]
-          ? {
-            branch: action.grid.cells[0].branch,
-            preferredCol: action.grid.cells[0].col,
-          }
+          ? { branch: action.grid.cells[0].branch }
           : null);
       return {
         ...state,

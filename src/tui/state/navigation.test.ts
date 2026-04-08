@@ -35,76 +35,61 @@ const allUpToDate = (branches: string[]): Map<string, SyncStatus> =>
   new Map(branches.map((b) => [b, "up-to-date" as SyncStatus]));
 
 describe("navigation", () => {
-  const a = linearTree("alpha", ["a1", "a2", "a3", "a4", "a5", "a6"]);
-  const b = linearTree("beta", ["b1", "b2", "b3"]);
-  const g = linearTree("gamma", ["g1", "g2", "g3", "g4", "g5", "g6", "g7"]);
+  const a = linearTree("alpha", ["a1", "a2", "a3"]);
+  const b = linearTree("beta", ["b1", "b2"]);
   const grid = buildGrid(
-    [a, b, g],
-    allUpToDate([
-      "a1",
-      "a2",
-      "a3",
-      "a4",
-      "a5",
-      "a6",
-      "b1",
-      "b2",
-      "b3",
-      "g1",
-      "g2",
-      "g3",
-      "g4",
-      "g5",
-      "g6",
-      "g7",
-    ]),
+    [a, b],
+    allUpToDate(["a1", "a2", "a3", "b1", "b2"]),
   );
 
-  test("moveRight walks along a row", () => {
-    const c: Cursor = { branch: "a1", preferredCol: 0 };
-    const r1 = moveRight(grid, c);
-    expect(r1.branch).toBe("a2");
-    expect(r1.preferredCol).toBe(1);
+  test("moveDown walks to the next branch in row order", () => {
+    const c: Cursor = { branch: "a1" };
+    expect(moveDown(grid, c).branch).toBe("a2");
   });
 
-  test("moveRight at end of chain is no-op", () => {
-    const c: Cursor = { branch: "a6", preferredCol: 5 };
-    expect(moveRight(grid, c)).toEqual(c);
+  test("moveDown crosses stack boundaries", () => {
+    const c: Cursor = { branch: "a3" };
+    expect(moveDown(grid, c).branch).toBe("b1");
   });
 
-  test("moveDown from tall stack to shorter one clamps", () => {
-    // a5 is col=4 on alpha row. beta only has cols 0..2.
-    const c: Cursor = { branch: "a5", preferredCol: 4 };
-    const r1 = moveDown(grid, c);
-    expect(r1.branch).toBe("b3");
-    expect(r1.preferredCol).toBe(4); // preserved
-  });
-
-  test("moveDown restores preferredCol when next row is wide enough", () => {
-    const c: Cursor = { branch: "b3", preferredCol: 4 };
-    const r1 = moveDown(grid, c);
-    expect(r1.branch).toBe("g5");
-    expect(r1.preferredCol).toBe(4);
+  test("moveDown at the very last branch is a no-op", () => {
+    const c: Cursor = { branch: "b2" };
+    expect(moveDown(grid, c)).toEqual(c);
   });
 
   test("moveUp mirrors moveDown", () => {
-    const c: Cursor = { branch: "g5", preferredCol: 4 };
-    const r1 = moveUp(grid, c);
-    expect(r1.branch).toBe("b3");
-    expect(r1.preferredCol).toBe(4);
+    const c: Cursor = { branch: "b1" };
+    expect(moveUp(grid, c).branch).toBe("a3");
   });
 
-  test("moveLeft does not change preferredCol beyond new col", () => {
-    const c: Cursor = { branch: "a3", preferredCol: 2 };
-    const r = moveLeft(grid, c);
-    expect(r.branch).toBe("a2");
-    expect(r.preferredCol).toBe(1);
+  test("moveUp at the very first branch is a no-op", () => {
+    const c: Cursor = { branch: "a1" };
+    expect(moveUp(grid, c)).toEqual(c);
   });
 
-  test("moveToBranch jumps directly and resets preferredCol", () => {
-    const r = moveToBranch(grid, "g4");
-    expect(r?.branch).toBe("g4");
-    expect(r?.preferredCol).toBe(3);
+  test("moveRight moves to the first child", () => {
+    const c: Cursor = { branch: "a1" };
+    expect(moveRight(grid, c).branch).toBe("a2");
+  });
+
+  test("moveRight at a leaf is a no-op", () => {
+    const c: Cursor = { branch: "a3" };
+    expect(moveRight(grid, c)).toEqual(c);
+  });
+
+  test("moveLeft moves to the parent", () => {
+    const c: Cursor = { branch: "a3" };
+    expect(moveLeft(grid, c).branch).toBe("a2");
+  });
+
+  test("moveLeft at a root is a no-op", () => {
+    const c: Cursor = { branch: "a1" };
+    expect(moveLeft(grid, c)).toEqual(c);
+  });
+
+  test("moveToBranch jumps directly", () => {
+    const r = moveToBranch(grid, "b2");
+    expect(r?.branch).toBe("b2");
   });
 
   test("moveToBranch returns null for unknown branch", () => {
@@ -112,7 +97,7 @@ describe("navigation", () => {
   });
 
   test("moveToStack focuses first branch of target stack", () => {
-    const c: Cursor = { branch: "a3", preferredCol: 2 };
+    const c: Cursor = { branch: "a3" };
     const r = moveToStack(grid, "beta", c);
     expect(r?.branch).toBe("b1");
   });

@@ -65,7 +65,7 @@ deno test --allow-run=git,gh --allow-env --allow-read --allow-write \
 
 # Single TUI component test (same allow flags; Ink + ink-testing-library
 # don't need anything beyond what the task test flags already grant)
-deno test --allow-env --allow-read src/tui/components/node.test.tsx
+deno test --allow-env --allow-read src/tui/components/stack-band.test.tsx
 
 # Type check, lint, fmt check
 deno task check
@@ -159,6 +159,56 @@ non-interactive `status` path doesn't pay the Ink load cost. It also forces
 `process.stdout.isTTY = true` before calling `render()` because Deno's
 `node:process` compat layer doesn't always set it correctly, which otherwise
 makes Ink fall back to append-mode rendering.
+
+#### Rendering model
+
+The TUI renders each stack as a vertical ladder: every branch gets its own row
+(2 lines: branch name + PR info), with `├─`/`└─` corners between parent and
+child and inter-row `│` rails keeping the tree visually continuous.
+`lib/layout.ts` walks the tree DFS and assigns each cell a `depth`,
+`isLastSibling`, `hasChildren`, and `ancestorRails[]` that `stack-band.tsx`
+turns into prefix strings.
+
+Multiple stacks connect back to a shared `main` label at the top through a
+per-stack trunk column. Stack N-1 (the last in render order) sits at col 0 with
+no trunk bars to its left; each earlier stack is indented one col-group (3
+chars) further right so the later stacks' bars can run up past it to `main`
+without crossings. Every stack's content is aligned to the same column (the
+most-indented stack's content col), achieved by extending each stack's `└─`
+corner horizontally to reach that column. Each bar uses the root branch's sync
+glyph (`│`/`╎`/`║` and `─`/`╌`/`═`) so diverged/behind roots are visible at a
+glance. Gap rows between stacks keep the trunk continuous while still reading as
+separate blocks.
+
+`stack-map.tsx` owns all trunk rendering and passes per-stack header/content
+prefix segments into `stack-band.tsx`, which only handles the internal ladder
+and cells. The trunk helpers (`headerTrunkSegments`, `contentTrunkSegments`,
+`initialTrunkSegments`) produce `TrunkSegment[]` (text + color) and must stay in
+sync with the cursor-Y math in `app.tsx` used for scroll tracking.
+
+`app.tsx` maintains `scrollX`/`scrollY` state and a cursor-follow effect that
+walks the visible stacks to compute the cursor's row index. Scrolling up snaps
+to `max(0, headerY - 2)` so the stack header and two rows of context above it
+(including the `main` label for the first stack) stay visible; scrolling down
+moves minimally to keep the cursor in view. If a stack is taller than the
+viewport, the scroll falls back to cursor-only visibility (header may scroll off
+the top).
+
+Keyboard navigation:
+
+- `↑`/`↓`/`k`/`j`: walk branches in row order (crosses stack boundaries).
+- `←`/`→`/`h`/`l`: parent / first child in the tree.
+- `g`/`G`: first / last branch in the current stack.
+- `[`/`]` or `pgup`/`pgdn`: previous / next stack.
+- `tab` / `shift-tab`: cycle tabs.
+- `1`-`9`: jump to tab N.
+- `?`: toggle help overlay (rendered inline inside the main Box rather than as a
+  separate root, so Ink's log-update tracking stays correct after close).
+- `o`/`y`/`Y`: open PR / yank branch name / yank PR URL.
+
+The status bar at the bottom is built dynamically from `STATUS_BAR_ITEMS` in
+`help-overlay.tsx`: `buildStatusBar(termSize.cols)` greedily includes shortcuts
+until the next one would overflow the terminal width.
 
 ### Testing
 

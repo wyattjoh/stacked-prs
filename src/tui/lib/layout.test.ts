@@ -33,7 +33,7 @@ function sync(...pairs: Array<[string, SyncStatus]>): Map<string, SyncStatus> {
 }
 
 describe("buildGrid", () => {
-  test("single linear stack", () => {
+  test("single linear stack ladders down with increasing depth", () => {
     const t = tree("alpha", "a", [["a", ["b"]], ["b", ["c"]]]);
     const grid = buildGrid(
       [t],
@@ -45,17 +45,19 @@ describe("buildGrid", () => {
     );
 
     expect(grid.cells).toHaveLength(3);
-    expect(grid.byBranch.get("a")?.col).toBe(0);
-    expect(grid.byBranch.get("b")?.col).toBe(1);
-    expect(grid.byBranch.get("c")?.col).toBe(2);
+    expect(grid.byBranch.get("a")?.depth).toBe(0);
+    expect(grid.byBranch.get("b")?.depth).toBe(1);
+    expect(grid.byBranch.get("c")?.depth).toBe(2);
     expect(grid.byBranch.get("a")?.row).toBe(0);
-    expect(grid.byBranch.get("b")?.row).toBe(0);
-    expect(grid.byBranch.get("c")?.row).toBe(0);
-    expect(grid.byBranch.get("a")?.parentCol).toBe(null);
-    expect(grid.byBranch.get("b")?.parentCol).toBe(0);
+    expect(grid.byBranch.get("b")?.row).toBe(1);
+    expect(grid.byBranch.get("c")?.row).toBe(2);
+    expect(grid.byBranch.get("a")?.parent).toBe(null);
+    expect(grid.byBranch.get("b")?.parent).toBe("a");
+    expect(grid.byBranch.get("a")?.firstChild).toBe("b");
+    expect(grid.byBranch.get("c")?.firstChild).toBe(null);
   });
 
-  test("fork drops to a new row", () => {
+  test("fork puts siblings on consecutive rows at same depth", () => {
     const t = tree("alpha", "a", [["a", ["b", "c"]]]);
     const grid = buildGrid(
       [t],
@@ -66,14 +68,52 @@ describe("buildGrid", () => {
       ),
     );
 
-    // 'a' and 'b' on row 0, 'c' drops to row 1
+    // Every branch is on its own row; b and c are at the same depth.
     expect(grid.byBranch.get("a")?.row).toBe(0);
-    expect(grid.byBranch.get("b")?.row).toBe(0);
-    expect(grid.byBranch.get("c")?.row).toBe(1);
-    expect(grid.byBranch.get("b")?.col).toBe(1);
-    expect(grid.byBranch.get("c")?.col).toBe(1);
-    expect(grid.byBranch.get("c")?.isForkRow).toBe(true);
-    expect(grid.byBranch.get("b")?.isForkRow).toBe(false);
+    expect(grid.byBranch.get("b")?.row).toBe(1);
+    expect(grid.byBranch.get("c")?.row).toBe(2);
+    expect(grid.byBranch.get("b")?.depth).toBe(1);
+    expect(grid.byBranch.get("c")?.depth).toBe(1);
+    // b is not the last sibling, c is.
+    expect(grid.byBranch.get("b")?.isLastSibling).toBe(false);
+    expect(grid.byBranch.get("c")?.isLastSibling).toBe(true);
+  });
+
+  test("ancestor rails reflect whether an uncle is still coming", () => {
+    // a has children b, c; b has child d. When rendering d (depth 2),
+    // slot 0 should carry a rail because b still has a later sibling (c).
+    const t = tree("alpha", "a", [["a", ["b", "c"]], ["b", ["d"]]]);
+    const grid = buildGrid(
+      [t],
+      sync(
+        ["a", "up-to-date"],
+        ["b", "up-to-date"],
+        ["c", "up-to-date"],
+        ["d", "up-to-date"],
+      ),
+    );
+
+    const d = grid.byBranch.get("d");
+    expect(d?.depth).toBe(2);
+    expect(d?.ancestorRails).toEqual([true]);
+  });
+
+  test("no ancestor rail when parent is last sibling", () => {
+    // a has only child b; b has only child c. c at depth 2 should have
+    // ancestorRails [false] because b is last sibling of a.
+    const t = tree("alpha", "a", [["a", ["b"]], ["b", ["c"]]]);
+    const grid = buildGrid(
+      [t],
+      sync(
+        ["a", "up-to-date"],
+        ["b", "up-to-date"],
+        ["c", "up-to-date"],
+      ),
+    );
+
+    const c = grid.byBranch.get("c");
+    expect(c?.depth).toBe(2);
+    expect(c?.ancestorRails).toEqual([false]);
   });
 
   test("connector style reflects sync status", () => {

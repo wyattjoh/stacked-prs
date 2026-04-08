@@ -4,22 +4,22 @@ export const DARK_PALETTE = [
   "cyan",
   "magenta",
   "blue",
-  "brightCyan",
-  "brightMagenta",
-  "brightBlue",
-  "white",
-  "gray",
+  "cyanBright",
+  "magentaBright",
+  "blueBright",
+  "green",
+  "yellow",
 ] as const;
 
 export const LIGHT_PALETTE = [
   "cyan",
   "magenta",
   "blue",
-  "brightCyan",
-  "brightMagenta",
-  "brightBlue",
-  "gray",
-  "blackBright",
+  "cyanBright",
+  "magentaBright",
+  "blueBright",
+  "green",
+  "red",
 ] as const;
 
 /** FNV-1a 32-bit hash of a string. Deterministic, no external deps. */

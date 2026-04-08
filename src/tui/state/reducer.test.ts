@@ -87,14 +87,14 @@ describe("reducer", () => {
   test("CURSOR_SET updates cursor", () => {
     const s = reducer(
       makeState(),
-      { type: "CURSOR_SET", cursor: { branch: "a1", preferredCol: 0 } },
+      { type: "CURSOR_SET", cursor: { branch: "a1" } },
     );
-    expect(s.cursor).toEqual({ branch: "a1", preferredCol: 0 });
+    expect(s.cursor).toEqual({ branch: "a1" });
   });
 
   test("TAB_SWITCH remembers cursors per tab", () => {
     const s0 = makeState({
-      cursor: { branch: "a1", preferredCol: 0 },
+      cursor: { branch: "a1" },
       activeTab: "all",
     });
     const s1 = reducer(s0, { type: "TAB_SWITCH", tab: { stack: "alpha" } });

@@ -34,15 +34,25 @@ export type CommitsCellState =
   | { status: "loaded"; commits: CommitInfo[] }
   | { status: "error"; message: string };
 
-/** One node's position in the 2D grid. */
+/**
+ * One branch's position in the ladder. Every branch gets a unique row.
+ *
+ * `ancestorRails` has length `max(0, depth - 1)`; entry `i` is true when the
+ * ancestor at depth `(i + 1)` has a later sibling, meaning a vertical rail
+ * runs through col-group `i` on this row. The corner at col-group
+ * `(depth - 1)` is drawn from `isLastSibling` and consumes its own slot.
+ */
 export interface GridCell {
   branch: string;
   stackName: string;
   row: number;
-  col: number;
-  parentCol: number | null;
+  depth: number;
+  isLastSibling: boolean;
+  hasChildren: boolean;
+  ancestorRails: boolean[];
+  parent: string | null;
+  firstChild: string | null;
   connectorStyle: ConnectorStyle;
-  isForkRow: boolean;
 }
 
 export interface GridLayout {
@@ -52,12 +62,10 @@ export interface GridLayout {
   byStack: Map<string, GridCell[]>;
   rowsByStack: Map<string, number[]>;
   totalRows: number;
-  totalCols: number;
 }
 
 export interface Cursor {
   branch: string;
-  preferredCol: number;
 }
 
 /** "all" or a specific stack name. */
