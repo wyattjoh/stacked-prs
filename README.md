@@ -7,17 +7,13 @@ Deno helper scripts on your behalf.
 
 ## Installation
 
-This is a Claude Code plugin. From inside Claude Code:
+This is a Claude Code plugin distributed through the
+[wyattjoh/claude-code-marketplace](https://github.com/wyattjoh/claude-code-marketplace).
+From inside Claude Code, add the marketplace and then install the plugin:
 
 ```
+/plugin marketplace add wyattjoh/claude-code-marketplace
 /plugin install wyattjoh/stacked-prs
-```
-
-Or, for local development, add this directory as a plugin source:
-
-```
-/plugin marketplace add /path/to/stacked-prs
-/plugin install stacked-prs
 ```
 
 After install, the `stacked-prs` skill auto-loads on relevant prompts and is
