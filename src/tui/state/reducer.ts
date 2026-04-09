@@ -114,10 +114,28 @@ export function reducer(state: State, action: Action): State {
         cursorByTab.set(tabKey(state.activeTab), state.cursor);
       }
       const restored = cursorByTab.get(tabKey(action.tab)) ?? null;
+      // When switching into a specific-stack tab, the cursor must live in
+      // that stack. A restored per-tab cursor is trusted (it came from this
+      // tab before), but the "fall back to current cursor" path could carry
+      // a branch from a different stack, which would let j/k walk outside
+      // the visible stack. Snap to the first cell of the target stack in
+      // that case.
+      let nextCursor = restored ?? state.cursor;
+      if (action.tab !== "all") {
+        const stackCells = state.grid.byStack.get(action.tab.stack) ?? [];
+        const firstCell = [...stackCells].sort((a, b) => a.row - b.row)[0];
+        const cursorCell = nextCursor
+          ? state.grid.byBranch.get(nextCursor.branch)
+          : undefined;
+        const cursorInStack = cursorCell?.stackName === action.tab.stack;
+        if (!cursorInStack) {
+          nextCursor = firstCell ? { branch: firstCell.branch } : null;
+        }
+      }
       return {
         ...state,
         activeTab: action.tab,
-        cursor: restored ?? state.cursor,
+        cursor: nextCursor,
         cursorByTab,
       };
     }

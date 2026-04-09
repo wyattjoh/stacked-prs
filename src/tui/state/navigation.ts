@@ -4,24 +4,37 @@ function cellFor(grid: GridLayout, cursor: Cursor): GridCell | undefined {
   return grid.byBranch.get(cursor.branch);
 }
 
-/** Cells across all stacks, ordered by monotonic row index. */
-function orderedCells(grid: GridLayout): GridCell[] {
-  return [...grid.cells].sort((a, b) => a.row - b.row);
+/**
+ * Cells across all stacks, ordered by monotonic row index. When `stackName`
+ * is provided the walk is constrained to that single stack so the cursor
+ * cannot leak across stack boundaries while a specific-stack tab is active.
+ */
+function orderedCells(grid: GridLayout, stackName?: string): GridCell[] {
+  const source = stackName ? (grid.byStack.get(stackName) ?? []) : grid.cells;
+  return [...source].sort((a, b) => a.row - b.row);
 }
 
-export function moveDown(grid: GridLayout, cursor: Cursor): Cursor {
+export function moveDown(
+  grid: GridLayout,
+  cursor: Cursor,
+  stackName?: string,
+): Cursor {
   const cell = cellFor(grid, cursor);
   if (!cell) return cursor;
-  const ordered = orderedCells(grid);
+  const ordered = orderedCells(grid, stackName);
   const idx = ordered.findIndex((c) => c.branch === cell.branch);
   if (idx < 0 || idx + 1 >= ordered.length) return cursor;
   return { branch: ordered[idx + 1].branch };
 }
 
-export function moveUp(grid: GridLayout, cursor: Cursor): Cursor {
+export function moveUp(
+  grid: GridLayout,
+  cursor: Cursor,
+  stackName?: string,
+): Cursor {
   const cell = cellFor(grid, cursor);
   if (!cell) return cursor;
-  const ordered = orderedCells(grid);
+  const ordered = orderedCells(grid, stackName);
   const idx = ordered.findIndex((c) => c.branch === cell.branch);
   if (idx <= 0) return cursor;
   return { branch: ordered[idx - 1].branch };

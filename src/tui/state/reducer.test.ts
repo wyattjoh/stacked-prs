@@ -1,7 +1,8 @@
 import { describe, it as test } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { initialState, reducer } from "./reducer.ts";
-import type { Action, State } from "../types.ts";
+import type { Action, State, SyncStatus } from "../types.ts";
+import type { StackTree } from "../../lib/stack.ts";
 import { buildGrid } from "../lib/layout.ts";
 
 const emptyGrid = buildGrid([], new Map());
@@ -101,6 +102,51 @@ describe("reducer", () => {
     // Previous "all" cursor saved
     expect(s1.cursorByTab.get("all")?.branch).toBe("a1");
     expect(s1.activeTab).toEqual({ stack: "alpha" });
+  });
+
+  test("TAB_SWITCH into a specific stack snaps cursor to that stack", () => {
+    const linear = (name: string, branches: string[]): StackTree => {
+      // deno-lint-ignore no-explicit-any
+      const chain = (i: number): any => {
+        if (i >= branches.length) return [];
+        return [{
+          branch: branches[i],
+          stackName: name,
+          parent: i === 0 ? "main" : branches[i - 1],
+          children: chain(i + 1),
+        }];
+      };
+      return {
+        stackName: name,
+        baseBranch: "main",
+        mergeStrategy: "merge",
+        roots: chain(0),
+      };
+    };
+    const sync = new Map<string, SyncStatus>(
+      ["a1", "a2", "b1", "b2"].map((b) => [b, "up-to-date"]),
+    );
+    const grid = buildGrid(
+      [linear("alpha", ["a1", "a2"]), linear("beta", ["b1", "b2"])],
+      sync,
+    );
+    // Cursor lives in "alpha" while we switch to tab for "beta" — it should
+    // snap to beta's first cell instead of staying on a1.
+    const s0 = makeState({
+      grid,
+      cursor: { branch: "a1" },
+      activeTab: "all",
+    });
+    const s1 = reducer(s0, { type: "TAB_SWITCH", tab: { stack: "beta" } });
+    expect(s1.cursor?.branch).toBe("b1");
+
+    // Switching back to "all" restores the saved cursor on "all".
+    const s2 = reducer(s1, { type: "TAB_SWITCH", tab: "all" });
+    expect(s2.cursor?.branch).toBe("a1");
+
+    // Re-entering "beta" restores the per-tab cursor (still b1).
+    const s3 = reducer(s2, { type: "TAB_SWITCH", tab: { stack: "beta" } });
+    expect(s3.cursor?.branch).toBe("b1");
   });
 
   test("COMMITS_LOADED stores commits for branch", () => {

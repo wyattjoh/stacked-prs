@@ -101,4 +101,19 @@ describe("navigation", () => {
     const r = moveToStack(grid, "beta", c);
     expect(r?.branch).toBe("b1");
   });
+
+  test("moveDown scoped to a stack stops at the stack's last branch", () => {
+    const c: Cursor = { branch: "a3" };
+    expect(moveDown(grid, c, "alpha")).toEqual(c);
+  });
+
+  test("moveUp scoped to a stack stops at the stack's first branch", () => {
+    const c: Cursor = { branch: "b1" };
+    expect(moveUp(grid, c, "beta")).toEqual(c);
+  });
+
+  test("moveDown scoped still walks inside the stack", () => {
+    const c: Cursor = { branch: "a1" };
+    expect(moveDown(grid, c, "alpha").branch).toBe("a2");
+  });
 });

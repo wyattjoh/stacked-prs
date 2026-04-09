@@ -396,14 +396,25 @@ export function App(props: AppProps): React.ReactElement {
     const grid = state.grid;
     const cursor = state.cursor;
 
+    // When a specific stack tab is active, constrain vertical navigation so
+    // j/k/↑/↓ cannot walk out of the visible stack.
+    const scopedStack = state.activeTab === "all"
+      ? undefined
+      : state.activeTab.stack;
     if (key.leftArrow) {
       dispatch({ type: "CURSOR_SET", cursor: moveLeft(grid, cursor) });
     } else if (key.rightArrow) {
       dispatch({ type: "CURSOR_SET", cursor: moveRight(grid, cursor) });
     } else if (key.upArrow) {
-      dispatch({ type: "CURSOR_SET", cursor: moveUp(grid, cursor) });
+      dispatch({
+        type: "CURSOR_SET",
+        cursor: moveUp(grid, cursor, scopedStack),
+      });
     } else if (key.downArrow) {
-      dispatch({ type: "CURSOR_SET", cursor: moveDown(grid, cursor) });
+      dispatch({
+        type: "CURSOR_SET",
+        cursor: moveDown(grid, cursor, scopedStack),
+      });
     } else if (input === "g") {
       const c = grid.byBranch.get(cursor.branch);
       if (c) {
