@@ -351,58 +351,31 @@ multiple roots.
 
 **Preferred path:** press `L` in the TUI. It plans and executes the full land
 automatically. Use the Claude-orchestrated steps below only when the TUI is not
-available or a fully manual walkthrough is needed.
+available.
 
-Two supported shapes are handled by `executeLand` (in `src/commands/land.ts`):
+Two supported shapes are handled by `executeLandFromCli` (in
+`src/commands/land.ts`):
 
 - **root-merged:** exactly one root PR is merged, no other branch is merged.
   Remaining branches are rebased onto the base branch and force-pushed.
 - **all-merged:** every PR in the stack is merged. No rebase or push is needed;
   all branches are deleted and config is removed.
 
-**Claude-orchestrated steps (root-merged):**
+**Claude-orchestrated steps:**
 
-1. Run `cli.ts status --json` and read `prStateByBranch` to identify merged
-   branches.
-2. **No-op check:** if no branch has a merged PR, report and stop.
-3. Run `cli.ts restack --dry-run --json` (if applicable) to verify the tree.
-4. Run `cli.ts nav --dry-run` to preview nav comment changes.
-5. Determine repo owner/name via `gh repo view --json owner,name`.
-6. **Present full cleanup plan:**
-   - Linked worktrees to remove before execution (if any)
-   - Per-branch rebase:
-     `git rebase --rebase-merges --onto <new-target> <old-parent-sha> <branch>`
-     for each remaining branch in topological order
-   - Force-push each remaining branch:
-     `git push --force-with-lease=refs/heads/<branch>:<pre-lease-sha> origin <branch>`
-   - PR retargets: `gh pr edit <number> --base <new-base>` (plus
-     `gh pr ready <number>` only if the PR is currently a draft)
-   - Nav comment refresh via `cli.ts nav`
-   - Config cleanup (library call, not a CLI command): reparents children of the
-     merged root to the base branch; auto-splits if multiple roots result
-   - Branch deletion: `git branch -D <merged-root>` and any auto-merged branches
-     (HEAD is moved to the original ref before deletion)
-7. **Wait for confirmation** (required before any `git push`, `git rebase`,
-   `git branch -D`, or `gh` write call).
-8. Run `git fetch origin <base-branch>`.
-9. Remove any listed linked worktrees: `git worktree remove <path>`.
-10. For each rebase step in topological order:
-    - `git checkout <branch>`
-    - `git rebase --rebase-merges --onto <new-target> <old-parent-sha> <branch>`
-11. Force-push remaining branches leaves-first.
-12. Retarget and optionally un-draft PRs.
-13. Refresh nav comments via `cli.ts nav`.
-14. Move HEAD to the original ref, then `git branch -D <merged-root>`.
+1. Run `cli.ts land --stack-name=<name> --json`
+2. If `ok: true`: report landed branches and any splits shown in the output.
+3. If `error: "conflict"`:
+   - Show the user the `conflictFiles` list and `recovery.resolve` command.
+   - After the user resolves conflicts, run `recovery.resume` (the `--resume`
+     command).
+   - Repeat from step 1 until `ok: true`.
+4. If `error: "blocked"`: report the preflight blockers and ask the user to
+   resolve them.
 
-**Claude-orchestrated steps (all-merged):**
-
-1-7. Same as root-merged steps 1-7 (plan, confirm).\
-8\. Remove any listed linked worktrees.\
-9\. Move HEAD to the original ref.\
-10\. Delete every branch in the stack: `git branch -D <branch>` (leaves-first).\
-11\. Remove stack git config keys (`stack.<name>.merge-strategy`, `base-branch`,
-`resume-state`); remove `branch.<name>.stack-name` and
-`branch.<name>.stack-parent` for every branch.
+Read-only operations (`cli.ts status`, `cli.ts land --dry-run --json`) run
+without confirmation. The `cli.ts land` command itself requires no separate
+confirmation step -- the plan is built and executed in one call.
 
 ### `clean`
 
@@ -549,6 +522,7 @@ command.
 - `deno run ... cli.ts verify-refs`
 - `deno run ... cli.ts restack --dry-run` (with or without `--json`)
 - `deno run ... cli.ts clean --json` (report-only; `--confirm` mutates)
+- `deno run ... cli.ts land --dry-run` (with or without `--json`)
 
 **If the plan changes mid-execution** (e.g., rebase conflicts), pause and
 re-present the remaining operations before continuing.
@@ -645,6 +619,20 @@ deno run --allow-run=git,gh --allow-env --allow-read ${CLAUDE_PLUGIN_ROOT}/src/c
 Computes the full submit plan for a stack: which PRs need creating, which need
 base updates, and what nav comment changes are needed. Iterates nodes in DFS
 order. Returns JSON with per-branch actions and an `isNoOp` flag.
+
+### `land`
+
+```bash
+deno run --allow-run=git,gh --allow-env --allow-read ${CLAUDE_PLUGIN_ROOT}/src/cli.ts land \
+  [--stack-name=<name>] [--dry-run] [--json] [--resume]
+```
+
+Lands a merged PR and cleans up the stack. Builds the land plan, executes
+rebases and force-pushes (root-merged case) or deletes all branches (all-merged
+case), and auto-splits the stack when multiple roots result. Pass `--dry-run` to
+print the plan without executing. Pass `--json` for structured output. Pass
+`--resume` to continue after resolving a rebase conflict. Exits with code 1 on
+failure (conflict or blocked).
 
 ### `clean`
 

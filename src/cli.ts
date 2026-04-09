@@ -9,6 +9,12 @@ import { verifyRefs } from "./commands/verify-refs.ts";
 import { discoverChain } from "./commands/import-discover.ts";
 import { computeSubmitPlan } from "./commands/submit-plan.ts";
 import { applyClean, detectStaleConfig } from "./commands/clean.ts";
+import {
+  executeLandFromCli,
+  type LandCliResult,
+  planLand,
+} from "./commands/land.ts";
+import { getAllNodes } from "./lib/stack.ts";
 import { assignColors, detectTheme, readColorOverrides } from "./lib/colors.ts";
 import { ansiColor } from "./lib/ansi.ts";
 
@@ -486,5 +492,135 @@ await new Command()
         console.log(`  ${key}`);
       }
     }
+  })
+  // --- land ---
+  .command("land", "Land a merged PR and clean up the stack")
+  .option(
+    "--stack-name <name:string>",
+    "Stack name (auto-detected from current branch)",
+  )
+  .option("--dry-run", "Plan and display what would happen without executing")
+  .option("--json", "Output as JSON")
+  .option("--resume", "Resume after resolving a rebase conflict")
+  .action(async (options) => {
+    const stackName = await resolveStackName(dir, options.stackName);
+
+    const tree = await getStackTree(dir, stackName);
+    const nodes = getAllNodes(tree);
+
+    const repoInfo = await gh("repo", "view", "--json", "owner,name");
+    const { owner, name: repoName } = JSON.parse(repoInfo) as {
+      owner: { login: string };
+      name: string;
+    };
+
+    const prStateByBranch = new Map<
+      string,
+      "OPEN" | "DRAFT" | "MERGED" | "CLOSED" | "NONE"
+    >();
+    const prInfoByBranch = new Map<
+      string,
+      import("./tui/types.ts").PrInfo
+    >();
+
+    await Promise.all(
+      nodes.map(async (node) => {
+        const result = await gh(
+          "pr",
+          "list",
+          "--head",
+          node.branch,
+          "--repo",
+          `${owner}/${repoName}`,
+          "--state",
+          "all",
+          "--json",
+          "number,url,state,isDraft,createdAt",
+        );
+        const prs = JSON.parse(result) as import("./tui/types.ts").PrInfo[];
+        const best = prs.length > 0 ? prs[0] : null;
+        if (best) {
+          const state = best.state.toUpperCase() as
+            | "OPEN"
+            | "DRAFT"
+            | "MERGED"
+            | "CLOSED";
+          prStateByBranch.set(node.branch, state);
+          prInfoByBranch.set(node.branch, best);
+        } else {
+          prStateByBranch.set(node.branch, "NONE");
+        }
+      }),
+    );
+
+    if (options.dryRun) {
+      const plan = await planLand(
+        dir,
+        stackName,
+        prStateByBranch,
+        prInfoByBranch,
+      );
+      if (options.json) {
+        console.log(JSON.stringify(plan, null, 2));
+      } else {
+        console.log("Land plan for stack:", stackName);
+        console.log("Case:", plan.case);
+        console.log(
+          "Merged branches:",
+          plan.mergedBranches.join(", ") || "none",
+        );
+        console.log(
+          "Branches to rebase:",
+          plan.rebaseSteps.map((s) => s.branch).join(", ") || "none",
+        );
+        console.log(
+          "Branches to delete:",
+          plan.branchesToDelete.join(", ") || "none",
+        );
+      }
+      return;
+    }
+
+    const result: LandCliResult = await executeLandFromCli(
+      dir,
+      stackName,
+      prStateByBranch,
+      prInfoByBranch,
+      { resume: options.resume },
+    );
+
+    if (options.json) {
+      console.log(JSON.stringify(result, null, 2));
+    } else {
+      if (result.ok) {
+        console.log(`Stack "${stackName}" landed successfully.`);
+        if (result.result?.split && result.result.split.length > 0) {
+          console.log(
+            "Split into stacks:",
+            result.result.split.map((s) => s.stackName).join(", "),
+          );
+        }
+      } else if (result.error === "conflict") {
+        const conflictBranch =
+          result.conflictedAt && "branch" in result.conflictedAt
+            ? result.conflictedAt.branch
+            : "unknown";
+        console.error(`\nConflict during rebase of ${conflictBranch}`);
+        if (result.conflictFiles && result.conflictFiles.length > 0) {
+          console.error("\nConflicting files:");
+          for (const f of result.conflictFiles) {
+            console.error(`  ${f}`);
+          }
+        }
+        console.error("\nTo resolve:");
+        console.error(`  ${result.recovery?.resolve}`);
+        console.error(`  Then: ${result.recovery?.resume}`);
+        console.error(`  Or abort: ${result.recovery?.abort}`);
+      } else {
+        console.error("Land failed:", result.error);
+      }
+    }
+
+    if (!result.ok) Deno.exit(1);
   })
   .parse(Deno.args);
