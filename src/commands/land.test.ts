@@ -550,6 +550,68 @@ describe("executeLand case A conflict rollback", () => {
   });
 });
 
+describe("executeLand case A push phase", () => {
+  it("force-with-leases leaves-first", async () => {
+    const env = await createRepoWithOrigin();
+    try {
+      await addBranch(env.dir, "feat/a", "main");
+      await runGit(env.dir, "push", "origin", "feat/a");
+      await addBranch(env.dir, "feat/b", "feat/a");
+      await runGit(env.dir, "push", "origin", "feat/b");
+      await addBranch(env.dir, "feat/c", "feat/b");
+      await runGit(env.dir, "push", "origin", "feat/c");
+      await initStack(env, "s", [
+        ["feat/a", "main"],
+        ["feat/b", "feat/a"],
+        ["feat/c", "feat/b"],
+      ]);
+
+      // Merge feat/a into main on origin.
+      await runGit(env.dir, "checkout", "main");
+      await runGit(env.dir, "merge", "feat/a", "--no-ff", "-m", "Merge feat/a");
+      await runGit(env.dir, "push", "origin", "main");
+      await runGit(env.dir, "fetch", "origin", "main");
+
+      const prStates: PrStateByBranch = new Map([
+        ["feat/a", "MERGED"],
+        ["feat/b", "OPEN"],
+        ["feat/c", "OPEN"],
+      ]);
+      const prInfo = new Map<string, PrInfo>([
+        ["feat/b", { number: 20, url: "", state: "OPEN", isDraft: true }],
+        ["feat/c", { number: 30, url: "", state: "OPEN", isDraft: true }],
+      ]);
+
+      const mockDir = await Deno.makeTempDir();
+      setMockDir(mockDir);
+
+      const events: LandProgressEvent[] = [];
+      try {
+        await executeLand(
+          env.dir,
+          await planLand(env.dir, "s", prStates, prInfo),
+          {
+            onProgress: (e) => events.push(e),
+            freshPrStates: () => Promise.resolve(prStates),
+          },
+        );
+      } catch {
+        // later phases still unimplemented
+      } finally {
+        setMockDir(undefined);
+      }
+
+      const pushOks = events
+        .filter((e) => e.step.kind === "push" && e.status === "ok")
+        .map((e) => (e.step as { kind: "push"; branch: string }).branch);
+      expect(pushOks).toEqual(["feat/c", "feat/b"]);
+    } finally {
+      await env.cleanup();
+      setMockDir(undefined);
+    }
+  });
+});
+
 describe("executeLand case A rebase phase", () => {
   it("rebases child onto origin/main for merge-strategy root-merged", async () => {
     const env = await createRepoWithOrigin();

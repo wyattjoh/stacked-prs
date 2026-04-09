@@ -735,6 +735,88 @@ async function executeCaseARebases(
   }
 }
 
+async function rollbackRemotePushes(
+  dir: string,
+  plan: LandPlan,
+  state: ExecState,
+): Promise<void> {
+  const snapByBranch = new Map(plan.snapshot.map((s) => [s.branch, s]));
+  for (const branch of state.pushed) {
+    const snap = snapByBranch.get(branch);
+    if (!snap) continue;
+
+    const { code: headCode, stdout: postSha } = await runGitCommand(
+      dir,
+      "rev-parse",
+      branch,
+    );
+    if (headCode !== 0) {
+      state.rollback.remoteFailed.push({
+        branch,
+        reason: "could not rev-parse current tip",
+      });
+      continue;
+    }
+
+    const { code, stderr } = await runGitCommand(
+      dir,
+      "push",
+      `--force-with-lease=refs/heads/${branch}:${postSha}`,
+      "origin",
+      `${snap.tipSha}:refs/heads/${branch}`,
+    );
+    if (code === 0) {
+      state.rollback.remoteRestored.push(branch);
+    } else {
+      state.rollback.remoteFailed.push({
+        branch,
+        reason: `force-with-lease rollback failed: ${stderr.trim()}`,
+      });
+    }
+  }
+}
+
+async function executeCaseAPushes(
+  dir: string,
+  plan: LandPlan,
+  hooks: LandHooks,
+  state: ExecState,
+): Promise<void> {
+  for (const step of plan.pushSteps) {
+    if (state.autoMerged.has(step.branch)) {
+      emit(
+        hooks,
+        { kind: "push", branch: step.branch },
+        "skipped",
+        "auto-merged",
+      );
+      continue;
+    }
+
+    emit(hooks, { kind: "push", branch: step.branch }, "running");
+    const { code, stderr } = await runGitCommand(
+      dir,
+      "push",
+      `--force-with-lease=refs/heads/${step.branch}:${step.preLeaseSha}`,
+      "origin",
+      step.branch,
+    );
+    if (code !== 0) {
+      emit(hooks, { kind: "push", branch: step.branch }, "failed", stderr);
+      await rollbackRemotePushes(dir, plan, state);
+      await rollbackLocalRebases(dir, plan, state);
+      throw new LandError(
+        `Push of ${step.branch} failed: ${stderr}`,
+        plan,
+        state.rollback,
+        { kind: "push", branch: step.branch },
+      );
+    }
+    state.pushed.add(step.branch);
+    emit(hooks, { kind: "push", branch: step.branch }, "ok");
+  }
+}
+
 async function executeCaseA(
   dir: string,
   plan: LandPlan,
@@ -758,9 +840,11 @@ async function executeCaseA(
 
   await executeCaseARebases(dir, plan, hooks, state);
 
-  // Push, PR update, nav, config-cleanup, delete, restore-head phases
-  // follow in Tasks 18-23.
-  throw new Error("executeLand case A: post-rebase phases not yet implemented");
+  await executeCaseAPushes(dir, plan, hooks, state);
+
+  // PR updates, nav, config-cleanup, delete, restore-head phases
+  // follow in Tasks 19-23.
+  throw new Error("executeLand case A: post-push phases not yet implemented");
 }
 
 export async function executeLand(
