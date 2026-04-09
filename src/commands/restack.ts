@@ -533,41 +533,17 @@ export async function executeRestack(
   stackName: string,
   opts: RestackOptionsV2,
 ): Promise<RestackResultV2> {
-  const tree = await getStackTree(dir, stackName);
   const plan = await planRestack(dir, stackName, opts);
   const executed: RebasePlan[] = [];
-  const conflictedSubtrees = new Set<string>();
   let firstFailure: "conflict" | "other" | undefined;
   let recovery: RestackResultV2["recovery"] | undefined;
-
-  // Build an ancestor lookup: for each branch, the set of its ancestor branch
-  // names within the stack. This lets us check "is this branch inside a
-  // subtree rooted at a conflicted branch".
-  const ancestorsOf = new Map<string, Set<string>>();
-  const fillAncestors = (node: StackNode, trail: string[]): void => {
-    ancestorsOf.set(node.branch, new Set(trail));
-    for (const child of node.children) {
-      fillAncestors(child, [...trail, node.branch]);
-    }
-  };
-  for (const root of tree.roots) fillAncestors(root, []);
-
-  const isInsideConflictedSubtree = (branch: string): boolean => {
-    const ancestors = ancestorsOf.get(branch) ?? new Set();
-    for (const a of ancestors) {
-      if (conflictedSubtrees.has(a)) return true;
-    }
-    return false;
-  };
+  let conflictedAt: string | undefined;
 
   for (const entry of plan.rebases) {
+    if (conflictedAt !== undefined) break;
+
     if (entry.status === "skipped-clean") {
       executed.push(entry);
-      continue;
-    }
-
-    if (isInsideConflictedSubtree(entry.branch)) {
-      executed.push({ ...entry, status: "skipped-due-to-conflict" });
       continue;
     }
 
@@ -606,21 +582,28 @@ export async function executeRestack(
       stderr: result.stderr,
       conflictFiles: result.conflictFiles,
     });
-    conflictedSubtrees.add(entry.branch);
+    conflictedAt = entry.branch;
+    firstFailure = wasConflict ? "conflict" : "other";
+    recovery = {
+      resolve: "git add <conflicting files> && git rebase --continue",
+      abort: "git rebase --abort",
+      resume:
+        `deno run --allow-run=git,gh --allow-env --allow-read src/cli.ts restack --stack-name=${stackName} --resume`,
+    };
+    // Intentionally do NOT abort the rebase. Leave the working tree in its
+    // conflicted state so the user can resolve and `git rebase --continue`.
+    // Resume (Task 6) will finish the in-progress rebase and continue walking
+    // remaining plan entries.
+  }
 
-    // Abort the in-progress rebase so independent sibling subtrees can still
-    // be processed. Resume state persistence (Task 6) will re-plan this
-    // branch's rebase on the next `--resume` invocation.
-    await runGitCommand(dir, "rebase", "--abort");
-
-    if (firstFailure === undefined) {
-      firstFailure = wasConflict ? "conflict" : "other";
-      recovery = {
-        resolve: "git add <conflicting files> && git rebase --continue",
-        abort: "git rebase --abort",
-        resume:
-          `deno run --allow-run=git,gh --allow-env --allow-read src/cli.ts restack --stack-name=${stackName} --resume`,
-      };
+  // Mark every plan entry we didn't touch as skipped-due-to-conflict so the
+  // caller has a complete picture of what still needs to run on resume.
+  if (conflictedAt !== undefined) {
+    const processed = new Set(executed.map((e) => e.branch));
+    for (const entry of plan.rebases) {
+      if (!processed.has(entry.branch)) {
+        executed.push({ ...entry, status: "skipped-due-to-conflict" });
+      }
     }
   }
 

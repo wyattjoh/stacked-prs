@@ -581,7 +581,7 @@ describe("executeRestack (conflict handling)", () => {
     await repo.cleanup();
   });
 
-  test("conflict on one sibling: other sibling still rebases", async () => {
+  test("conflict stops the walk; siblings are deferred to resume", async () => {
     // main -> root -> { leftConflict, rightClean }
     // Add a commit on main that touches the same file as leftConflict.
     await runGit(repo.dir, "checkout", "main");
@@ -614,6 +614,8 @@ describe("executeRestack (conflict handling)", () => {
     await runGit(repo.dir, "push", "origin", "main");
     await runGit(repo.dir, "reset", "--hard", "HEAD~1");
 
+    const rightCleanBefore = await runGit(repo.dir, "rev-parse", "rightClean");
+
     const result = await executeRestack(repo.dir, "test", {});
 
     expect(result.ok).toBe(false);
@@ -623,7 +625,14 @@ describe("executeRestack (conflict handling)", () => {
     expect(byBranch.get("root")!.status).toBe("rebased");
     expect(byBranch.get("leftConflict")!.status).toBe("conflict");
     expect(byBranch.get("leftChild")!.status).toBe("skipped-due-to-conflict");
-    expect(byBranch.get("rightClean")!.status).toBe("rebased");
+    // rightClean is independent of the conflicted subtree but the walk stops
+    // at the first conflict so the mid-rebase state stays visible and
+    // `git rebase --continue` keeps working.
+    expect(byBranch.get("rightClean")!.status).toBe("skipped-due-to-conflict");
+
+    // rightClean must not have been touched.
+    const rightCleanAfter = await runGit(repo.dir, "rev-parse", "rightClean");
+    expect(rightCleanAfter).toBe(rightCleanBefore);
 
     expect(result.recovery).toBeDefined();
     expect(result.recovery!.resolve).toContain("rebase --continue");
