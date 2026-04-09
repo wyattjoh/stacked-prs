@@ -125,3 +125,15 @@ export class UnsupportedLandShape extends Error {
 // Suppress unused-import warnings at the module boundary. These types are
 // re-used by land-related helpers in later tasks (preflight, plan, execute).
 export type { DirtyWorktree, NavAction, PrInfo, SplitInfo };
+
+import { runGitCommand } from "../lib/stack.ts";
+
+export async function isShallowRepository(dir: string): Promise<boolean> {
+  const { code, stdout } = await runGitCommand(
+    dir,
+    "rev-parse",
+    "--is-shallow-repository",
+  );
+  if (code !== 0) return false;
+  return stdout === "true";
+}
