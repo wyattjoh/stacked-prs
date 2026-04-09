@@ -491,3 +491,91 @@ export async function planRestack(
 
   return { ok: true, rebases };
 }
+
+async function rebaseBranch(
+  dir: string,
+  branch: string,
+  oldParentSha: string,
+  newTarget: string,
+): Promise<{ ok: boolean; stderr?: string; conflictFiles?: string[] }> {
+  const checkout = await runGitCommand(dir, "checkout", branch);
+  if (checkout.code !== 0) {
+    return { ok: false, stderr: checkout.stderr };
+  }
+
+  const rebase = await runGitCommand(
+    dir,
+    "rebase",
+    "--onto",
+    newTarget,
+    oldParentSha,
+    branch,
+  );
+  if (rebase.code === 0) {
+    return { ok: true };
+  }
+
+  const conflictFiles = await getConflictFiles(dir);
+  return {
+    ok: false,
+    stderr: rebase.stderr || rebase.stdout,
+    conflictFiles: conflictFiles.length > 0 ? conflictFiles : undefined,
+  };
+}
+
+/**
+ * Execute a full restack. Currently handles only clean cases; conflict
+ * handling is added in Task 5.
+ */
+export async function executeRestack(
+  dir: string,
+  stackName: string,
+  opts: RestackOptionsV2,
+): Promise<RestackResultV2> {
+  const plan = await planRestack(dir, stackName, opts);
+  const executed: RebasePlan[] = [];
+
+  for (const entry of plan.rebases) {
+    if (entry.status === "skipped-clean") {
+      executed.push(entry);
+      continue;
+    }
+
+    // entry.status === "planned"; resolve the current target SHA (parent
+    // may have just been rewritten for non-root nodes) and re-check ancestry.
+    // Unlike the planner, execute mode does NOT fall back to the local base
+    // if `origin/<base>` fails to resolve — production always fetches first,
+    // and we want to fail loudly if the ref is missing.
+    const targetSha = await revParse(dir, entry.newTarget);
+    const branchSha = await revParse(dir, entry.branch);
+    const isAncestorResult = await runGitCommand(
+      dir,
+      "merge-base",
+      "--is-ancestor",
+      targetSha,
+      branchSha,
+    );
+    if (isAncestorResult.code === 0) {
+      executed.push({ ...entry, status: "skipped-clean" });
+      continue;
+    }
+
+    const result = await rebaseBranch(
+      dir,
+      entry.branch,
+      entry.oldParentSha,
+      entry.newTarget,
+    );
+    if (result.ok) {
+      executed.push({ ...entry, status: "rebased" });
+    } else {
+      // Conflict handling in Task 5; for now, throw so happy-path tests
+      // surface unexpected conflicts loudly.
+      throw new Error(
+        `Unexpected rebase failure on ${entry.branch}: ${result.stderr}`,
+      );
+    }
+  }
+
+  return { ok: true, rebases: executed };
+}

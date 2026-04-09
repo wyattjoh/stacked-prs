@@ -15,6 +15,7 @@ import {
 } from "../lib/stack.ts";
 import {
   decomposeSegments,
+  executeRestack,
   planRestack,
   restack,
   topologicalOrder,
@@ -455,5 +456,114 @@ describe("planRestack (dry-run)", () => {
 
     expect(aAfter).toBe(aBefore);
     expect(mainAfter).toBe(mainBefore);
+  });
+});
+
+/**
+ * Set up a local "origin" remote pointing at a bare clone of this repo so
+ * the restack algorithm can resolve `origin/main`. Called by any test that
+ * exercises the origin/<base> resolution path.
+ */
+async function setupFakeOrigin(dir: string): Promise<void> {
+  const bareDir = await Deno.makeTempDir({ prefix: "stacked-prs-origin-" });
+  await runGit(dir, "clone", "--bare", dir, bareDir);
+  await runGit(dir, "remote", "add", "origin", bareDir);
+  await runGit(dir, "fetch", "origin");
+}
+
+describe("executeRestack (clean cases)", () => {
+  let repo: TestRepo;
+
+  beforeEach(async () => {
+    repo = await createTestRepo();
+  });
+
+  afterEach(async () => {
+    await repo.cleanup();
+  });
+
+  test("linear chain already synced is a no-op", async () => {
+    await addBranch(repo.dir, "a", "main");
+    await addBranch(repo.dir, "b", "a");
+    await setBaseBranch(repo.dir, "test", "main");
+    await setStackNode(repo.dir, "a", "test", "main");
+    await setStackNode(repo.dir, "b", "test", "a");
+
+    await setupFakeOrigin(repo.dir);
+
+    const bBefore = await runGit(repo.dir, "rev-parse", "b");
+
+    const result = await executeRestack(repo.dir, "test", {});
+
+    const bAfter = await runGit(repo.dir, "rev-parse", "b");
+
+    expect(result.ok).toBe(true);
+    expect(bAfter).toBe(bBefore);
+    expect(result.rebases.every((r) => r.status === "skipped-clean")).toBe(
+      true,
+    );
+  });
+
+  test("base advanced: all branches rebased, commits preserved", async () => {
+    await addBranch(repo.dir, "a", "main");
+    await addBranch(repo.dir, "b", "a");
+    await setBaseBranch(repo.dir, "test", "main");
+    await setStackNode(repo.dir, "a", "test", "main");
+    await setStackNode(repo.dir, "b", "test", "a");
+
+    // Simulate `origin/main` advancing by creating an `origin` remote.
+    await setupFakeOrigin(repo.dir);
+    await runGit(repo.dir, "checkout", "main");
+    await commitFile(repo.dir, "main-extra.txt", "extra\n");
+    await runGit(repo.dir, "push", "origin", "main");
+    // Rewind local main so origin/main is ahead.
+    await runGit(repo.dir, "reset", "--hard", "HEAD~1");
+
+    const result = await executeRestack(repo.dir, "test", {});
+
+    expect(result.ok).toBe(true);
+    expect(result.rebases.map((r) => r.status))
+      .toEqual(["rebased", "rebased"]);
+
+    // Both branches should contain the new main-extra.txt commit.
+    const aLog = await runGit(repo.dir, "log", "--format=%s", "a");
+    const bLog = await runGit(repo.dir, "log", "--format=%s", "b");
+    expect(aLog).toContain("add main-extra.txt");
+    expect(bLog).toContain("add main-extra.txt");
+    expect(bLog).toContain("add a.txt");
+    expect(bLog).toContain("add b.txt");
+  });
+
+  test("regression: middle-branch drift is propagated upward", async () => {
+    // main -> a -> b -> c, then commit directly to a without propagating.
+    // Old segment-based restack would drop the commit; per-branch must keep it.
+    await addBranch(repo.dir, "a", "main");
+    await addBranch(repo.dir, "b", "a");
+    await addBranch(repo.dir, "c", "b");
+    await setBaseBranch(repo.dir, "test", "main");
+    await setStackNode(repo.dir, "a", "test", "main");
+    await setStackNode(repo.dir, "b", "test", "a");
+    await setStackNode(repo.dir, "c", "test", "b");
+
+    // Add an unpropagated commit on a
+    await runGit(repo.dir, "checkout", "a");
+    await commitFile(repo.dir, "a-drift.txt", "drift\n");
+
+    await setupFakeOrigin(repo.dir);
+    await runGit(repo.dir, "checkout", "main");
+    await runGit(repo.dir, "push", "origin", "main");
+
+    const result = await executeRestack(repo.dir, "test", {});
+
+    expect(result.ok).toBe(true);
+
+    // The drift commit must end up in both b and c's history.
+    const bLog = await runGit(repo.dir, "log", "--format=%s", "b");
+    const cLog = await runGit(repo.dir, "log", "--format=%s", "c");
+    expect(bLog).toContain("add a-drift.txt");
+    expect(cLog).toContain("add a-drift.txt");
+    // And must not be duplicated.
+    expect(bLog.match(/add a-drift\.txt/g)).toHaveLength(1);
+    expect(cLog.match(/add a-drift\.txt/g)).toHaveLength(1);
   });
 });
