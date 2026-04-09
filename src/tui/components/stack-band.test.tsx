@@ -1,5 +1,5 @@
 import React from "react";
-import { describe, it as test } from "@std/testing/bdd";
+import { describe, it, it as test } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { render } from "ink-testing-library";
 import type { GridCell } from "../types.ts";
@@ -26,6 +26,54 @@ function cell(
 }
 
 const emptyPrefix = [{ text: "" }];
+
+describe("StackBand merged cell rendering", () => {
+  it("renders a merged cell with dimColor and no connector prefix", () => {
+    const mergedCell: GridCell = {
+      branch: "feature/a",
+      stackName: "my-stack",
+      row: 0,
+      depth: 0,
+      isLastSibling: true,
+      hasChildren: false,
+      ancestorRails: [],
+      parent: null,
+      firstChild: null,
+      connectorStyle: "solid",
+      merged: true,
+    };
+    const liveCell: GridCell = {
+      branch: "feature/b",
+      stackName: "my-stack",
+      row: 2,
+      depth: 0,
+      isLastSibling: true,
+      hasChildren: false,
+      ancestorRails: [],
+      parent: null,
+      firstChild: null,
+      connectorStyle: "solid",
+    };
+
+    const { unmount, lastFrame } = render(
+      <StackBand
+        stackName="my-stack"
+        mergeStrategy={undefined}
+        color="cyan"
+        cells={[mergedCell, liveCell]}
+        focusedBranch={null}
+        prData={new Map()}
+        headerPrefix={[]}
+        contentPrefix={[]}
+      />,
+    );
+
+    const frame = lastFrame() ?? "";
+    expect(frame).toContain("feature/a");
+    expect(frame).toContain("feature/b");
+    unmount();
+  });
+});
 
 describe("StackBand", () => {
   test("renders header with stack name and merge strategy", () => {

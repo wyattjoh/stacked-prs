@@ -121,6 +121,9 @@ export function StackBand(props: StackBandProps): React.ReactElement {
     : `Stack: ${props.stackName}`;
 
   const sorted = [...props.cells].sort((a, b) => a.row - b.row);
+  const mergedCells = sorted.filter((c) => c.merged);
+  const liveCells = sorted.filter((c) => !c.merged);
+  const hasMerged = mergedCells.length > 0;
 
   return (
     <Box flexDirection="column" flexShrink={0}>
@@ -129,7 +132,44 @@ export function StackBand(props: StackBandProps): React.ReactElement {
         <TrunkSegments segs={props.headerPrefix} />
         <Text color={props.color} bold>{header}</Text>
       </Box>
-      {sorted.map((cell, i) => {
+
+      {/* Gap row after header when there are merged cells */}
+      {hasMerged && (
+        <Box flexDirection="row" flexShrink={0}>
+          <TrunkSegments segs={props.contentPrefix} />
+        </Box>
+      )}
+
+      {/* Merged cells: dimmed, no connector prefix */}
+      {mergedCells.map((cell) => {
+        const cellState = props.prData.get(cell.branch);
+        const info = infoLine(cellState);
+        const prColor = infoColor(cellState);
+        return (
+          <Box key={cell.branch} flexDirection="column" flexShrink={0}>
+            <Box flexDirection="row" flexShrink={0}>
+              <TrunkSegments segs={props.contentPrefix} />
+              <Text dimColor>{cell.branch}</Text>
+            </Box>
+            <Box flexDirection="row" flexShrink={0}>
+              <TrunkSegments segs={props.contentPrefix} />
+              <Text color={prColor} dimColor>
+                {info}
+              </Text>
+            </Box>
+          </Box>
+        );
+      })}
+
+      {/* Gap row between merged section and live cells */}
+      {hasMerged && liveCells.length > 0 && (
+        <Box flexDirection="row" flexShrink={0}>
+          <TrunkSegments segs={props.contentPrefix} />
+        </Box>
+      )}
+
+      {/* Live cells */}
+      {liveCells.map((cell, i) => {
         const top = topPrefix(cell);
         const bottom = bottomPrefix(cell);
         const cellState = props.prData.get(cell.branch);
@@ -137,7 +177,7 @@ export function StackBand(props: StackBandProps): React.ReactElement {
         const prColor = infoColor(cellState);
         const focused = props.focusedBranch === cell.branch;
         const nameStyle = focused ? { inverse: true } : {};
-        const railStr = i < sorted.length - 1 ? railPrefix(cell) : "";
+        const railStr = i < liveCells.length - 1 ? railPrefix(cell) : "";
         return (
           <Box key={cell.branch} flexDirection="column" flexShrink={0}>
             <Box flexDirection="row" flexShrink={0}>
@@ -156,7 +196,7 @@ export function StackBand(props: StackBandProps): React.ReactElement {
                 {info}
               </Text>
             </Box>
-            {i < sorted.length - 1 && (
+            {i < liveCells.length - 1 && (
               <Box flexDirection="row" flexShrink={0}>
                 <TrunkSegments segs={props.contentPrefix} />
                 {railStr.length > 0 && (
