@@ -524,16 +524,41 @@ async function rebaseBranch(
 }
 
 /**
- * Execute a full restack. Currently handles only clean cases; conflict
- * handling is added in Task 5.
+ * Execute a full restack. Handles conflict isolation: when one branch hits a
+ * rebase conflict, its descendants are marked skipped-due-to-conflict but
+ * independent sibling subtrees continue to rebase.
  */
 export async function executeRestack(
   dir: string,
   stackName: string,
   opts: RestackOptionsV2,
 ): Promise<RestackResultV2> {
+  const tree = await getStackTree(dir, stackName);
   const plan = await planRestack(dir, stackName, opts);
   const executed: RebasePlan[] = [];
+  const conflictedSubtrees = new Set<string>();
+  let firstFailure: "conflict" | "other" | undefined;
+  let recovery: RestackResultV2["recovery"] | undefined;
+
+  // Build an ancestor lookup: for each branch, the set of its ancestor branch
+  // names within the stack. This lets us check "is this branch inside a
+  // subtree rooted at a conflicted branch".
+  const ancestorsOf = new Map<string, Set<string>>();
+  const fillAncestors = (node: StackNode, trail: string[]): void => {
+    ancestorsOf.set(node.branch, new Set(trail));
+    for (const child of node.children) {
+      fillAncestors(child, [...trail, node.branch]);
+    }
+  };
+  for (const root of tree.roots) fillAncestors(root, []);
+
+  const isInsideConflictedSubtree = (branch: string): boolean => {
+    const ancestors = ancestorsOf.get(branch) ?? new Set();
+    for (const a of ancestors) {
+      if (conflictedSubtrees.has(a)) return true;
+    }
+    return false;
+  };
 
   for (const entry of plan.rebases) {
     if (entry.status === "skipped-clean") {
@@ -541,11 +566,13 @@ export async function executeRestack(
       continue;
     }
 
-    // entry.status === "planned"; resolve the current target SHA (parent
-    // may have just been rewritten for non-root nodes) and re-check ancestry.
-    // Unlike the planner, execute mode does NOT fall back to the local base
-    // if `origin/<base>` fails to resolve — production always fetches first,
-    // and we want to fail loudly if the ref is missing.
+    if (isInsideConflictedSubtree(entry.branch)) {
+      executed.push({ ...entry, status: "skipped-due-to-conflict" });
+      continue;
+    }
+
+    // Re-check ancestry now that earlier rebases may have moved this branch's
+    // parent (and therefore `newTarget`, for non-root nodes).
     const targetSha = await revParse(dir, entry.newTarget);
     const branchSha = await revParse(dir, entry.branch);
     const isAncestorResult = await runGitCommand(
@@ -568,13 +595,42 @@ export async function executeRestack(
     );
     if (result.ok) {
       executed.push({ ...entry, status: "rebased" });
-    } else {
-      // Conflict handling in Task 5; for now, throw so happy-path tests
-      // surface unexpected conflicts loudly.
-      throw new Error(
-        `Unexpected rebase failure on ${entry.branch}: ${result.stderr}`,
-      );
+      continue;
     }
+
+    const wasConflict = (result.conflictFiles?.length ?? 0) > 0 ||
+      (result.stderr ?? "").includes("CONFLICT");
+    executed.push({
+      ...entry,
+      status: "conflict",
+      stderr: result.stderr,
+      conflictFiles: result.conflictFiles,
+    });
+    conflictedSubtrees.add(entry.branch);
+
+    // Abort the in-progress rebase so independent sibling subtrees can still
+    // be processed. Resume state persistence (Task 6) will re-plan this
+    // branch's rebase on the next `--resume` invocation.
+    await runGitCommand(dir, "rebase", "--abort");
+
+    if (firstFailure === undefined) {
+      firstFailure = wasConflict ? "conflict" : "other";
+      recovery = {
+        resolve: "git add <conflicting files> && git rebase --continue",
+        abort: "git rebase --abort",
+        resume:
+          `deno run --allow-run=git,gh --allow-env --allow-read src/cli.ts restack --stack-name=${stackName} --resume`,
+      };
+    }
+  }
+
+  if (firstFailure !== undefined) {
+    return {
+      ok: false,
+      error: firstFailure,
+      rebases: executed,
+      recovery,
+    };
   }
 
   return { ok: true, rebases: executed };

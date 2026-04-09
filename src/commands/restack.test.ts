@@ -567,3 +567,65 @@ describe("executeRestack (clean cases)", () => {
     expect(cLog.match(/add a-drift\.txt/g)).toHaveLength(1);
   });
 });
+
+describe("executeRestack (conflict handling)", () => {
+  let repo: TestRepo;
+
+  beforeEach(async () => {
+    repo = await createTestRepo();
+  });
+
+  afterEach(async () => {
+    // Abort any in-progress rebase so cleanup() can succeed.
+    await runGit(repo.dir, "rebase", "--abort").catch(() => {});
+    await repo.cleanup();
+  });
+
+  test("conflict on one sibling: other sibling still rebases", async () => {
+    // main -> root -> { leftConflict, rightClean }
+    // Add a commit on main that touches the same file as leftConflict.
+    await runGit(repo.dir, "checkout", "main");
+    await commitFile(repo.dir, "shared.txt", "initial\n");
+
+    await addBranch(repo.dir, "root", "main");
+
+    await runGit(repo.dir, "checkout", "-b", "leftConflict", "root");
+    await Deno.writeTextFile(`${repo.dir}/shared.txt`, "left version\n");
+    await runGit(repo.dir, "add", "shared.txt");
+    await runGit(repo.dir, "commit", "-m", "left edits shared");
+
+    await runGit(repo.dir, "checkout", "-b", "leftChild", "leftConflict");
+    await commitFile(repo.dir, "leftChild.txt", "lc\n");
+
+    await addBranch(repo.dir, "rightClean", "root");
+
+    await setBaseBranch(repo.dir, "test", "main");
+    await setStackNode(repo.dir, "root", "test", "main");
+    await setStackNode(repo.dir, "leftConflict", "test", "root");
+    await setStackNode(repo.dir, "leftChild", "test", "leftConflict");
+    await setStackNode(repo.dir, "rightClean", "test", "root");
+
+    // Advance origin/main with a conflicting change to shared.txt.
+    await setupFakeOrigin(repo.dir);
+    await runGit(repo.dir, "checkout", "main");
+    await Deno.writeTextFile(`${repo.dir}/shared.txt`, "main version\n");
+    await runGit(repo.dir, "add", "shared.txt");
+    await runGit(repo.dir, "commit", "-m", "main edits shared");
+    await runGit(repo.dir, "push", "origin", "main");
+    await runGit(repo.dir, "reset", "--hard", "HEAD~1");
+
+    const result = await executeRestack(repo.dir, "test", {});
+
+    expect(result.ok).toBe(false);
+    expect(result.error).toBe("conflict");
+
+    const byBranch = new Map(result.rebases.map((r) => [r.branch, r]));
+    expect(byBranch.get("root")!.status).toBe("rebased");
+    expect(byBranch.get("leftConflict")!.status).toBe("conflict");
+    expect(byBranch.get("leftChild")!.status).toBe("skipped-due-to-conflict");
+    expect(byBranch.get("rightClean")!.status).toBe("rebased");
+
+    expect(result.recovery).toBeDefined();
+    expect(result.recovery!.resolve).toContain("rebase --continue");
+  });
+});
