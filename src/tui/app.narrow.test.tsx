@@ -72,23 +72,25 @@ function stripAnsi(s: string): string {
 }
 
 /**
- * Split a stripped frame into the stack-map region (between the tab bar
+ * Split a stripped frame into the stack-map region (between the header
  * and the detail pane) and the detail pane header line. Assertions rely
  * on plain-text presence so they pass regardless of whether chalk decided
  * to emit color escapes (varies with FORCE_COLOR + TTY detection).
  */
 function regions(frame: string): { stackMap: string; detailHeader: string } {
   const lines = frame.split("\n");
-  // Collect `┌` border lines and index from the end so this helper keeps
-  // working when future chrome changes add more border blocks above the
-  // body wrapper (e.g., the Task 6 HeaderBox). The last `┌` is always the
-  // detail pane; the second-to-last is the body wrapper.
+  // HeaderBox uses round corners (╭/╰) so its borders don't contribute to
+  // the `┌` search. That makes the first `┌` always the body wrapper's
+  // top border and the last `┌` always the detail pane's top border.
+  // Intermediate `┌` lines (e.g., the canopy row from initialTrunkSegments
+  // in multi-stack views) live inside the body wrapper and belong to the
+  // stack map region.
   const borders: number[] = [];
   for (let i = 1; i < lines.length; i++) {
     if (lines[i].includes("┌")) borders.push(i);
   }
+  const bodyTop = borders[0] ?? -1;
   const detailTop = borders.at(-1) ?? lines.length;
-  const bodyTop = borders.at(-2) ?? -1;
   const stackMap = lines.slice(bodyTop + 1, detailTop).join("\n");
   const detailHeader = lines[detailTop + 1] ?? "";
   return { stackMap, detailHeader };

@@ -201,7 +201,7 @@ export function App(props: AppProps): React.ReactElement {
 
   // Height reserved for the StackMap, computed from the terminal size minus
   // the fixed chrome around it. Keep this in sync with `CHROME_HEIGHT_BASE`
-  // and the one-line guarantees in `TabBar` + the status bar `<Box>` below.
+  // and the one-line guarantees in `HeaderBox` + the status bar `<Box>` below.
   // If either of those wraps, this math drifts and the cursor-follow scroll
   // effect can put the selected branch outside the visible region.
   const stackMapHeight = Math.max(
