@@ -38,11 +38,16 @@ export interface AppProps {
 }
 
 /**
- * Fixed chrome reserved around the stack-map viewport: tab bar (1) + detail
- * pane (8, hard-coded in `DetailPane`) + status bar (1). The optional
- * gh-unavailable warning adds one more line, applied on top of this base.
+ * Fixed chrome reserved around the stack-map viewport: tab bar (1) + body
+ * border (2) + detail pane (8, hard-coded in `DetailPane`) + status bar (1).
+ * The optional gh-unavailable warning adds one more line, applied on top of
+ * this base.
+ *
+ * Chrome = header (3) + body border (2) + detail pane (8) + status bar (1).
+ * Updated in-progress: this task adds the body border (+2). Task 6 bumps
+ * the header from 1 → 3 (+2 more) when HeaderBox replaces TabBar.
  */
-const CHROME_HEIGHT_BASE = 1 + 8 + 1;
+const CHROME_HEIGHT_BASE = 1 + 2 + 8 + 1;
 
 /**
  * Minimum stack-map viewport height. Each branch row is 2 lines (name +
@@ -237,7 +242,7 @@ export function App(props: AppProps): React.ReactElement {
       computeScrollX({
         cursorX,
         cursorWidth: cell.branch.length,
-        viewportWidth: termSize.cols,
+        viewportWidth: termSize.cols - 2,
         prev,
       })
     );
@@ -509,13 +514,26 @@ export function App(props: AppProps): React.ReactElement {
         )
         : (
           <>
-            <StackMap
-              state={state}
-              viewportWidth={termSize.cols}
-              viewportHeight={stackMapHeight}
-              scrollX={scrollX}
-              scrollY={scrollY}
-            />
+            <Box
+              borderStyle="single"
+              borderColor={state.focusedSection === "body"
+                ? primaryColor
+                : "gray"}
+              flexDirection="column"
+              flexShrink={0}
+              width={termSize.cols}
+              height={stackMapHeight + 2}
+              overflowX="hidden"
+              overflowY="hidden"
+            >
+              <StackMap
+                state={state}
+                viewportWidth={termSize.cols - 2}
+                viewportHeight={stackMapHeight}
+                scrollX={scrollX}
+                scrollY={scrollY}
+              />
+            </Box>
             <DetailPane
               branch={focusedBranch}
               prCell={focusedBranch

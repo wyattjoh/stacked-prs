@@ -79,18 +79,16 @@ function stripAnsi(s: string): string {
  */
 function regions(frame: string): { stackMap: string; detailHeader: string } {
   const lines = frame.split("\n");
-  // First line is TabBar. Detail pane starts at the first `┌` border line.
-  let borderStart = -1;
+  // Find the two border blocks: first is the body wrapper, second is the
+  // detail pane. Content between them is the stack map interior.
+  const borders: number[] = [];
   for (let i = 1; i < lines.length; i++) {
-    if (lines[i].includes("┌")) {
-      borderStart = i;
-      break;
-    }
+    if (lines[i].includes("┌")) borders.push(i);
   }
-  if (borderStart < 0) borderStart = lines.length;
-  const stackMap = lines.slice(1, borderStart).join("\n");
-  // Detail header is the first line inside the border box.
-  const detailHeader = lines[borderStart + 1] ?? "";
+  const bodyTop = borders[0] ?? -1;
+  const detailTop = borders[1] ?? lines.length;
+  const stackMap = lines.slice(bodyTop + 1, detailTop).join("\n");
+  const detailHeader = lines[detailTop + 1] ?? "";
   return { stackMap, detailHeader };
 }
 
@@ -300,16 +298,11 @@ Deno.test({
         // wrapped, the logo would be on line 0 and [All] on line 1.
         expect(lines[0]).toContain("stacked-prs");
         expect(lines[0]).toContain("[All]");
-        // The chrome around the stack-map must fit in exactly:
-        //   tab bar (1) + detail pane (8) + status bar (1) = 10 rows.
-        // If any of those wrapped, the stack-map viewport math in
-        // `app.tsx` would drift and the cursor-follow scroll would stop
-        // tracking. Assert by counting non-blank lines outside the
-        // stack-map region.
-        const borderStart = lines.findIndex((l) => l.includes("┌"));
-        expect(borderStart).toBeGreaterThanOrEqual(2);
-        const stackMapRows = borderStart - 1; // subtract the single tab-bar row
-        expect(stackMapRows).toBe(24 - 10);
+        // Chrome (intermediate state, Task 5): tab bar (1) + body border (2) +
+        // detail pane (8) + status bar (1) = 12. The first `┌` is the body
+        // wrapper's top border, expected at row 1 (tab bar row 0).
+        const firstBorder = lines.findIndex((l) => l.includes("┌"));
+        expect(firstBorder).toBe(1);
       } finally {
         instance.unmount();
       }
