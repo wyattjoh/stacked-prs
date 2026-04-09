@@ -6,6 +6,7 @@ import {
   removeStackBranch,
   setBaseBranch,
   setMergeStrategy,
+  setStackMerged,
   setStackNode,
   type StackTree,
 } from "../lib/stack.ts";
@@ -73,7 +74,10 @@ export async function configSplitStack(
   const baseBranch = tree.baseBranch;
   const mergeStrategy = await getMergeStrategy(dir, stackName);
 
-  if (tree.roots.length <= 1) {
+  // Only live (non-merged) roots need to be split into new stacks
+  const liveRoots = tree.roots.filter((n) => !n.merged);
+
+  if (liveRoots.length <= 1) {
     return [];
   }
 
@@ -81,7 +85,7 @@ export async function configSplitStack(
   const usedNames = new Set<string>();
   const splits: SplitInfo[] = [];
 
-  for (const root of tree.roots) {
+  for (const root of liveRoots) {
     let newName = deriveStackName(root.branch);
     // Resolve collision by appending a suffix
     if (usedNames.has(newName)) {
@@ -108,8 +112,9 @@ export async function configSplitStack(
     }
   }
 
-  // Remove all original stack metadata by clearing stack-name on each branch
-  for (const node of getAllNodes(tree)) {
+  // Remove stack metadata only from live nodes (merged nodes stay in original stack)
+  const liveNodes = getAllNodes(tree).filter((n) => !n.merged);
+  for (const node of liveNodes) {
     await removeStackBranch(dir, node.branch);
   }
 
@@ -210,14 +215,15 @@ export async function configLandCleanup(
     }
   }
 
-  // Remove the merged branch
-  await removeStackBranch(dir, mergedBranch);
+  // Mark the merged branch as historical instead of removing it
+  await setStackMerged(dir, mergedBranch);
 
-  // Re-read the tree to see how many roots remain
+  // Re-read the tree to see how many LIVE roots remain (exclude merged nodes)
   const treeAfter = await getStackTree(dir, stackName);
+  const liveRoots = treeAfter.roots.filter((n) => !n.merged);
 
-  // If more than one root remains, split the stack
-  if (treeAfter.roots.length > 1) {
+  // If more than one live root remains, split the stack
+  if (liveRoots.length > 1) {
     const splitInto = await configSplitStack(dir, stackName);
     return { removed: mergedBranch, splitInto };
   }
