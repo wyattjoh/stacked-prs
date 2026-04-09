@@ -1089,3 +1089,65 @@ describe("executeLand stale-plan detection", () => {
     }
   });
 });
+
+describe("classifyLandCase with historical merged nodes", () => {
+  it("ignores stack-merged nodes when computing all-merged", async () => {
+    const repo = await createTestRepo();
+    try {
+      await addBranch(repo.dir, "feature/a", "main");
+      await addBranch(repo.dir, "feature/b", "main");
+      await setStackNode(repo.dir, "feature/a", "my-stack", "main");
+      await setStackNode(repo.dir, "feature/b", "my-stack", "main");
+      await setBaseBranch(repo.dir, "my-stack", "main");
+      // Mark feature/a as historically merged
+      await runGitCommand(
+        repo.dir,
+        "config",
+        "branch.feature/a.stack-merged",
+        "true",
+      );
+
+      const tree = await getStackTree(repo.dir, "my-stack");
+      const prStates: PrStateByBranch = new Map([
+        ["feature/a", "MERGED"],
+        ["feature/b", "MERGED"],
+      ]);
+
+      // Should be "all-merged" — feature/a historical node should not block this
+      const landCase = classifyLandCase(tree, prStates);
+      expect(landCase).toBe("all-merged");
+    } finally {
+      await repo.cleanup();
+    }
+  });
+
+  it("ignores stack-merged nodes when checking root for root-merged", async () => {
+    const repo = await createTestRepo();
+    try {
+      await addBranch(repo.dir, "feature/a", "main");
+      await addBranch(repo.dir, "feature/b", "main");
+      await setStackNode(repo.dir, "feature/a", "my-stack", "main");
+      await setStackNode(repo.dir, "feature/b", "my-stack", "main");
+      await setBaseBranch(repo.dir, "my-stack", "main");
+      await runGitCommand(
+        repo.dir,
+        "config",
+        "branch.feature/a.stack-merged",
+        "true",
+      );
+
+      const tree = await getStackTree(repo.dir, "my-stack");
+      const prStates: PrStateByBranch = new Map([
+        ["feature/a", "MERGED"],
+        ["feature/b", "OPEN"],
+      ]);
+
+      // feature/b is the only live root; its PR is open — nothing to land
+      expect(() => classifyLandCase(tree, prStates)).toThrow(
+        UnsupportedLandShape,
+      );
+    } finally {
+      await repo.cleanup();
+    }
+  });
+});

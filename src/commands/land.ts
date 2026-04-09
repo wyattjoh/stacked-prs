@@ -223,9 +223,10 @@ export function classifyLandCase(
   tree: StackTree,
   prStateByBranch: PrStateByBranch,
 ): LandCase {
-  const nodes = getAllNodes(tree);
+  // Ignore historically merged nodes — they are done and don't affect classification
+  const nodes = getAllNodes(tree).filter((n) => !n.merged);
   if (nodes.length === 0) {
-    throw new UnsupportedLandShape("Stack has no branches to land");
+    throw new UnsupportedLandShape("Stack has no live branches to land");
   }
 
   const mergedSet = new Set(
@@ -242,12 +243,13 @@ export function classifyLandCase(
     return "all-merged";
   }
 
-  if (tree.roots.length !== 1) {
+  const liveRoots = tree.roots.filter((n) => !n.merged);
+  if (liveRoots.length !== 1) {
     throw new UnsupportedLandShape(
       "Cannot land a multi-root stack unless every branch is merged",
     );
   }
-  const root = tree.roots[0];
+  const root = liveRoots[0];
   if (!mergedSet.has(root.branch)) {
     throw new UnsupportedLandShape(
       "Root of the stack is not merged; only merged roots or fully merged stacks are supported",
@@ -470,12 +472,17 @@ export async function planLand(
   prInfoByBranch: Map<string, PrInfo>,
 ): Promise<LandPlan> {
   const tree = await getStackTree(dir, stackName);
+
+  // Merged nodes are historical; exclude them from rebase/push/PR steps
+  const liveRoots = tree.roots.filter((n) => !n.merged);
+  const liveTree: StackTree = { ...tree, roots: liveRoots };
+
   const landCase = classifyLandCase(tree, prStateByBranch);
 
   const snapshot = await captureSnapshot(dir, tree);
   const originalHeadRef = await captureOriginalHead(dir);
 
-  const mergedBranches = getAllNodes(tree)
+  const mergedBranches = getAllNodes(liveTree)
     .filter((n) => prStateByBranch.get(n.branch) === "MERGED")
     .map((n) => n.branch);
 
@@ -506,15 +513,15 @@ export async function planLand(
   // rebased. A clean worktree for a surviving branch is a hard blocker (git
   // refuses to rebase a branch checked out in another worktree), so we only
   // check the deleted root's worktree here.
-  const mergedRoot = tree.roots[0].branch;
+  const mergedRoot = liveTree.roots[0].branch;
   const worktreesToRemove = await detectCleanWorktreeCollisions(dir, [
     mergedRoot,
   ]);
 
-  const rebaseSteps = buildRebaseSteps(tree, snapshot, mergedRoot);
-  const pushSteps = buildPushSteps(tree, snapshot, mergedRoot);
-  const prUpdates = buildPrUpdateSteps(tree, prInfoByBranch, mergedRoot);
-  const preview = previewLandCleanup(tree, mergedRoot);
+  const rebaseSteps = buildRebaseSteps(liveTree, snapshot, mergedRoot);
+  const pushSteps = buildPushSteps(liveTree, snapshot, mergedRoot);
+  const prUpdates = buildPrUpdateSteps(liveTree, prInfoByBranch, mergedRoot);
+  const preview = previewLandCleanup(liveTree, mergedRoot);
 
   return {
     stackName,
