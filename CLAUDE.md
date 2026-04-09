@@ -28,11 +28,12 @@ src/
 ├── lib/
 │   ├── stack.ts                # Core library: types, git config read/write, tree traversal
 │   ├── gh.ts                   # GitHub CLI wrapper with test fixture support (GH_MOCK_DIR)
+│   ├── worktrees.ts            # Pre-flight worktree safety reader (git worktree list + status)
 │   └── testdata/helpers.ts     # Test utilities (createTestRepo, addBranch, commitFile)
 ├── commands/
 │   ├── config.ts               # Metadata mutations (library, not a CLI subcommand)
 │   ├── status.ts               # Stack state + PR info
-│   ├── restack.ts              # Segment-based tree rebase
+│   ├── restack.ts              # Per-branch topological rebase
 │   ├── nav.ts                  # PR navigation comment management
 │   ├── verify-refs.ts          # Post-rebase branch ancestry verification
 │   ├── import-discover.ts      # Chain detection: walks git graph to find branch trees
@@ -107,25 +108,30 @@ exactly one parent (another stack branch or the base branch). Multiple branches
 can share the same parent, creating a fork. Sibling order is alphabetical by
 branch name, determined at read time.
 
-Tree traversal uses DFS (depth-first, pre-order). `restack.ts` rebases by
-decomposing the tree into linear segments (fork point or root to leaf), then
-rebasing each segment in topological order with `git rebase --update-refs`.
-Independent sibling segments continue even when one hits a conflict.
+Tree traversal uses DFS (depth-first, pre-order). `restack.ts` rebases per
+branch: it walks the filtered tree in DFS topological order, snapshots each
+node's parent SHA before any mutation, then runs
+`git rebase --onto <new-target> <old-parent-sha> <branch>` for each branch in
+turn. Root branches target `origin/<base>` so local `main` is never touched. The
+walk stops at the first conflict and leaves the working tree mid-rebase for
+resolution; `--resume` continues the walk after `git rebase --continue`. Resume
+state is persisted under `stack.<stack-name>.resume-state` so a conflicted run
+can be continued across process invocations.
 
 ### Script roles
 
-| File                              | Role                                       | Invoked as                              |
-| --------------------------------- | ------------------------------------------ | --------------------------------------- |
-| `src/lib/stack.ts`                | Library only, not a CLI                    | Imported by all other scripts           |
-| `src/lib/gh.ts`                   | Library only, not a CLI                    | Imported by scripts needing GitHub data |
-| `src/commands/config.ts`          | Library functions for metadata mutations   | Imported by other commands              |
-| `src/commands/status.ts`          | Read stack state + PR info                 | `cli.ts status [--json]`                |
-| `src/commands/restack.ts`         | Segment-based tree rebase                  | `cli.ts restack [--json]`               |
-| `src/commands/nav.ts`             | Navigation comments                        | `cli.ts nav [--dry-run]`                |
-| `src/commands/verify-refs.ts`     | Post-rebase verification                   | `cli.ts verify-refs`                    |
-| `src/commands/import-discover.ts` | Branch tree detection                      | `cli.ts import-discover`                |
-| `src/commands/submit-plan.ts`     | Submit planning                            | `cli.ts submit-plan`                    |
-| `src/tui/app.tsx`                 | Root Ink component, owns reducer + effects | Launched by `cli.ts status -i`          |
+| File                              | Role                                       | Invoked as                                       |
+| --------------------------------- | ------------------------------------------ | ------------------------------------------------ |
+| `src/lib/stack.ts`                | Library only, not a CLI                    | Imported by all other scripts                    |
+| `src/lib/gh.ts`                   | Library only, not a CLI                    | Imported by scripts needing GitHub data          |
+| `src/commands/config.ts`          | Library functions for metadata mutations   | Imported by other commands                       |
+| `src/commands/status.ts`          | Read stack state + PR info                 | `cli.ts status [--json]`                         |
+| `src/commands/restack.ts`         | Per-branch topological rebase              | `cli.ts restack [--dry-run] [--json] [--resume]` |
+| `src/commands/nav.ts`             | Navigation comments                        | `cli.ts nav [--dry-run]`                         |
+| `src/commands/verify-refs.ts`     | Post-rebase verification                   | `cli.ts verify-refs`                             |
+| `src/commands/import-discover.ts` | Branch tree detection                      | `cli.ts import-discover`                         |
+| `src/commands/submit-plan.ts`     | Submit planning                            | `cli.ts submit-plan`                             |
+| `src/tui/app.tsx`                 | Root Ink component, owns reducer + effects | Launched by `cli.ts status -i`                   |
 
 ### Git config schema
 
@@ -134,11 +140,15 @@ branch.<name>.stack-name           # Which stack this branch belongs to
 branch.<name>.stack-parent         # Parent branch name (or the base branch, e.g. "main")
 stack.<stack-name>.merge-strategy  # "merge" or "squash"
 stack.<stack-name>.base-branch     # Base branch name, e.g. "main" or "master"
+stack.<stack-name>.resume-state    # Transient JSON for in-progress restack recovery
 ```
 
 `stack-order` is not used in the tree model; topology is derived entirely from
 `stack-parent` relationships. `getStackTree` auto-migrates old configs by
-removing `stack-order` keys after validating the tree.
+removing `stack-order` keys after validating the tree. `resume-state` is
+transient: written before a restack walk begins, updated after each successful
+branch rebase, and cleared on successful completion. If it exists,
+`cli.ts restack` refuses to run without `--resume`.
 
 ### TUI layer (`src/tui/`)
 
