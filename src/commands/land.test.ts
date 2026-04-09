@@ -5,7 +5,9 @@ import {
   captureSnapshot,
   classifyLandCase,
   isShallowRepository,
+  planLand,
   previewLandCleanup,
+  type PrInfo,
   type PrStateByBranch,
   runLandPreflight,
   UnsupportedLandShape,
@@ -305,6 +307,57 @@ describe("previewLandCleanup", () => {
       const tree = await getStackTree(repo.dir, "s");
       const preview = previewLandCleanup(tree, "feat/a");
       expect(preview.splits.length).toBe(2);
+    } finally {
+      await repo.cleanup();
+    }
+  });
+});
+
+describe("planLand", () => {
+  it("builds a root-merged plan for a linear stack", async () => {
+    const repo = await createTestRepo();
+    try {
+      await addBranch(repo.dir, "feat/a", "main");
+      await addBranch(repo.dir, "feat/b", "feat/a");
+      await initStack(repo, "s", [["feat/a", "main"], ["feat/b", "feat/a"]]);
+      const prStates: PrStateByBranch = new Map([
+        ["feat/a", "MERGED"],
+        ["feat/b", "OPEN"],
+      ]);
+      const prInfo = new Map<string, PrInfo>([
+        ["feat/b", { number: 20, url: "", state: "OPEN", isDraft: true }],
+      ]);
+      const plan = await planLand(repo.dir, "s", prStates, prInfo);
+      expect(plan.case).toBe("root-merged");
+      expect(plan.mergedBranches).toEqual(["feat/a"]);
+      expect(plan.rebaseSteps.length).toBe(1);
+      expect(plan.rebaseSteps[0].branch).toBe("feat/b");
+      expect(plan.rebaseSteps[0].newTarget).toBe("origin/main");
+      expect(plan.pushSteps.length).toBe(1);
+      expect(plan.prUpdates.length).toBe(1);
+      expect(plan.prUpdates[0].newBase).toBe("main");
+      expect(plan.branchesToDelete).toEqual(["feat/a"]);
+    } finally {
+      await repo.cleanup();
+    }
+  });
+
+  it("builds an all-merged plan with empty rebase/push/prUpdates", async () => {
+    const repo = await createTestRepo();
+    try {
+      await addBranch(repo.dir, "feat/a", "main");
+      await addBranch(repo.dir, "feat/b", "feat/a");
+      await initStack(repo, "s", [["feat/a", "main"], ["feat/b", "feat/a"]]);
+      const prStates: PrStateByBranch = new Map([
+        ["feat/a", "MERGED"],
+        ["feat/b", "MERGED"],
+      ]);
+      const plan = await planLand(repo.dir, "s", prStates, new Map());
+      expect(plan.case).toBe("all-merged");
+      expect(plan.rebaseSteps).toEqual([]);
+      expect(plan.pushSteps).toEqual([]);
+      expect(plan.prUpdates).toEqual([]);
+      expect([...plan.branchesToDelete].sort()).toEqual(["feat/a", "feat/b"]);
     } finally {
       await repo.cleanup();
     }

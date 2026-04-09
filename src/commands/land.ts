@@ -136,6 +136,7 @@ import {
 import {
   findNode,
   getAllNodes,
+  getStackTree,
   runGitCommand,
   type StackTree,
 } from "../lib/stack.ts";
@@ -428,4 +429,61 @@ export function previewLandCleanup(
   }
 
   return { remainingRoots, splits };
+}
+
+export async function planLand(
+  dir: string,
+  stackName: string,
+  prStateByBranch: PrStateByBranch,
+  prInfoByBranch: Map<string, PrInfo>,
+): Promise<LandPlan> {
+  const tree = await getStackTree(dir, stackName);
+  const landCase = classifyLandCase(tree, prStateByBranch);
+
+  const snapshot = await captureSnapshot(dir, tree);
+  const originalHeadRef = await captureOriginalHead(dir);
+
+  const mergedBranches = getAllNodes(tree)
+    .filter((n) => prStateByBranch.get(n.branch) === "MERGED")
+    .map((n) => n.branch);
+
+  if (landCase === "all-merged") {
+    return {
+      stackName,
+      baseBranch: tree.baseBranch,
+      case: "all-merged",
+      mergedBranches,
+      rebaseSteps: [],
+      pushSteps: [],
+      prUpdates: [],
+      navUpdates: [],
+      branchesToDelete: mergedBranches,
+      snapshot,
+      originalHeadRef,
+      splitPreview: [],
+    };
+  }
+
+  // root-merged
+  const mergedRoot = tree.roots[0].branch;
+
+  const rebaseSteps = buildRebaseSteps(tree, snapshot, mergedRoot);
+  const pushSteps = buildPushSteps(tree, snapshot, mergedRoot);
+  const prUpdates = buildPrUpdateSteps(tree, prInfoByBranch, mergedRoot);
+  const preview = previewLandCleanup(tree, mergedRoot);
+
+  return {
+    stackName,
+    baseBranch: tree.baseBranch,
+    case: "root-merged",
+    mergedBranches,
+    rebaseSteps,
+    pushSteps,
+    prUpdates,
+    navUpdates: [],
+    branchesToDelete: [mergedRoot],
+    snapshot,
+    originalHeadRef,
+    splitPreview: preview.splits,
+  };
 }
