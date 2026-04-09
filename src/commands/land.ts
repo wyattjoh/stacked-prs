@@ -906,10 +906,48 @@ async function executeCaseA(
 
   await executeCaseAPrUpdates(dir, plan, hooks, state);
 
-  // nav, config-cleanup, delete, restore-head phases follow in Tasks 20-23.
+  await executeCaseAPrCloses(dir, plan, hooks, state);
+
+  // nav, config-cleanup, delete, restore-head phases follow in Tasks 21-23.
   throw new Error(
-    "executeLand case A: post-pr-update phases not yet implemented",
+    "executeLand case A: post-pr-close phases not yet implemented",
   );
+}
+
+async function executeCaseAPrCloses(
+  _dir: string,
+  plan: LandPlan,
+  hooks: LandHooks,
+  state: ExecState,
+): Promise<void> {
+  for (const update of plan.prUpdates) {
+    if (!state.autoMerged.has(update.branch)) continue;
+    emit(hooks, { kind: "pr-close", branch: update.branch }, "running");
+    try {
+      await gh(
+        "pr",
+        "close",
+        String(update.prNumber),
+        "--comment",
+        "auto-merged during stack land: every commit was already upstream",
+      );
+      state.prClosed.add(update.prNumber);
+      emit(hooks, { kind: "pr-close", branch: update.branch }, "ok");
+    } catch (err) {
+      emit(
+        hooks,
+        { kind: "pr-close", branch: update.branch },
+        "failed",
+        (err as Error).message,
+      );
+      throw new LandError(
+        `PR close for ${update.branch} failed: ${(err as Error).message}`,
+        plan,
+        state.rollback,
+        { kind: "pr-close", branch: update.branch },
+      );
+    }
+  }
 }
 
 export async function executeLand(

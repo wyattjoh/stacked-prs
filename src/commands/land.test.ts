@@ -743,3 +743,64 @@ describe("executeLand case A rebase phase", () => {
     }
   });
 });
+
+describe("executeLand case A pr-close phase", () => {
+  it("closes PRs for auto-merged branches with a comment", async () => {
+    const env = await createRepoWithOrigin();
+    try {
+      // Build: main - A - B where B has no unique commits vs A (so rebase
+      // drops all of B's commits and marks it auto-merged).
+      await runGit(env.dir, "checkout", "-b", "feat/a", "main");
+      await Deno.writeTextFile(`${env.dir}/shared.txt`, "shared content\n");
+      await runGit(env.dir, "add", "shared.txt");
+      await runGit(env.dir, "commit", "-m", "add shared");
+      await runGit(env.dir, "push", "origin", "feat/a");
+      await runGit(env.dir, "checkout", "-b", "feat/b", "feat/a");
+      await runGit(env.dir, "push", "origin", "feat/b");
+      await initStack(env, "s", [["feat/a", "main"], ["feat/b", "feat/a"]]);
+
+      // Squash-merge feat/a into main via a fresh cherry-pick commit.
+      await runGit(env.dir, "checkout", "main");
+      await Deno.writeTextFile(`${env.dir}/shared.txt`, "shared content\n");
+      await runGit(env.dir, "add", "shared.txt");
+      await runGit(env.dir, "commit", "-m", "squashed feat/a");
+      await runGit(env.dir, "push", "origin", "main");
+      await runGit(env.dir, "fetch", "origin", "main");
+
+      const prStates: PrStateByBranch = new Map([
+        ["feat/a", "MERGED"],
+        ["feat/b", "OPEN"],
+      ]);
+      const prInfo = new Map<string, PrInfo>([
+        ["feat/b", { number: 20, url: "", state: "OPEN", isDraft: true }],
+      ]);
+
+      const mockDir = await Deno.makeTempDir();
+      setMockDir(mockDir);
+
+      const events: LandProgressEvent[] = [];
+      try {
+        await executeLand(
+          env.dir,
+          await planLand(env.dir, "s", prStates, prInfo),
+          {
+            onProgress: (e) => events.push(e),
+            freshPrStates: () => Promise.resolve(prStates),
+          },
+        );
+      } catch {
+        // later phases still unimplemented
+      } finally {
+        setMockDir(undefined);
+      }
+
+      const closeEvent = events.find(
+        (e) => e.step.kind === "pr-close" && e.status === "ok",
+      );
+      expect(closeEvent).toBeDefined();
+    } finally {
+      await env.cleanup();
+      setMockDir(undefined);
+    }
+  });
+});
