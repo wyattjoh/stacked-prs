@@ -213,3 +213,71 @@ export async function checkWorktreeSafety(
 
   return dirty;
 }
+
+export interface InProgressOperation {
+  worktreePath: string;
+  branch: string | null;
+  operation: "rebase" | "merge" | "cherry-pick" | "revert" | "bisect";
+}
+
+const OP_MARKERS: ReadonlyArray<
+  readonly [string, InProgressOperation["operation"]]
+> = [
+  ["rebase-merge", "rebase"],
+  ["rebase-apply", "rebase"],
+  ["MERGE_HEAD", "merge"],
+  ["CHERRY_PICK_HEAD", "cherry-pick"],
+  ["REVERT_HEAD", "revert"],
+  ["BISECT_LOG", "bisect"],
+];
+
+async function fileExists(path: string): Promise<boolean> {
+  try {
+    await Deno.stat(path);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * List every in-progress git operation across all worktrees. For each
+ * worktree, check its per-worktree gitdir for operation marker files.
+ * At most one operation per worktree.
+ */
+export async function listInProgressOperations(
+  dir: string,
+): Promise<InProgressOperation[]> {
+  const { code, stdout, stderr } = await runGitCommand(
+    dir,
+    "worktree",
+    "list",
+    "--porcelain",
+  );
+  if (code !== 0) {
+    throw new Error(`git worktree list failed: ${stderr}`);
+  }
+  const worktrees = parseWorktreeList(stdout);
+  const ops: InProgressOperation[] = [];
+
+  for (const wt of worktrees) {
+    const gitDir = await runGitCommand(wt.path, "rev-parse", "--git-dir");
+    if (gitDir.code !== 0) continue;
+    const gitDirPath = gitDir.stdout.startsWith("/")
+      ? gitDir.stdout
+      : `${wt.path}/${gitDir.stdout}`;
+
+    for (const [marker, operation] of OP_MARKERS) {
+      if (await fileExists(`${gitDirPath}/${marker}`)) {
+        ops.push({
+          worktreePath: wt.path,
+          branch: wt.branch,
+          operation,
+        });
+        break;
+      }
+    }
+  }
+
+  return ops;
+}

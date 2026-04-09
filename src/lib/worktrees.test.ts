@@ -2,7 +2,8 @@ import { afterEach, beforeEach, describe, it as test } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { commitFile, createTestRepo, runGit } from "./testdata/helpers.ts";
 import type { TestRepo } from "./testdata/helpers.ts";
-import { checkWorktreeSafety } from "./worktrees.ts";
+import { checkWorktreeSafety, listInProgressOperations } from "./worktrees.ts";
+import { runGitCommand } from "./stack.ts";
 
 describe("checkWorktreeSafety", () => {
   let repo: TestRepo;
@@ -117,5 +118,35 @@ describe("checkWorktreeSafety", () => {
 
     expect(result).toHaveLength(1);
     expect(result[0].dirtyFiles).toContain(" leading.txt");
+  });
+});
+
+describe("listInProgressOperations", () => {
+  let repo: TestRepo;
+
+  beforeEach(async () => {
+    repo = await createTestRepo();
+  });
+
+  afterEach(async () => {
+    await repo.cleanup();
+  });
+
+  test("returns empty for a clean repo", async () => {
+    const ops = await listInProgressOperations(repo.dir);
+    expect(ops).toEqual([]);
+  });
+
+  test("detects CHERRY_PICK_HEAD", async () => {
+    const { stdout: gitDir } = await runGitCommand(
+      repo.dir,
+      "rev-parse",
+      "--git-dir",
+    );
+    const gitDirAbs = gitDir.startsWith("/") ? gitDir : `${repo.dir}/${gitDir}`;
+    await Deno.writeTextFile(`${gitDirAbs}/CHERRY_PICK_HEAD`, "deadbeef\n");
+    const ops = await listInProgressOperations(repo.dir);
+    expect(ops.length).toBe(1);
+    expect(ops[0].operation).toBe("cherry-pick");
   });
 });
