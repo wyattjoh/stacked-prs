@@ -557,6 +557,295 @@ describe("executeRestack (filters)", () => {
     expect(bAfter).toBe(bBefore);
     expect(cAfter).toBe(cBefore);
   });
+});
+
+describe("executeRestack (codex review fixes)", () => {
+  let repo: TestRepo;
+
+  beforeEach(async () => {
+    repo = await createTestRepo();
+  });
+
+  afterEach(async () => {
+    await runGit(repo.dir, "rebase", "--abort").catch(() => {});
+    await repo.cleanup();
+  });
+
+  test("[fix1] resume correctly identifies conflicted branch when a clean branch precedes it", async () => {
+    // main -> a (clean) -> b (clean) -> c (conflict).
+    // `a` and `b` will be skipped-clean, `c` hits a conflict. On resume, the
+    // old "first non-completed in plan order" inference would incorrectly mark
+    // `a` as just-continued; with conflictedBranch in resume-state we mark `c`.
+    await runGit(repo.dir, "checkout", "main");
+    await commitFile(repo.dir, "shared.txt", "initial\n");
+
+    await addBranch(repo.dir, "a", "main");
+    await addBranch(repo.dir, "b", "a");
+
+    await runGit(repo.dir, "checkout", "-b", "c", "b");
+    await Deno.writeTextFile(`${repo.dir}/shared.txt`, "c version\n");
+    await runGit(repo.dir, "add", "shared.txt");
+    await runGit(repo.dir, "commit", "-m", "c edits shared");
+
+    await setBaseBranch(repo.dir, "test", "main");
+    await setStackNode(repo.dir, "a", "test", "main");
+    await setStackNode(repo.dir, "b", "test", "a");
+    await setStackNode(repo.dir, "c", "test", "b");
+
+    await setupFakeOrigin(repo.dir);
+    await runGit(repo.dir, "checkout", "main");
+    await Deno.writeTextFile(`${repo.dir}/shared.txt`, "main version\n");
+    await runGit(repo.dir, "add", "shared.txt");
+    await runGit(repo.dir, "commit", "-m", "main edits shared");
+    await runGit(repo.dir, "push", "origin", "main");
+    await runGit(repo.dir, "reset", "--hard", "HEAD~1");
+
+    const first = await executeRestack(repo.dir, "test", {});
+    expect(first.ok).toBe(false);
+    expect(first.error).toBe("conflict");
+    // Confirm it was c that conflicted.
+    const byBranch = new Map(first.rebases.map((r) => [r.branch, r]));
+    expect(byBranch.get("c")!.status).toBe("conflict");
+
+    // Verify resume-state now includes conflictedBranch = "c".
+    const stateRaw = await runGit(
+      repo.dir,
+      "config",
+      "stack.test.resume-state",
+    );
+    const state = JSON.parse(stateRaw) as { conflictedBranch?: string };
+    expect(state.conflictedBranch).toBe("c");
+
+    // Resolve the conflict.
+    await Deno.writeTextFile(`${repo.dir}/shared.txt`, "c version\n");
+    await runGit(repo.dir, "add", "shared.txt");
+
+    const second = await executeRestack(repo.dir, "test", { resume: true });
+    expect(second.ok).toBe(true);
+
+    // c must contain both commits; importantly, c is the one that got rebased,
+    // not a (which was already rebased previously or left alone).
+    const cLog = await runGit(repo.dir, "log", "--format=%s", "c");
+    expect(cLog).toContain("c edits shared");
+    expect(cLog).toContain("main edits shared");
+  });
+
+  test("[fix2] missing origin/base fails preflight without persisting resume-state", async () => {
+    await addBranch(repo.dir, "a", "main");
+    await addBranch(repo.dir, "b", "a");
+    await setBaseBranch(repo.dir, "test", "main");
+    await setStackNode(repo.dir, "a", "test", "main");
+    await setStackNode(repo.dir, "b", "test", "a");
+
+    // Advance main so `a` is planned, but do NOT set up an origin remote so
+    // `origin/main` cannot resolve at runtime.
+    await runGit(repo.dir, "checkout", "main");
+    await commitFile(repo.dir, "main-extra.txt", "extra\n");
+
+    let threw = false;
+    let message = "";
+    try {
+      await executeRestack(repo.dir, "test", {});
+    } catch (err) {
+      threw = true;
+      message = (err as Error).message;
+    }
+    expect(threw).toBe(true);
+    expect(message).toContain("origin");
+
+    // resume-state must not have been persisted.
+    let stateExists = false;
+    try {
+      await runGit(repo.dir, "config", "stack.test.resume-state");
+      stateExists = true;
+    } catch {
+      // not set, good
+    }
+    expect(stateExists).toBe(false);
+  });
+
+  test("[fix3] force-push between sessions is detected by the resume guard", async () => {
+    // Trigger a conflict on `c`, then before resuming, force-push `rightClean`
+    // so its tip no longer matches the snapshot. Resume should refuse to
+    // touch rightClean.
+    await runGit(repo.dir, "checkout", "main");
+    await commitFile(repo.dir, "shared.txt", "initial\n");
+    await addBranch(repo.dir, "root", "main");
+
+    await runGit(repo.dir, "checkout", "-b", "leftConflict", "root");
+    await Deno.writeTextFile(`${repo.dir}/shared.txt`, "left version\n");
+    await runGit(repo.dir, "add", "shared.txt");
+    await runGit(repo.dir, "commit", "-m", "left edits shared");
+
+    await addBranch(repo.dir, "rightClean", "root");
+
+    await setBaseBranch(repo.dir, "test", "main");
+    await setStackNode(repo.dir, "root", "test", "main");
+    await setStackNode(repo.dir, "leftConflict", "test", "root");
+    await setStackNode(repo.dir, "rightClean", "test", "root");
+
+    await setupFakeOrigin(repo.dir);
+    await runGit(repo.dir, "checkout", "main");
+    await Deno.writeTextFile(`${repo.dir}/shared.txt`, "main version\n");
+    await runGit(repo.dir, "add", "shared.txt");
+    await runGit(repo.dir, "commit", "-m", "main edits shared");
+    await runGit(repo.dir, "push", "origin", "main");
+    await runGit(repo.dir, "reset", "--hard", "HEAD~1");
+
+    const first = await executeRestack(repo.dir, "test", {});
+    expect(first.ok).toBe(false);
+    expect(first.error).toBe("conflict");
+
+    // Now force-push rightClean by rewriting it. The rebase is still mid-
+    // conflict on leftConflict, so we can't switch branches; instead, use
+    // update-ref to move rightClean to a new commit created via a detached
+    // HEAD path.
+    const rightCleanSha = await runGit(repo.dir, "rev-parse", "rightClean");
+    // Create a new commit object by reset + commit on a temporary branch.
+    // We need to stay on the current rebase, so use update-ref directly.
+    const newSha = await runGit(
+      repo.dir,
+      "commit-tree",
+      `${rightCleanSha}^{tree}`,
+      "-p",
+      `${rightCleanSha}`,
+      "-m",
+      "force-pushed rightClean",
+    );
+    await runGit(repo.dir, "update-ref", "refs/heads/rightClean", newSha);
+
+    // Resolve the leftConflict conflict.
+    await Deno.writeTextFile(`${repo.dir}/shared.txt`, "left version\n");
+    await runGit(repo.dir, "add", "shared.txt");
+
+    const second = await executeRestack(repo.dir, "test", { resume: true });
+    expect(second.ok).toBe(false);
+    expect(second.error).toBe("other");
+
+    // rightClean must show up in the rebases with a force-push error in stderr.
+    const rightEntry = second.rebases.find((r) => r.branch === "rightClean");
+    expect(rightEntry).toBeDefined();
+    expect(rightEntry!.stderr?.toLowerCase() ?? "").toContain("force-push");
+
+    // Resume-state must be cleared so the user can start a fresh walk.
+    let stateExists = false;
+    try {
+      await runGit(repo.dir, "config", "stack.test.resume-state");
+      stateExists = true;
+    } catch {
+      // cleared
+    }
+    expect(stateExists).toBe(false);
+  });
+
+  test("[fix4] resume after manual git rebase --abort clears state and throws", async () => {
+    // Trigger a conflict to get resume-state + an in-progress rebase.
+    await runGit(repo.dir, "checkout", "main");
+    await commitFile(repo.dir, "shared.txt", "initial\n");
+    await addBranch(repo.dir, "root", "main");
+
+    await runGit(repo.dir, "checkout", "-b", "leftConflict", "root");
+    await Deno.writeTextFile(`${repo.dir}/shared.txt`, "left version\n");
+    await runGit(repo.dir, "add", "shared.txt");
+    await runGit(repo.dir, "commit", "-m", "left edits shared");
+
+    await setBaseBranch(repo.dir, "test", "main");
+    await setStackNode(repo.dir, "root", "test", "main");
+    await setStackNode(repo.dir, "leftConflict", "test", "root");
+
+    await setupFakeOrigin(repo.dir);
+    await runGit(repo.dir, "checkout", "main");
+    await Deno.writeTextFile(`${repo.dir}/shared.txt`, "main version\n");
+    await runGit(repo.dir, "add", "shared.txt");
+    await runGit(repo.dir, "commit", "-m", "main edits shared");
+    await runGit(repo.dir, "push", "origin", "main");
+    await runGit(repo.dir, "reset", "--hard", "HEAD~1");
+
+    const first = await executeRestack(repo.dir, "test", {});
+    expect(first.ok).toBe(false);
+    expect(first.error).toBe("conflict");
+
+    // User manually aborts the rebase.
+    await runGit(repo.dir, "rebase", "--abort");
+
+    let threw = false;
+    let message = "";
+    try {
+      await executeRestack(repo.dir, "test", { resume: true });
+    } catch (err) {
+      threw = true;
+      message = (err as Error).message;
+    }
+    expect(threw).toBe(true);
+    expect(message).toContain("No rebase in progress");
+
+    // resume-state must be cleared.
+    let stateExists = false;
+    try {
+      await runGit(repo.dir, "config", "stack.test.resume-state");
+      stateExists = true;
+    } catch {
+      // cleared
+    }
+    expect(stateExists).toBe(false);
+  });
+
+  test("[fix5] dirty worktree blocks executeRestack with a clear error", async () => {
+    await addBranch(repo.dir, "a", "main");
+    await setBaseBranch(repo.dir, "test", "main");
+    await setStackNode(repo.dir, "a", "test", "main");
+
+    await setupFakeOrigin(repo.dir);
+    await runGit(repo.dir, "checkout", "main");
+    await commitFile(repo.dir, "main-extra.txt", "extra\n");
+    await runGit(repo.dir, "push", "origin", "main");
+    await runGit(repo.dir, "reset", "--hard", "HEAD~1");
+
+    // Check out `a` so the primary worktree is on an in-scope branch, then
+    // dirty it.
+    await runGit(repo.dir, "checkout", "a");
+    await Deno.writeTextFile(`${repo.dir}/dirty.txt`, "uncommitted\n");
+
+    let threw = false;
+    let message = "";
+    try {
+      await executeRestack(repo.dir, "test", {});
+    } catch (err) {
+      threw = true;
+      message = (err as Error).message;
+    }
+    expect(threw).toBe(true);
+    expect(message).toContain("uncommitted changes");
+    expect(message).toContain("dirty.txt");
+
+    // Clean up dirty file before afterEach cleanup.
+    await Deno.remove(`${repo.dir}/dirty.txt`);
+  });
+
+  test("[fix5] skipWorktreeCheck bypasses the dirty worktree guard", async () => {
+    await addBranch(repo.dir, "a", "main");
+    await setBaseBranch(repo.dir, "test", "main");
+    await setStackNode(repo.dir, "a", "test", "main");
+
+    await setupFakeOrigin(repo.dir);
+    await runGit(repo.dir, "checkout", "main");
+    await commitFile(repo.dir, "main-extra.txt", "extra\n");
+    await runGit(repo.dir, "push", "origin", "main");
+    await runGit(repo.dir, "reset", "--hard", "HEAD~1");
+
+    // Check out a branch we won't touch so the dirty file doesn't collide
+    // with the rebase. Then dirty main (out of scope anyway).
+    await runGit(repo.dir, "checkout", "a");
+    // Write an untracked file that doesn't conflict with rebase content.
+    await Deno.writeTextFile(`${repo.dir}/untracked.txt`, "untracked\n");
+
+    const result = await executeRestack(repo.dir, "test", {
+      skipWorktreeCheck: true,
+    });
+    expect(result.ok).toBe(true);
+
+    await Deno.remove(`${repo.dir}/untracked.txt`).catch(() => {});
+  });
 
   test("--upstack-from with a non-existent branch produces no rebases", async () => {
     await addBranch(repo.dir, "a", "main");
