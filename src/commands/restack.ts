@@ -200,6 +200,41 @@ function resolveTarget(node: StackNode, tree: StackTree): string {
 }
 
 /**
+ * Return branch names from `branches` whose local refs do not exist.
+ * Uses `refs/heads/<branch>` so the probe is unambiguous (it won't match a
+ * tag, remote-tracking ref, or unrelated object).
+ */
+async function findMissingRefs(
+  dir: string,
+  branches: Iterable<string>,
+): Promise<string[]> {
+  const missing: string[] = [];
+  for (const branch of branches) {
+    const probe = await runGitCommand(
+      dir,
+      "rev-parse",
+      "--verify",
+      "--quiet",
+      `refs/heads/${branch}`,
+    );
+    if (probe.code !== 0) {
+      missing.push(branch);
+    }
+  }
+  return missing;
+}
+
+async function findMissingBranches(
+  dir: string,
+  tree: StackTree,
+): Promise<string[]> {
+  return await findMissingRefs(
+    dir,
+    topologicalOrder(tree).map((n) => n.branch),
+  );
+}
+
+/**
  * Compute the full rebase plan without mutating the repo.
  */
 export async function planRestack(
@@ -208,6 +243,23 @@ export async function planRestack(
   opts: RestackOptions,
 ): Promise<RestackResult> {
   const tree = await getStackTree(dir, stackName);
+
+  const missing = await findMissingBranches(dir, tree);
+  if (missing.length > 0) {
+    const lines = missing.map((b) => `  - ${b}`).join("\n");
+    const cleanupLines = missing
+      .map((b) =>
+        `  git config --unset branch.${b}.stack-name && git config --unset branch.${b}.stack-parent`
+      )
+      .join("\n");
+    throw new Error(
+      `Stack "${stackName}" references ${missing.length} branch(es) that no longer exist:\n` +
+        `${lines}\n\n` +
+        `Either recreate the branch(es), or remove them from the stack:\n` +
+        `${cleanupLines}`,
+    );
+  }
+
   const nodes = filterNodes(tree, opts);
 
   // Snapshot every in-scope node's parent SHA before any mutation. The
@@ -360,6 +412,27 @@ export async function executeRestack(
     resume:
       `deno run --allow-run=git,gh --allow-env --allow-read src/cli.ts restack --stack-name=${stackName} --resume`,
   });
+
+  // Defensive check: if any branch referenced by the persisted walk no longer
+  // exists, the resume cannot continue. Clear the (unrecoverable) resume-state
+  // and surface a clear, actionable error before touching the rebase.
+  if (existingState) {
+    const missing = await findMissingRefs(
+      dir,
+      Object.keys(existingState.oldParentSha),
+    );
+    if (missing.length > 0) {
+      await clearResumeState(dir, stackName);
+      const lines = missing.map((b) => `  - ${b}`).join("\n");
+      throw new Error(
+        `Cannot resume restack for stack "${stackName}": ${missing.length} branch(es) from the\n` +
+          `in-progress walk no longer exist:\n` +
+          `${lines}\n` +
+          `Resume state has been cleared. Run cli.ts restack (without --resume) to\n` +
+          `start a fresh walk after deciding how to handle the missing branches.`,
+      );
+    }
+  }
 
   // On resume, finish any in-progress git rebase first and mark the exact
   // branch that was mid-rebase as completed (read from resume-state, not

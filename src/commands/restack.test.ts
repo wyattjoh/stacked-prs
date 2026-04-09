@@ -944,3 +944,103 @@ describe("executeRestack (codex review fixes)", () => {
     expect(bAfter).toBe(bBefore);
   });
 });
+
+describe("executeRestack (deleted branches)", () => {
+  let repo: TestRepo;
+
+  beforeEach(async () => {
+    repo = await createTestRepo();
+  });
+
+  afterEach(async () => {
+    await runGit(repo.dir, "rebase", "--abort").catch(() => {});
+    await repo.cleanup();
+  });
+
+  test("planRestack throws when a stack-config branch is deleted", async () => {
+    await addBranch(repo.dir, "a", "main");
+    await addBranch(repo.dir, "b", "a");
+    await setBaseBranch(repo.dir, "test", "main");
+    await setStackNode(repo.dir, "a", "test", "main");
+    await setStackNode(repo.dir, "b", "test", "a");
+
+    // Delete `b`'s ref directly so its stack config survives
+    // (`git branch -D` would auto-remove the branch.<name>.* config).
+    await runGit(repo.dir, "checkout", "main");
+    await runGit(repo.dir, "update-ref", "-d", "refs/heads/b");
+
+    let caught: Error | undefined;
+    try {
+      await planRestack(repo.dir, "test", {});
+    } catch (e) {
+      caught = e as Error;
+    }
+
+    expect(caught).toBeDefined();
+    expect(caught!.message).toContain("no longer exist");
+    expect(caught!.message).toContain("b");
+    expect(caught!.message).toContain("git config --unset branch.b.stack-name");
+  });
+
+  test("resume detects a deleted branch and clears state", async () => {
+    // Build a stack and trigger a conflict so we have resume-state.
+    await runGit(repo.dir, "checkout", "main");
+    await commitFile(repo.dir, "shared.txt", "initial\n");
+    await addBranch(repo.dir, "root", "main");
+
+    await runGit(repo.dir, "checkout", "-b", "leftConflict", "root");
+    await Deno.writeTextFile(`${repo.dir}/shared.txt`, "left\n");
+    await runGit(repo.dir, "add", "shared.txt");
+    await runGit(repo.dir, "commit", "-m", "left edits");
+
+    await setBaseBranch(repo.dir, "test", "main");
+    await setStackNode(repo.dir, "root", "test", "main");
+    await setStackNode(repo.dir, "leftConflict", "test", "root");
+
+    await setupFakeOrigin(repo.dir);
+    await runGit(repo.dir, "checkout", "main");
+    await Deno.writeTextFile(`${repo.dir}/shared.txt`, "main\n");
+    await runGit(repo.dir, "add", "shared.txt");
+    await runGit(repo.dir, "commit", "-m", "main edits");
+    await runGit(repo.dir, "push", "origin", "main");
+    await runGit(repo.dir, "reset", "--hard", "HEAD~1");
+
+    const first = await executeRestack(repo.dir, "test", {});
+    expect(first.ok).toBe(false);
+
+    // Confirm resume-state exists.
+    const beforeState = await runGit(
+      repo.dir,
+      "config",
+      "stack.test.resume-state",
+    ).catch(() => null);
+    expect(beforeState).not.toBeNull();
+
+    // User aborts the rebase and deletes the conflicted branch.
+    await runGit(repo.dir, "rebase", "--abort");
+    await runGit(repo.dir, "checkout", "main");
+    await runGit(repo.dir, "branch", "-D", "leftConflict");
+
+    // Resume should detect the missing branch and clear state.
+    let caught: Error | undefined;
+    try {
+      await executeRestack(repo.dir, "test", { resume: true });
+    } catch (e) {
+      caught = e as Error;
+    }
+
+    expect(caught).toBeDefined();
+    expect(caught!.message).toContain("no longer exist");
+    expect(caught!.message).toContain("leftConflict");
+
+    // Resume-state must be cleared.
+    let stateExists = false;
+    try {
+      await runGit(repo.dir, "config", "stack.test.resume-state");
+      stateExists = true;
+    } catch {
+      // good, config not set
+    }
+    expect(stateExists).toBe(false);
+  });
+});
