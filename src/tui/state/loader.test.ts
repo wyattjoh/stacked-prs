@@ -45,7 +45,12 @@ describe("loadLocal with merged nodes", () => {
       await setStackNode(repo.dir, "feature/b", "my-stack", "main");
       await setBaseBranch(repo.dir, "my-stack", "main");
       // Mark feature/a as historically merged; branch ref still exists in config
-      await runGitCommand(repo.dir, "config", "branch.feature/a.stack-merged", "true");
+      await runGitCommand(
+        repo.dir,
+        "config",
+        "branch.feature/a.stack-merged",
+        "true",
+      );
 
       const result = await loadLocal(repo.dir);
       expect(result.syncByBranch.get("feature/a")).toBe("landed");

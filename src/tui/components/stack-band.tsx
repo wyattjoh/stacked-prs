@@ -115,6 +115,47 @@ export function TrunkSegments(
   );
 }
 
+function renderCell(
+  cell: GridCell,
+  isLast: boolean,
+  focused: boolean,
+  props: StackBandProps,
+): React.ReactElement {
+  const top = topPrefix(cell);
+  const bottom = bottomPrefix(cell);
+  const cellState = props.prData.get(cell.branch);
+  const info = infoLine(cellState);
+  const prColor = infoColor(cellState);
+  const nameStyle = focused ? { inverse: true } : {};
+  const railStr = isLast ? "" : railPrefix(cell);
+  return (
+    <Box key={cell.branch} flexDirection="column" flexShrink={0}>
+      <Box flexDirection="row" flexShrink={0}>
+        <TrunkSegments segs={props.contentPrefix} />
+        {top.length > 0 && <Text color={props.color}>{top}</Text>}
+        <Text color={props.color} {...nameStyle}>{cell.branch}</Text>
+      </Box>
+      <Box flexDirection="row" flexShrink={0}>
+        <TrunkSegments segs={props.contentPrefix} />
+        {bottom.length > 0 && <Text color={props.color}>{bottom}</Text>}
+        <Text
+          color={prColor}
+          dimColor={prColor === undefined}
+          {...nameStyle}
+        >
+          {info}
+        </Text>
+      </Box>
+      {!isLast && (
+        <Box flexDirection="row" flexShrink={0}>
+          <TrunkSegments segs={props.contentPrefix} />
+          {railStr.length > 0 && <Text color={props.color}>{railStr}</Text>}
+        </Box>
+      )}
+    </Box>
+  );
+}
+
 export function StackBand(props: StackBandProps): React.ReactElement {
   const header = props.mergeStrategy
     ? `Stack: ${props.stackName} (${props.mergeStrategy})`
@@ -122,9 +163,29 @@ export function StackBand(props: StackBandProps): React.ReactElement {
 
   const sorted = [...props.cells].sort((a, b) => a.row - b.row);
   const mergedCells = sorted.filter((c) => c.merged);
-  const liveCells = sorted.filter((c) => !c.merged);
-  const hasMerged = mergedCells.length > 0;
 
+  if (mergedCells.length === 0) {
+    // No merged cells: use original rendering (identical JSX structure,
+    // preserves Ink height calculation for non-merged stacks).
+    return (
+      <Box flexDirection="column" flexShrink={0}>
+        <Box flexDirection="row" flexShrink={0}>
+          <TrunkSegments segs={props.headerPrefix} />
+          <Text color={props.color} bold>{header}</Text>
+        </Box>
+        {sorted.map((cell, i) =>
+          renderCell(
+            cell,
+            i === sorted.length - 1,
+            props.focusedBranch === cell.branch,
+            props,
+          )
+        )}
+      </Box>
+    );
+  }
+
+  const liveCells = sorted.filter((c) => !c.merged);
   return (
     <Box flexDirection="column" flexShrink={0}>
       {/* Stack header row */}
@@ -133,12 +194,10 @@ export function StackBand(props: StackBandProps): React.ReactElement {
         <Text color={props.color} bold>{header}</Text>
       </Box>
 
-      {/* Gap row after header when there are merged cells */}
-      {hasMerged && (
-        <Box flexDirection="row" flexShrink={0}>
-          <TrunkSegments segs={props.contentPrefix} />
-        </Box>
-      )}
+      {/* Gap row after header */}
+      <Box flexDirection="row" flexShrink={0}>
+        <TrunkSegments segs={props.contentPrefix} />
+      </Box>
 
       {/* Merged cells: dimmed, no connector prefix */}
       {mergedCells.map((cell) => {
@@ -162,51 +221,21 @@ export function StackBand(props: StackBandProps): React.ReactElement {
       })}
 
       {/* Gap row between merged section and live cells */}
-      {hasMerged && liveCells.length > 0 && (
+      {liveCells.length > 0 && (
         <Box flexDirection="row" flexShrink={0}>
           <TrunkSegments segs={props.contentPrefix} />
         </Box>
       )}
 
       {/* Live cells */}
-      {liveCells.map((cell, i) => {
-        const top = topPrefix(cell);
-        const bottom = bottomPrefix(cell);
-        const cellState = props.prData.get(cell.branch);
-        const info = infoLine(cellState);
-        const prColor = infoColor(cellState);
-        const focused = props.focusedBranch === cell.branch;
-        const nameStyle = focused ? { inverse: true } : {};
-        const railStr = i < liveCells.length - 1 ? railPrefix(cell) : "";
-        return (
-          <Box key={cell.branch} flexDirection="column" flexShrink={0}>
-            <Box flexDirection="row" flexShrink={0}>
-              <TrunkSegments segs={props.contentPrefix} />
-              {top.length > 0 && <Text color={props.color}>{top}</Text>}
-              <Text color={props.color} {...nameStyle}>{cell.branch}</Text>
-            </Box>
-            <Box flexDirection="row" flexShrink={0}>
-              <TrunkSegments segs={props.contentPrefix} />
-              {bottom.length > 0 && <Text color={props.color}>{bottom}</Text>}
-              <Text
-                color={prColor}
-                dimColor={prColor === undefined}
-                {...nameStyle}
-              >
-                {info}
-              </Text>
-            </Box>
-            {i < liveCells.length - 1 && (
-              <Box flexDirection="row" flexShrink={0}>
-                <TrunkSegments segs={props.contentPrefix} />
-                {railStr.length > 0 && (
-                  <Text color={props.color}>{railStr}</Text>
-                )}
-              </Box>
-            )}
-          </Box>
-        );
-      })}
+      {liveCells.map((cell, i) =>
+        renderCell(
+          cell,
+          i === liveCells.length - 1,
+          props.focusedBranch === cell.branch,
+          props,
+        )
+      )}
     </Box>
   );
 }
