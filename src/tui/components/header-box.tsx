@@ -22,27 +22,24 @@ export interface HeaderBoxProps {
  * `app.tsx` reserves 3 rows of chrome for it.
  */
 export function HeaderBox(props: HeaderBoxProps): React.ReactElement {
-  const order: TabId[] = ["all", ...props.stacks.map((s) => ({ stack: s }))];
-  const activeIdx = order.findIndex((t) =>
-    t === "all" ? props.activeTab === "all" : props.activeTab !== "all" &&
-      props.activeTab.stack === (t as { stack: string }).stack
-  );
-  const position = `[${activeIdx + 1}/${order.length}]`;
+  const total = props.stacks.length + 1;
+  const activeIdx = props.activeTab === "all"
+    ? 0
+    : Math.max(0, props.stacks.indexOf(props.activeTab.stack) + 1);
+  const position = `[${activeIdx + 1}/${total}]`;
 
-  const isAll = props.activeTab === "all";
-  const activeStackName = isAll
-    ? null
-    : (props.activeTab as { stack: string }).stack;
-  const activeStackColor = activeStackName
-    ? (props.colorByStack.get(activeStackName) ?? "white")
+  const active = props.activeTab === "all"
+    ? { kind: "all" as const, label: "All stacks", color: "gray" }
+    : {
+      kind: "stack" as const,
+      label: props.activeTab.stack,
+      color: props.colorByStack.get(props.activeTab.stack) ?? "gray",
+    };
+
+  // Border: active stack color when focused on a stack tab; gray otherwise.
+  const borderColor = props.focused && active.kind === "stack"
+    ? active.color
     : "gray";
-
-  // Border: active stack color when focused on a stack tab; gray otherwise
-  // (unfocused, or All tab active).
-  const borderColor = props.focused && !isAll ? activeStackColor : "gray";
-
-  const label = isAll ? "All stacks" : activeStackName!;
-  const dotColor = isAll ? "gray" : activeStackColor;
 
   return (
     <Box
@@ -56,9 +53,9 @@ export function HeaderBox(props: HeaderBoxProps): React.ReactElement {
     >
       <Box flexDirection="row" flexShrink={0}>
         <Text dimColor>{`stacked-prs   `}</Text>
-        <Text color={dotColor}>{`● `}</Text>
+        <Text color={active.color}>{`● `}</Text>
         <Text bold color={props.focused ? props.primaryColor : undefined}>
-          {label}
+          {active.label}
         </Text>
         <Text dimColor>{`  ${position}`}</Text>
       </Box>
