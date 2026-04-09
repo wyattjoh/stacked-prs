@@ -100,28 +100,26 @@ export async function configSplitStack(
     splits.push({ stackName: newName, branches });
   }
 
-  // Write new stack metadata for each split
+  const nodeByBranch = new Map(getAllNodes(tree).map((n) => [n.branch, n]));
+
+  // Write stack-level metadata for each split
   for (const split of splits) {
     await setBaseBranch(dir, split.stackName, baseBranch);
     if (mergeStrategy) {
       await setMergeStrategy(dir, split.stackName, mergeStrategy);
     }
-    for (const branch of split.branches) {
-      const node = getAllNodes(tree).find((n) => n.branch === branch)!;
-      await setStackNode(dir, branch, split.stackName, node.parent);
-    }
   }
 
   // Remove stack metadata only from live nodes (merged nodes stay in original stack)
-  const liveNodes = getAllNodes(tree).filter((n) => !n.merged);
+  const liveNodes = [...nodeByBranch.values()].filter((n) => !n.merged);
   for (const node of liveNodes) {
     await removeStackBranch(dir, node.branch);
   }
 
-  // Restore branch metadata now pointing to new stacks
+  // Write branch-level metadata pointing to new stacks
   for (const split of splits) {
     for (const branch of split.branches) {
-      const node = getAllNodes(tree).find((n) => n.branch === branch)!;
+      const node = nodeByBranch.get(branch)!;
       await setStackNode(dir, branch, split.stackName, node.parent);
     }
   }

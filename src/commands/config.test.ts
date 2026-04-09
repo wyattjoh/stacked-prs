@@ -363,62 +363,52 @@ describe("config", () => {
 
   describe("configLandCleanup (deferred cleanup)", () => {
     test("sets stack-merged on the merged branch instead of removing it", async () => {
-      const repo = await createTestRepo();
-      try {
-        await addBranch(repo.dir, "feature/a", "main");
-        await addBranch(repo.dir, "feature/b", "feature/a");
-        await setStackNode(repo.dir, "feature/a", "my-stack", "main");
-        await setStackNode(repo.dir, "feature/b", "my-stack", "feature/a");
-        await setBaseBranch(repo.dir, "my-stack", "main");
+      await addBranch(repo.dir, "feature/a", "main");
+      await addBranch(repo.dir, "feature/b", "feature/a");
+      await setStackNode(repo.dir, "feature/a", "my-stack", "main");
+      await setStackNode(repo.dir, "feature/b", "my-stack", "feature/a");
+      await setBaseBranch(repo.dir, "my-stack", "main");
 
-        await configLandCleanup(repo.dir, "my-stack", "feature/a");
+      await configLandCleanup(repo.dir, "my-stack", "feature/a");
 
-        // feature/a must still have its stack config keys
-        const stackName = await gitConfig(
-          repo.dir,
-          "branch.feature/a.stack-name",
-        );
-        expect(stackName).toBe("my-stack");
+      // feature/a must still have its stack config keys
+      const stackName = await gitConfig(
+        repo.dir,
+        "branch.feature/a.stack-name",
+      );
+      expect(stackName).toBe("my-stack");
 
-        // feature/a must be flagged as merged
-        const merged = await gitConfig(
-          repo.dir,
-          "branch.feature/a.stack-merged",
-        );
-        expect(merged).toBe("true");
+      // feature/a must be flagged as merged
+      const merged = await gitConfig(
+        repo.dir,
+        "branch.feature/a.stack-merged",
+      );
+      expect(merged).toBe("true");
 
-        // feature/b must have been reparented to main
-        const tree = await getStackTree(repo.dir, "my-stack");
-        const nodeB = tree.roots.find((n) =>
-          n.branch === "feature/b" && !n.merged
-        );
-        expect(nodeB).toBeDefined();
-        expect(nodeB!.parent).toBe("main");
-      } finally {
-        await repo.cleanup();
-      }
+      // feature/b must have been reparented to main
+      const tree = await getStackTree(repo.dir, "my-stack");
+      const nodeB = tree.roots.find((n) =>
+        n.branch === "feature/b" && !n.merged
+      );
+      expect(nodeB).toBeDefined();
+      expect(nodeB!.parent).toBe("main");
     });
 
     test("does not split when only one live root remains after landing", async () => {
-      const repo = await createTestRepo();
-      try {
-        await addBranch(repo.dir, "feature/a", "main");
-        await addBranch(repo.dir, "feature/b", "feature/a");
-        await setStackNode(repo.dir, "feature/a", "my-stack", "main");
-        await setStackNode(repo.dir, "feature/b", "my-stack", "feature/a");
-        await setBaseBranch(repo.dir, "my-stack", "main");
+      await addBranch(repo.dir, "feature/a", "main");
+      await addBranch(repo.dir, "feature/b", "feature/a");
+      await setStackNode(repo.dir, "feature/a", "my-stack", "main");
+      await setStackNode(repo.dir, "feature/b", "my-stack", "feature/a");
+      await setBaseBranch(repo.dir, "my-stack", "main");
 
-        const result = await configLandCleanup(
-          repo.dir,
-          "my-stack",
-          "feature/a",
-        );
+      const result = await configLandCleanup(
+        repo.dir,
+        "my-stack",
+        "feature/a",
+      );
 
-        expect(result.removed).toBe("feature/a");
-        expect(result.splitInto).toHaveLength(0);
-      } finally {
-        await repo.cleanup();
-      }
+      expect(result.removed).toBe("feature/a");
+      expect(result.splitInto).toHaveLength(0);
     });
   });
 
