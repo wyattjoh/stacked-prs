@@ -638,3 +638,99 @@ describe("executeRestack (conflict handling)", () => {
     expect(result.recovery!.resolve).toContain("rebase --continue");
   });
 });
+
+describe("executeRestack (resume)", () => {
+  let repo: TestRepo;
+
+  beforeEach(async () => {
+    repo = await createTestRepo();
+  });
+
+  afterEach(async () => {
+    await runGit(repo.dir, "rebase", "--abort").catch(() => {});
+    await repo.cleanup();
+  });
+
+  test("resume after manual conflict resolution continues the walk", async () => {
+    await runGit(repo.dir, "checkout", "main");
+    await commitFile(repo.dir, "shared.txt", "initial\n");
+    await addBranch(repo.dir, "root", "main");
+
+    await runGit(repo.dir, "checkout", "-b", "leftConflict", "root");
+    await Deno.writeTextFile(`${repo.dir}/shared.txt`, "left version\n");
+    await runGit(repo.dir, "add", "shared.txt");
+    await runGit(repo.dir, "commit", "-m", "left edits shared");
+
+    await addBranch(repo.dir, "rightClean", "root");
+
+    await setBaseBranch(repo.dir, "test", "main");
+    await setStackNode(repo.dir, "root", "test", "main");
+    await setStackNode(repo.dir, "leftConflict", "test", "root");
+    await setStackNode(repo.dir, "rightClean", "test", "root");
+
+    await setupFakeOrigin(repo.dir);
+    await runGit(repo.dir, "checkout", "main");
+    await Deno.writeTextFile(`${repo.dir}/shared.txt`, "main version\n");
+    await runGit(repo.dir, "add", "shared.txt");
+    await runGit(repo.dir, "commit", "-m", "main edits shared");
+    await runGit(repo.dir, "push", "origin", "main");
+    await runGit(repo.dir, "reset", "--hard", "HEAD~1");
+
+    // First run: leftConflict fails.
+    const first = await executeRestack(repo.dir, "test", {});
+    expect(first.ok).toBe(false);
+    expect(first.error).toBe("conflict");
+
+    // Simulate the user resolving the conflict.
+    await Deno.writeTextFile(`${repo.dir}/shared.txt`, "left version\n");
+    await runGit(repo.dir, "add", "shared.txt");
+
+    // Second run with --resume
+    const second = await executeRestack(repo.dir, "test", { resume: true });
+
+    expect(second.ok).toBe(true);
+    const leftConflictLog = await runGit(
+      repo.dir,
+      "log",
+      "--format=%s",
+      "leftConflict",
+    );
+    expect(leftConflictLog).toContain("left edits shared");
+    expect(leftConflictLog).toContain("main edits shared");
+
+    // rightClean must have been rebased in the resume walk.
+    const rightCleanLog = await runGit(
+      repo.dir,
+      "log",
+      "--format=%s",
+      "rightClean",
+    );
+    expect(rightCleanLog).toContain("main edits shared");
+
+    // Resume state should be cleared after success.
+    let resumeStateExists = false;
+    try {
+      await runGit(repo.dir, "config", "stack.test.resume-state");
+      resumeStateExists = true;
+    } catch {
+      // not set, good
+    }
+    expect(resumeStateExists).toBe(false);
+  });
+
+  test("resume without in-progress state throws", async () => {
+    await addBranch(repo.dir, "a", "main");
+    await setBaseBranch(repo.dir, "test", "main");
+    await setStackNode(repo.dir, "a", "test", "main");
+    await setupFakeOrigin(repo.dir);
+
+    let threw = false;
+    try {
+      await executeRestack(repo.dir, "test", { resume: true });
+    } catch (err) {
+      threw = true;
+      expect((err as Error).message).toContain("No restack in progress");
+    }
+    expect(threw).toBe(true);
+  });
+});

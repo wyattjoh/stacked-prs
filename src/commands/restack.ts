@@ -344,6 +344,56 @@ export interface RestackOptionsV2 {
   upstackFrom?: string;
   downstackFrom?: string;
   only?: string;
+  resume?: boolean;
+}
+
+interface ResumeState {
+  stackName: string;
+  opts: RestackOptionsV2;
+  oldParentSha: Record<string, string>;
+  completed: string[];
+}
+
+async function readResumeState(
+  dir: string,
+  stackName: string,
+): Promise<ResumeState | null> {
+  const { code, stdout } = await runGitCommand(
+    dir,
+    "config",
+    `stack.${stackName}.resume-state`,
+  );
+  if (code !== 0) return null;
+  try {
+    return JSON.parse(stdout.trim()) as ResumeState;
+  } catch {
+    return null;
+  }
+}
+
+async function writeResumeState(
+  dir: string,
+  stackName: string,
+  state: ResumeState,
+): Promise<void> {
+  await runGitCommand(
+    dir,
+    "config",
+    `stack.${stackName}.resume-state`,
+    JSON.stringify(state),
+  );
+}
+
+async function clearResumeState(
+  dir: string,
+  stackName: string,
+): Promise<void> {
+  await runGitCommand(
+    dir,
+    "config",
+    "--unset",
+    `stack.${stackName}.resume-state`,
+  );
 }
 
 async function revParse(dir: string, ref: string): Promise<string> {
@@ -533,17 +583,104 @@ export async function executeRestack(
   stackName: string,
   opts: RestackOptionsV2,
 ): Promise<RestackResultV2> {
-  const plan = await planRestack(dir, stackName, opts);
+  const existingState = await readResumeState(dir, stackName);
+  if (opts.resume && !existingState) {
+    throw new Error("No restack in progress to resume");
+  }
+  if (!opts.resume && existingState) {
+    throw new Error(
+      `Restack already in progress for stack "${stackName}". ` +
+        `Run with --resume or clear stack.${stackName}.resume-state manually.`,
+    );
+  }
+
+  const completed = new Set<string>(existingState?.completed ?? []);
+  const persistedOldParent = existingState
+    ? new Map(Object.entries(existingState.oldParentSha))
+    : null;
+  const effectiveOpts: RestackOptionsV2 = existingState
+    ? existingState.opts
+    : opts;
+
+  // On resume, finish any in-progress git rebase first. If it still conflicts,
+  // bail out with the same conflict result shape as before.
+  const makeRecovery = (): RestackResultV2["recovery"] => ({
+    resolve: "git add <conflicting files> && git rebase --continue",
+    abort: "git rebase --abort",
+    resume:
+      `deno run --allow-run=git,gh --allow-env --allow-read src/cli.ts restack --stack-name=${stackName} --resume`,
+  });
+
+  if (existingState) {
+    const continueResult = await runGitCommand(dir, "rebase", "--continue");
+    if (continueResult.code !== 0) {
+      const stillConflicted = await getConflictFiles(dir);
+      if (stillConflicted.length > 0) {
+        return {
+          ok: false,
+          error: "conflict",
+          rebases: [],
+          recovery: makeRecovery(),
+        };
+      }
+      return { ok: false, error: "other", rebases: [] };
+    }
+    // The branch that was mid-rebase is the head we just finished. We don't
+    // know its name from the config alone, but we do know every branch in
+    // `completed` is already done, and the next one not yet in `completed`
+    // from the plan is what --continue just finished. We mark it after we
+    // discover it in the plan walk below.
+  }
+
+  const plan = await planRestack(dir, stackName, effectiveOpts);
   const executed: RebasePlan[] = [];
   let firstFailure: "conflict" | "other" | undefined;
   let recovery: RestackResultV2["recovery"] | undefined;
   let conflictedAt: string | undefined;
+  let justContinuedBranch: string | undefined;
+
+  if (!existingState) {
+    // First-time entry: persist the initial snapshot before any rebase runs.
+    const initialOldParent: Record<string, string> = {};
+    for (const entry of plan.rebases) {
+      initialOldParent[entry.branch] = entry.oldParentSha;
+    }
+    await writeResumeState(dir, stackName, {
+      stackName,
+      opts: effectiveOpts,
+      oldParentSha: initialOldParent,
+      completed: [],
+    });
+  }
 
   for (const entry of plan.rebases) {
     if (conflictedAt !== undefined) break;
 
+    if (completed.has(entry.branch)) {
+      executed.push({ ...entry, status: "rebased" });
+      continue;
+    }
+
+    // The first non-completed branch on resume is the one that was mid-rebase
+    // and just finished via `git rebase --continue`. Mark it done.
+    if (existingState && justContinuedBranch === undefined) {
+      justContinuedBranch = entry.branch;
+      executed.push({ ...entry, status: "rebased" });
+      completed.add(entry.branch);
+      await writeResumeState(dir, stackName, {
+        stackName,
+        opts: effectiveOpts,
+        oldParentSha: persistedOldParent
+          ? Object.fromEntries(persistedOldParent)
+          : {},
+        completed: Array.from(completed),
+      });
+      continue;
+    }
+
     if (entry.status === "skipped-clean") {
       executed.push(entry);
+      completed.add(entry.branch);
       continue;
     }
 
@@ -563,14 +700,30 @@ export async function executeRestack(
       continue;
     }
 
+    // On resume, use the persisted oldParentSha (parents may have been
+    // rewritten already by the previous process, so re-snapshotting would be
+    // wrong). On first entry, the plan's snapshot is authoritative.
+    const boundary = persistedOldParent?.get(entry.branch) ??
+      entry.oldParentSha;
     const result = await rebaseBranch(
       dir,
       entry.branch,
-      entry.oldParentSha,
+      boundary,
       entry.newTarget,
     );
     if (result.ok) {
       executed.push({ ...entry, status: "rebased" });
+      completed.add(entry.branch);
+      await writeResumeState(dir, stackName, {
+        stackName,
+        opts: effectiveOpts,
+        oldParentSha: persistedOldParent
+          ? Object.fromEntries(persistedOldParent)
+          : Object.fromEntries(
+            plan.rebases.map((e) => [e.branch, e.oldParentSha]),
+          ),
+        completed: Array.from(completed),
+      });
       continue;
     }
 
@@ -584,12 +737,7 @@ export async function executeRestack(
     });
     conflictedAt = entry.branch;
     firstFailure = wasConflict ? "conflict" : "other";
-    recovery = {
-      resolve: "git add <conflicting files> && git rebase --continue",
-      abort: "git rebase --abort",
-      resume:
-        `deno run --allow-run=git,gh --allow-env --allow-read src/cli.ts restack --stack-name=${stackName} --resume`,
-    };
+    recovery = makeRecovery();
     // Intentionally do NOT abort the rebase. Leave the working tree in its
     // conflicted state so the user can resolve and `git rebase --continue`.
     // Resume (Task 6) will finish the in-progress rebase and continue walking
@@ -616,5 +764,6 @@ export async function executeRestack(
     };
   }
 
+  await clearResumeState(dir, stackName);
   return { ok: true, rebases: executed };
 }
