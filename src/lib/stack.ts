@@ -129,6 +129,7 @@ export async function removeStackBranch(
     `branch.${branch}.stack-name`,
     `branch.${branch}.stack-parent`,
     `branch.${branch}.stack-order`,
+    `branch.${branch}.stack-merged`,
   ];
 
   // Ignore exit codes: key may not exist (exit 5 from git config --unset).
@@ -148,6 +149,8 @@ export interface StackNode {
   stackName: string;
   parent: string;
   children: StackNode[];
+  /** True when branch.<name>.stack-merged = "true" in git config. */
+  merged?: boolean;
 }
 
 export interface StackTree {
@@ -166,6 +169,14 @@ export async function setStackNode(
 ): Promise<void> {
   await gitConfigSet(dir, `branch.${branch}.stack-name`, stackName);
   await gitConfigSet(dir, `branch.${branch}.stack-parent`, parent);
+}
+
+/** Mark a branch as historically merged (stack-merged = "true"). */
+export async function setStackMerged(
+  dir: string,
+  branch: string,
+): Promise<void> {
+  await gitConfigSet(dir, `branch.${branch}.stack-merged`, "true");
 }
 
 /** Get the base branch for a stack. Returns undefined if not set. */
@@ -285,6 +296,14 @@ export async function getStackTree(
     }),
   );
 
+  const mergedFlags = new Map<string, boolean>();
+  await Promise.all(
+    matchingBranches.map(async (branch) => {
+      const val = await gitConfig(dir, `branch.${branch}.stack-merged`);
+      if (val === "true") mergedFlags.set(branch, true);
+    }),
+  );
+
   // Build parent -> children map
   const childrenMap = new Map<string, string[]>();
   for (const [branch, parent] of branchParents) {
@@ -306,6 +325,7 @@ export async function getStackTree(
       stackName: resolvedStackName!,
       parent: branchParents.get(branch)!,
       children,
+      ...(mergedFlags.get(branch) ? { merged: true } : {}),
     };
   };
 

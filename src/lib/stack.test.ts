@@ -19,6 +19,7 @@ import {
   setBaseBranch,
   setMergeStrategy,
   setStackBranch,
+  setStackMerged,
   setStackNode,
   validateStackTree,
   walkDFS,
@@ -694,5 +695,49 @@ describe("getAllStackTrees", () => {
     const trees = await getAllStackTrees(repo.dir);
     expect(trees).toHaveLength(1);
     expect(trees[0].stackName).toBe("alpha");
+  });
+});
+
+describe("getStackTree merged field", () => {
+  test("sets merged=true on nodes whose branch.<name>.stack-merged is 'true'", async () => {
+    const repo = await createTestRepo();
+    try {
+      await addBranch(repo.dir, "feature/a", "main");
+      await addBranch(repo.dir, "feature/b", "main");
+      await setStackNode(repo.dir, "feature/a", "my-stack", "main");
+      await setStackNode(repo.dir, "feature/b", "my-stack", "main");
+      await setBaseBranch(repo.dir, "my-stack", "main");
+      // Mark feature/a as merged
+      await runGitCommand(
+        repo.dir,
+        "config",
+        "branch.feature/a.stack-merged",
+        "true",
+      );
+
+      const tree = await getStackTree(repo.dir, "my-stack");
+      const nodeA = tree.roots.find((n) => n.branch === "feature/a");
+      const nodeB = tree.roots.find((n) => n.branch === "feature/b");
+      expect(nodeA?.merged).toBe(true);
+      expect(nodeB?.merged).toBeUndefined();
+    } finally {
+      await repo.cleanup();
+    }
+  });
+
+  test("sets merged=true using setStackMerged helper", async () => {
+    const repo = await createTestRepo();
+    try {
+      await addBranch(repo.dir, "feature/c", "main");
+      await setStackNode(repo.dir, "feature/c", "helper-stack", "main");
+      await setBaseBranch(repo.dir, "helper-stack", "main");
+      await setStackMerged(repo.dir, "feature/c");
+
+      const tree = await getStackTree(repo.dir, "helper-stack");
+      const nodeC = tree.roots.find((n) => n.branch === "feature/c");
+      expect(nodeC?.merged).toBe(true);
+    } finally {
+      await repo.cleanup();
+    }
   });
 });
