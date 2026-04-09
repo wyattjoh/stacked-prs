@@ -334,3 +334,33 @@ export function buildPushSteps(
   }
   return steps;
 }
+
+/**
+ * Build PR base-retarget and ready-flip steps. Only branches whose
+ * recorded parent in the tree IS the merged root require a base change
+ * (they become direct children of the stack's base branch). Flip to
+ * ready when a branch was previously a draft (submit policy:
+ * parent-is-base PRs are ready).
+ */
+export function buildPrUpdateSteps(
+  tree: StackTree,
+  prInfoByBranch: Map<string, PrInfo>,
+  mergedRoot: string,
+): LandPrUpdate[] {
+  const updates: LandPrUpdate[] = [];
+  for (const node of getAllNodes(tree)) {
+    if (node.branch === mergedRoot) continue;
+    if (node.parent !== mergedRoot) continue;
+    const pr = prInfoByBranch.get(node.branch);
+    if (!pr) continue;
+    updates.push({
+      branch: node.branch,
+      prNumber: pr.number,
+      oldBase: mergedRoot,
+      newBase: tree.baseBranch,
+      wasDraft: pr.isDraft,
+      flipToReady: pr.isDraft,
+    });
+  }
+  return updates;
+}

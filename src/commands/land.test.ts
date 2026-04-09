@@ -225,3 +225,51 @@ describe("buildPushSteps", () => {
     }
   });
 });
+
+describe("buildPrUpdateSteps", () => {
+  it("retargets former children of merged root to base branch", async () => {
+    const repo = await createTestRepo();
+    try {
+      await addBranch(repo.dir, "feat/a", "main");
+      await addBranch(repo.dir, "feat/b", "feat/a");
+      await addBranch(repo.dir, "feat/c", "feat/b");
+      await initStack(repo, "s", [
+        ["feat/a", "main"],
+        ["feat/b", "feat/a"],
+        ["feat/c", "feat/b"],
+      ]);
+      const tree = await getStackTree(repo.dir, "s");
+      const { buildPrUpdateSteps } = await import("./land.ts");
+      const prInfoByBranch = new Map([
+        ["feat/b", { number: 20, url: "", state: "OPEN", isDraft: true }],
+        ["feat/c", { number: 30, url: "", state: "OPEN", isDraft: true }],
+      ]);
+      const updates = buildPrUpdateSteps(tree, prInfoByBranch, "feat/a");
+      expect(updates.length).toBe(1);
+      expect(updates[0].branch).toBe("feat/b");
+      expect(updates[0].prNumber).toBe(20);
+      expect(updates[0].newBase).toBe("main");
+      expect(updates[0].flipToReady).toBe(true);
+    } finally {
+      await repo.cleanup();
+    }
+  });
+
+  it("does not flip non-draft children to ready", async () => {
+    const repo = await createTestRepo();
+    try {
+      await addBranch(repo.dir, "feat/a", "main");
+      await addBranch(repo.dir, "feat/b", "feat/a");
+      await initStack(repo, "s", [["feat/a", "main"], ["feat/b", "feat/a"]]);
+      const tree = await getStackTree(repo.dir, "s");
+      const { buildPrUpdateSteps } = await import("./land.ts");
+      const prInfoByBranch = new Map([
+        ["feat/b", { number: 20, url: "", state: "OPEN", isDraft: false }],
+      ]);
+      const updates = buildPrUpdateSteps(tree, prInfoByBranch, "feat/a");
+      expect(updates[0].flipToReady).toBe(false);
+    } finally {
+      await repo.cleanup();
+    }
+  });
+});
