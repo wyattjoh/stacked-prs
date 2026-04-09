@@ -160,8 +160,10 @@ data sources as non-interactive `status` (`getAllStackTrees`, `git merge-base`,
 `gh pr list`), and does not write anything. The code is split along a strict
 purity boundary so most of it is testable without Ink:
 
-- Pure (`lib/layout.ts`, `lib/colors.ts`, `state/reducer.ts`,
-  `state/navigation.ts`) — unit tested with synthetic inputs, no Ink, no git.
+- Pure (`lib/layout.ts`, `state/reducer.ts`, `state/navigation.ts`) — unit
+  tested with synthetic inputs, no Ink, no git. Per-stack color assignment lives
+  in the shared `src/lib/colors.ts` (used by both the TUI and the `clean` CLI
+  output).
 - Impure (`state/loader.ts`, `lib/clipboard.ts`, `components/*.tsx`, `app.tsx`)
   — loader uses the existing `gh.ts` fixture system, components are tested with
   `ink-testing-library`, and `app.tsx` gets an integration test that spins up a
