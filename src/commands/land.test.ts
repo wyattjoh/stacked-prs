@@ -6,6 +6,7 @@ import {
   classifyLandCase,
   executeLand,
   isShallowRepository,
+  LandError,
   type LandProgressEvent,
   planLand,
   previewLandCleanup,
@@ -462,6 +463,89 @@ describe("planLand", () => {
       expect([...plan.branchesToDelete].sort()).toEqual(["feat/a", "feat/b"]);
     } finally {
       await repo.cleanup();
+    }
+  });
+});
+
+describe("executeLand case A conflict rollback", () => {
+  it("rebase conflict rolls back every touched branch to its pre-land SHA", async () => {
+    const env = await createRepoWithOrigin();
+    try {
+      // Create a conflict: feat/a and main both modify README.md.
+      await runGit(env.dir, "checkout", "-b", "feat/a", "main");
+      await Deno.writeTextFile(
+        `${env.dir}/README.md`,
+        "# Conflicting change from A\n",
+      );
+      await runGit(env.dir, "add", "README.md");
+      await runGit(env.dir, "commit", "-m", "modify readme on a");
+      await runGit(env.dir, "push", "origin", "feat/a");
+
+      await runGit(env.dir, "checkout", "-b", "feat/b", "feat/a");
+      await Deno.writeTextFile(
+        `${env.dir}/README.md`,
+        "# Further change from B\n",
+      );
+      await runGit(env.dir, "add", "README.md");
+      await runGit(env.dir, "commit", "-m", "modify readme on b");
+      await runGit(env.dir, "push", "origin", "feat/b");
+
+      await initStack(env, "s", [["feat/a", "main"], ["feat/b", "feat/a"]]);
+
+      // Diverge main with a conflicting README change.
+      await runGit(env.dir, "checkout", "main");
+      await Deno.writeTextFile(
+        `${env.dir}/README.md`,
+        "# Main's conflicting change\n",
+      );
+      await runGit(env.dir, "add", "README.md");
+      await runGit(env.dir, "commit", "-m", "modify readme on main");
+      await runGit(env.dir, "push", "origin", "main");
+      await runGit(env.dir, "fetch", "origin", "main");
+
+      const preLandTipB =
+        (await runGitCommand(env.dir, "rev-parse", "feat/b")).stdout;
+
+      const prStates: PrStateByBranch = new Map([
+        ["feat/a", "MERGED"],
+        ["feat/b", "OPEN"],
+      ]);
+      const prInfo = new Map<string, PrInfo>([
+        ["feat/b", { number: 20, url: "", state: "OPEN", isDraft: true }],
+      ]);
+
+      const plan = await planLand(env.dir, "s", prStates, prInfo);
+
+      let caught: LandError | null = null;
+      try {
+        await executeLand(env.dir, plan, {
+          onProgress: () => {},
+          freshPrStates: () => Promise.resolve(prStates),
+        });
+      } catch (err) {
+        if (err instanceof LandError) caught = err;
+      }
+
+      expect(caught).not.toBeNull();
+      expect(caught!.name).toBe("LandError");
+      expect(caught!.failedAt.kind).toBe("rebase");
+
+      // Branch tip is restored.
+      const postTipB =
+        (await runGitCommand(env.dir, "rev-parse", "feat/b")).stdout;
+      expect(postTipB).toBe(preLandTipB);
+
+      // No rebase in progress.
+      const rebaseHead = await runGitCommand(
+        env.dir,
+        "rev-parse",
+        "--verify",
+        "--quiet",
+        "REBASE_HEAD",
+      );
+      expect(rebaseHead.code).not.toBe(0);
+    } finally {
+      await env.cleanup();
     }
   });
 });
