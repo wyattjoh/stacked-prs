@@ -165,14 +165,12 @@ export type Action =
   | { type: "ERROR_LOG"; message: string }
   | { type: "LAND_START"; stackName: string }
   | { type: "LAND_PLAN_LOADED"; plan: LandPlan }
-  | { type: "LAND_PLAN_ERROR"; message: string }
   | { type: "LAND_CONFIRM" }
   | { type: "LAND_CANCEL" }
   | { type: "LAND_PROGRESS"; event: LandProgressEvent }
   | {
     type: "LAND_ERROR";
     plan: LandPlan | null;
-    events: LandProgressEvent[];
     message: string;
     rollback: LandRollbackReport | null;
   }

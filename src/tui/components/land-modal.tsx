@@ -117,127 +117,118 @@ function PlanSummary({ plan }: { plan: LandPlan }): React.ReactElement {
 export function LandModal(
   { phase }: LandModalProps,
 ): React.ReactElement | null {
-  if (phase.phase === "idle") return null;
-
-  if (phase.phase === "planning") {
-    return (
-      <Box borderStyle="double" flexDirection="column" padding={1}>
-        <Text>Computing land plan for stack {phase.stackName}...</Text>
-      </Box>
-    );
-  }
-
-  if (phase.phase === "confirming") {
-    return (
-      <Box borderStyle="double" flexDirection="column" padding={1}>
-        <PlanSummary plan={phase.plan} />
-        <Box marginTop={1}>
-          <Text dimColor>[y] confirm [n/esc] cancel</Text>
+  switch (phase.phase) {
+    case "idle":
+      return null;
+    case "planning":
+      return (
+        <Box borderStyle="double" flexDirection="column" padding={1}>
+          <Text>Computing land plan for stack {phase.stackName}...</Text>
         </Box>
-      </Box>
-    );
-  }
-
-  if (phase.phase === "executing") {
-    return (
-      <Box borderStyle="double" flexDirection="column" padding={1}>
-        <Text bold>Executing land for stack {phase.plan.stackName}</Text>
-        <Box flexDirection="column" marginTop={1}>
-          {phase.events.map((e, i) => (
-            <Box key={`e-${i}-${stepKey(e.step)}`}>
-              <Text>{formatEvent(e)}</Text>
-            </Box>
-          ))}
-        </Box>
-      </Box>
-    );
-  }
-
-  if (phase.phase === "done") {
-    return (
-      <Box borderStyle="double" flexDirection="column" padding={1}>
-        <Text color="green" bold>
-          Landed stack {phase.result.plan.stackName}
-        </Text>
-        {phase.result.autoMergedBranches.length > 0 && (
-          <Text>
-            Auto-merged: {phase.result.autoMergedBranches.join(", ")}
-          </Text>
-        )}
-        {phase.result.split.length > 1 && (
-          <Box flexDirection="column" marginTop={1}>
-            <Text>Split into:</Text>
-            {phase.result.split.map((s) => (
-              <Box key={`ds-${s.stackName}`}>
-                <Text>{s.stackName}</Text>
-              </Box>
-            ))}
+      );
+    case "confirming":
+      return (
+        <Box borderStyle="double" flexDirection="column" padding={1}>
+          <PlanSummary plan={phase.plan} />
+          <Box marginTop={1}>
+            <Text dimColor>[y] confirm [n/esc] cancel</Text>
           </Box>
-        )}
-        <Box marginTop={1}>
-          <Text dimColor>[esc] dismiss</Text>
         </Box>
-      </Box>
-    );
-  }
-
-  if (phase.phase === "error") {
-    return (
-      <Box borderStyle="double" flexDirection="column" padding={1}>
-        <Text color="red" bold>Land failed</Text>
-        <Text>{phase.message}</Text>
-        {phase.events.length > 0 && (
+      );
+    case "executing":
+      return (
+        <Box borderStyle="double" flexDirection="column" padding={1}>
+          <Text bold>Executing land for stack {phase.plan.stackName}</Text>
           <Box flexDirection="column" marginTop={1}>
-            <Text bold>Steps</Text>
             {phase.events.map((e, i) => (
-              <Box key={`ee-${i}-${stepKey(e.step)}`}>
+              <Box key={`e-${i}-${stepKey(e.step)}`}>
                 <Text>{formatEvent(e)}</Text>
               </Box>
             ))}
           </Box>
-        )}
-        {phase.rollback && (
-          <Box flexDirection="column" marginTop={1}>
-            <Text bold>Rollback</Text>
-            {phase.rollback.localRestored.length > 0 && (
-              <Text>
-                local restored: {phase.rollback.localRestored.join(", ")}
-              </Text>
-            )}
-            {phase.rollback.localFailed.length > 0 && (
-              <Text color="red">
-                local FAILED: {phase.rollback.localFailed
-                  .map((f) => `${f.branch} (${f.reason})`)
-                  .join("; ")}
-              </Text>
-            )}
-            {phase.rollback.remoteRestored.length > 0 && (
-              <Text>
-                remote restored: {phase.rollback.remoteRestored.join(", ")}
-              </Text>
-            )}
-            {phase.rollback.remoteFailed.length > 0 && (
-              <Text color="red">
-                remote FAILED: {phase.rollback.remoteFailed
-                  .map((f) => `${f.branch} (${f.reason})`)
-                  .join("; ")}
-              </Text>
-            )}
-            {phase.rollback.prFailed.length > 0 && (
-              <Text color="red">
-                pr FAILED: {phase.rollback.prFailed
-                  .map((f) => `#${f.prNumber} (${f.reason})`)
-                  .join("; ")}
-              </Text>
-            )}
-          </Box>
-        )}
-        <Box marginTop={1}>
-          <Text dimColor>[esc] dismiss</Text>
         </Box>
-      </Box>
-    );
+      );
+    case "done":
+      return (
+        <Box borderStyle="double" flexDirection="column" padding={1}>
+          <Text color="green" bold>
+            Landed stack {phase.result.plan.stackName}
+          </Text>
+          {phase.result.autoMergedBranches.length > 0 && (
+            <Text>
+              Auto-merged: {phase.result.autoMergedBranches.join(", ")}
+            </Text>
+          )}
+          {phase.result.split.length > 1 && (
+            <Box flexDirection="column" marginTop={1}>
+              <Text>Split into:</Text>
+              {phase.result.split.map((s) => (
+                <Box key={`ds-${s.stackName}`}>
+                  <Text>{s.stackName}</Text>
+                </Box>
+              ))}
+            </Box>
+          )}
+          <Box marginTop={1}>
+            <Text dimColor>[esc] dismiss</Text>
+          </Box>
+        </Box>
+      );
+    case "error":
+      return (
+        <Box borderStyle="double" flexDirection="column" padding={1}>
+          <Text color="red" bold>Land failed</Text>
+          <Text>{phase.message}</Text>
+          {phase.events.length > 0 && (
+            <Box flexDirection="column" marginTop={1}>
+              <Text bold>Steps</Text>
+              {phase.events.map((e, i) => (
+                <Box key={`ee-${i}-${stepKey(e.step)}`}>
+                  <Text>{formatEvent(e)}</Text>
+                </Box>
+              ))}
+            </Box>
+          )}
+          {phase.rollback && (
+            <Box flexDirection="column" marginTop={1}>
+              <Text bold>Rollback</Text>
+              {phase.rollback.localRestored.length > 0 && (
+                <Text>
+                  local restored: {phase.rollback.localRestored.join(", ")}
+                </Text>
+              )}
+              {phase.rollback.localFailed.length > 0 && (
+                <Text color="red">
+                  local FAILED: {phase.rollback.localFailed
+                    .map((f) => `${f.branch} (${f.reason})`)
+                    .join("; ")}
+                </Text>
+              )}
+              {phase.rollback.remoteRestored.length > 0 && (
+                <Text>
+                  remote restored: {phase.rollback.remoteRestored.join(", ")}
+                </Text>
+              )}
+              {phase.rollback.remoteFailed.length > 0 && (
+                <Text color="red">
+                  remote FAILED: {phase.rollback.remoteFailed
+                    .map((f) => `${f.branch} (${f.reason})`)
+                    .join("; ")}
+                </Text>
+              )}
+              {phase.rollback.prFailed.length > 0 && (
+                <Text color="red">
+                  pr FAILED: {phase.rollback.prFailed
+                    .map((f) => `#${f.prNumber} (${f.reason})`)
+                    .join("; ")}
+                </Text>
+              )}
+            </Box>
+          )}
+          <Box marginTop={1}>
+            <Text dimColor>[esc] dismiss</Text>
+          </Box>
+        </Box>
+      );
   }
-
-  return null;
 }

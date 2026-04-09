@@ -926,6 +926,94 @@ describe("executeLand case A nav phase", () => {
   });
 });
 
+describe("executeLand HEAD safety", () => {
+  it("deletes branches even when HEAD starts on a branch being deleted", async () => {
+    const env = await createRepoWithOrigin();
+    try {
+      await addBranch(env.dir, "feat/a", "main");
+      await addBranch(env.dir, "feat/b", "feat/a");
+      await initStack(env, "s", [["feat/a", "main"], ["feat/b", "feat/a"]]);
+
+      // Start on feat/a, which will be deleted by the all-merged land.
+      await runGit(env.dir, "checkout", "feat/a");
+
+      const prStates: PrStateByBranch = new Map([
+        ["feat/a", "MERGED"],
+        ["feat/b", "MERGED"],
+      ]);
+      const plan = await planLand(env.dir, "s", prStates, new Map());
+      expect(plan.case).toBe("all-merged");
+
+      const events: LandProgressEvent[] = [];
+      await executeLand(env.dir, plan, {
+        onProgress: (e) => events.push(e),
+        freshPrStates: () => Promise.resolve(prStates),
+      });
+
+      // Both branches must be gone.
+      const aExists = await runGitCommand(
+        env.dir,
+        "rev-parse",
+        "--verify",
+        "refs/heads/feat/a",
+      );
+      expect(aExists.code).not.toBe(0);
+      const bExists = await runGitCommand(
+        env.dir,
+        "rev-parse",
+        "--verify",
+        "refs/heads/feat/b",
+      );
+      expect(bExists.code).not.toBe(0);
+
+      // No deletion events should be "failed".
+      const deleteEvents = events.filter((e) => e.step.kind === "delete");
+      expect(deleteEvents.length).toBeGreaterThan(0);
+      expect(deleteEvents.every((e) => e.status !== "failed")).toBe(true);
+    } finally {
+      await env.cleanup();
+    }
+  });
+});
+
+describe("executeLand idempotent deletion", () => {
+  it("emits skipped when a branch is already absent", async () => {
+    const env = await createRepoWithOrigin();
+    try {
+      await addBranch(env.dir, "feat/a", "main");
+      await addBranch(env.dir, "feat/b", "feat/a");
+      await initStack(env, "s", [["feat/a", "main"], ["feat/b", "feat/a"]]);
+
+      const prStates: PrStateByBranch = new Map([
+        ["feat/a", "MERGED"],
+        ["feat/b", "MERGED"],
+      ]);
+      const plan = await planLand(env.dir, "s", prStates, new Map());
+
+      // Pre-delete feat/b before executing the land plan.
+      await runGit(env.dir, "checkout", "main");
+      await runGit(env.dir, "branch", "-D", "feat/b");
+
+      const events: LandProgressEvent[] = [];
+      await executeLand(env.dir, plan, {
+        onProgress: (e) => events.push(e),
+        freshPrStates: () => Promise.resolve(prStates),
+      });
+
+      const bDeleteEvent = events.findLast(
+        (e) =>
+          e.step.kind === "delete" &&
+          "branch" in e.step &&
+          e.step.branch === "feat/b",
+      );
+      expect(bDeleteEvent).toBeDefined();
+      expect(bDeleteEvent!.status).toBe("skipped");
+    } finally {
+      await env.cleanup();
+    }
+  });
+});
+
 describe("executeLand stale-plan detection", () => {
   it("aborts before mutation when a merged PR has been reopened", async () => {
     const env = await createRepoWithOrigin();

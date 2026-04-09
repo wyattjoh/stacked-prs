@@ -182,17 +182,6 @@ export function reducer(state: State, action: Action): State {
       };
     case "LAND_PLAN_LOADED":
       return { ...state, land: { phase: "confirming", plan: action.plan } };
-    case "LAND_PLAN_ERROR":
-      return {
-        ...state,
-        land: {
-          phase: "error",
-          plan: null,
-          events: [],
-          message: action.message,
-          rollback: null,
-        },
-      };
     case "LAND_CONFIRM": {
       if (state.land.phase !== "confirming") return state;
       return {
@@ -222,7 +211,7 @@ export function reducer(state: State, action: Action): State {
         land: {
           phase: "error",
           plan: action.plan,
-          events: action.events,
+          events: state.land.phase === "executing" ? state.land.events : [],
           message: action.message,
           rollback: action.rollback,
         },

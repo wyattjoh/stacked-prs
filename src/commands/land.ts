@@ -125,8 +125,6 @@ export class UnsupportedLandShape extends Error {
   }
 }
 
-// Suppress unused-import warnings at the module boundary. These types are
-// re-used by land-related helpers in later tasks (preflight, plan, execute).
 export type { DirtyWorktree, NavAction, PrInfo, SplitInfo, WorktreeCollision };
 
 import {
@@ -609,15 +607,54 @@ async function unsetConfig(dir: string, key: string): Promise<void> {
   await runGitCommand(dir, "config", "--unset", key);
 }
 
+/**
+ * If HEAD is currently a symbolic ref pointing to one of `branchesToDelete`,
+ * detach it to the current commit SHA so the deletion can proceed. Has no
+ * effect when HEAD is already detached or points to a surviving branch.
+ */
+async function detachHeadFromDeleted(
+  dir: string,
+  branchesToDelete: string[],
+): Promise<void> {
+  const { code, stdout } = await runGitCommand(
+    dir,
+    "symbolic-ref",
+    "--short",
+    "HEAD",
+  );
+  if (code !== 0) return; // Already detached.
+  if (!branchesToDelete.includes(stdout.trim())) return;
+  const { code: shaCode, stdout: sha } = await runGitCommand(
+    dir,
+    "rev-parse",
+    "HEAD",
+  );
+  if (shaCode !== 0) return;
+  await runGitCommand(dir, "checkout", "--detach", sha.trim());
+}
+
 async function executeCaseBCleanup(
   dir: string,
   plan: LandPlan,
   hooks: LandHooks,
 ): Promise<LandResult> {
+  // If HEAD is on a branch about to be deleted, detach it first.
+  await detachHeadFromDeleted(dir, plan.branchesToDelete);
+
   // Leaves-first: reverse the DFS order stored in branchesToDelete.
   const order = [...plan.branchesToDelete].reverse();
   for (const branch of order) {
     emit(hooks, { kind: "delete", branch }, "running");
+    const { code: existsCode } = await runGitCommand(
+      dir,
+      "rev-parse",
+      "--verify",
+      `refs/heads/${branch}`,
+    );
+    if (existsCode !== 0) {
+      emit(hooks, { kind: "delete", branch }, "skipped", "already absent");
+      continue;
+    }
     const { code, stderr } = await runGitCommand(dir, "branch", "-D", branch);
     if (code !== 0) {
       emit(hooks, { kind: "delete", branch }, "failed", stderr);
@@ -636,29 +673,7 @@ async function executeCaseBCleanup(
   await unsetConfig(dir, `stack.${plan.stackName}.base-branch`);
   await unsetConfig(dir, `stack.${plan.stackName}.resume-state`);
 
-  emit(hooks, { kind: "restore-head" }, "running");
-  const ref = plan.originalHeadRef;
-  if (ref.startsWith("refs/")) {
-    const branchName = ref.replace(/^refs\/heads\//, "");
-    const { code, stderr } = await runGitCommand(dir, "checkout", branchName);
-    if (code !== 0) {
-      emit(hooks, { kind: "restore-head" }, "failed", stderr);
-    } else {
-      emit(hooks, { kind: "restore-head" }, "ok");
-    }
-  } else {
-    const { code, stderr } = await runGitCommand(
-      dir,
-      "checkout",
-      "--detach",
-      ref,
-    );
-    if (code !== 0) {
-      emit(hooks, { kind: "restore-head" }, "failed", stderr);
-    } else {
-      emit(hooks, { kind: "restore-head" }, "ok");
-    }
-  }
+  await restoreHead(dir, plan, hooks);
 
   return { plan, autoMergedBranches: [], split: [] };
 }
@@ -1009,8 +1024,19 @@ async function executeCaseA(
   // Delete the merged root and any auto-merged branches. Deletion failures
   // are best-effort: the stack has already landed at this point.
   const toDelete = [mergedRoot, ...state.autoMerged];
+  await detachHeadFromDeleted(dir, toDelete);
   for (const branch of toDelete) {
     emit(hooks, { kind: "delete", branch }, "running");
+    const { code: existsCode } = await runGitCommand(
+      dir,
+      "rev-parse",
+      "--verify",
+      `refs/heads/${branch}`,
+    );
+    if (existsCode !== 0) {
+      emit(hooks, { kind: "delete", branch }, "skipped", "already absent");
+      continue;
+    }
     const { code, stderr } = await runGitCommand(dir, "branch", "-D", branch);
     if (code !== 0) {
       emit(hooks, { kind: "delete", branch }, "failed", stderr);
@@ -1060,7 +1086,7 @@ async function restoreHead(
 }
 
 async function executeCaseAPrCloses(
-  _dir: string,
+  dir: string,
   plan: LandPlan,
   hooks: LandHooks,
   state: ExecState,
@@ -1085,6 +1111,9 @@ async function executeCaseAPrCloses(
         "failed",
         (err as Error).message,
       );
+      await rollbackPrUpdates(dir, plan, state);
+      await rollbackRemotePushes(dir, plan, state);
+      await rollbackLocalRebases(dir, plan, state);
       throw new LandError(
         `PR close for ${update.branch} failed: ${(err as Error).message}`,
         plan,
@@ -1154,6 +1183,15 @@ export async function executeLand(
       wt.worktreePath,
     );
     if (code !== 0) {
+      if (stderr.includes("is not a working tree")) {
+        emit(
+          hooks,
+          { kind: "remove-worktree", branch: wt.branch },
+          "skipped",
+          "already absent",
+        );
+        continue;
+      }
       emit(
         hooks,
         { kind: "remove-worktree", branch: wt.branch },

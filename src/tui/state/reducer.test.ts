@@ -222,16 +222,53 @@ describe("reducer", () => {
     expect(s.land.events.length).toBe(1);
   });
 
-  test("LAND_PLAN_ERROR transitions to error phase", () => {
-    let s = reducer(initialState(), { type: "LAND_START", stackName: "s" });
-    s = reducer(s, { type: "LAND_PLAN_ERROR", message: "unsupported" });
-    expect(s.land.phase).toBe("error");
-  });
-
   test("LAND_DISMISS from error returns to idle", () => {
     let s = reducer(initialState(), { type: "LAND_START", stackName: "s" });
-    s = reducer(s, { type: "LAND_PLAN_ERROR", message: "unsupported" });
+    s = reducer(s, {
+      type: "LAND_ERROR",
+      plan: null,
+      message: "unsupported",
+      rollback: null,
+    });
     s = reducer(s, { type: "LAND_DISMISS" });
     expect(s.land.phase).toBe("idle");
+  });
+
+  test("LAND_ERROR preserves events accumulated during executing phase", () => {
+    let s = reducer(initialState(), { type: "LAND_START", stackName: "s" });
+    s = reducer(s, { type: "LAND_PLAN_LOADED", plan: fakeLandPlan() });
+    s = reducer(s, { type: "LAND_CONFIRM" });
+    s = reducer(s, {
+      type: "LAND_PROGRESS",
+      event: { step: { kind: "fetch" }, status: "ok" },
+    });
+    s = reducer(s, {
+      type: "LAND_PROGRESS",
+      event: { step: { kind: "rebase", branch: "feat/a" }, status: "running" },
+    });
+    s = reducer(s, {
+      type: "LAND_ERROR",
+      plan: null,
+      message: "rebase failed",
+      rollback: null,
+    });
+    if (s.land.phase !== "error") {
+      throw new Error("expected error phase");
+    }
+    expect(s.land.events.length).toBe(2);
+  });
+
+  test("LAND_ERROR from planning phase has empty events", () => {
+    let s = reducer(initialState(), { type: "LAND_START", stackName: "s" });
+    s = reducer(s, {
+      type: "LAND_ERROR",
+      plan: null,
+      message: "plan failed",
+      rollback: null,
+    });
+    if (s.land.phase !== "error") {
+      throw new Error("expected error phase");
+    }
+    expect(s.land.events).toEqual([]);
   });
 });

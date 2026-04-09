@@ -34,7 +34,7 @@ import { buildStatusBar, HelpOverlay } from "./components/help-overlay.tsx";
 import { LandModal } from "./components/land-modal.tsx";
 import {
   executeLand,
-  type LandPlan,
+  LandError,
   planLand,
   type PrStateByBranch,
   UnsupportedLandShape,
@@ -294,7 +294,6 @@ export function App(props: AppProps): React.ReactElement {
         dispatch({
           type: "LAND_ERROR",
           plan: null,
-          events: [],
           message: (err as Error).message,
           rollback: null,
         });
@@ -357,18 +356,20 @@ export function App(props: AppProps): React.ReactElement {
         dispatch({ type: "LAND_DONE", result });
       } catch (err) {
         if (cancelled) return;
-        const e = err as Error & {
-          plan?: LandPlan;
-          rollback?: unknown;
-          failedAt?: unknown;
-        };
+        if (err instanceof LandError) {
+          dispatch({
+            type: "LAND_ERROR",
+            plan: err.plan,
+            message: err.message,
+            rollback: err.rollback,
+          });
+          return;
+        }
         dispatch({
           type: "LAND_ERROR",
-          plan: e.plan ?? plan,
-          events: state.land.phase === "executing" ? state.land.events : [],
-          message: e.message,
-          // deno-lint-ignore no-explicit-any
-          rollback: (e.rollback ?? null) as any,
+          plan,
+          message: (err as Error).message,
+          rollback: null,
         });
       }
     })();

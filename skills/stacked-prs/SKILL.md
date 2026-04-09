@@ -316,48 +316,75 @@ Show current stack state. **No confirmation needed** (read-only).
 
 #### Interactive view
 
-Run `deno run ... cli.ts status -i` (or `--interactive`) to launch a read-only
-TUI. The TUI renders every configured stack as a horizontal left-to-right tree
-with per-stack colors, shows PR state and sync status per branch, and provides
-arrow-key navigation plus a live commit detail pane for the focused branch. The
-TUI never writes to the repo or GitHub, so it does not require confirmation
-gates.
+Run `deno run ... cli.ts status -i` (or `--interactive`) to launch a TUI. The
+TUI renders every configured stack as a horizontal left-to-right tree with
+per-stack colors, shows PR state and sync status per branch, and provides
+arrow-key navigation plus a live commit detail pane for the focused branch.
 
-Key bindings: `?` shows the full list.
+Key bindings: `?` shows the full list. Press `L` on a branch whose stack is
+eligible to land (root PR merged, or every PR merged) to open the land modal,
+which plans and executes the full cleanup automatically without requiring
+Claude.
 
 ### `land`
 
 Handle cleanup after a PR merges. Auto-splits the stack if landing creates
 multiple roots.
 
-1. Read the stack via `status.ts --json`
-2. Identify merged branch (bottom of stack, or ask if ambiguous)
-3. **No-op check:** if no branch has a merged PR (all PRs are open/draft or
-   missing), report "No merged PRs found, nothing to land" and stop
-4. `git fetch origin`
-5. Determine repo owner/name from `gh repo view --json owner,name`
-6. Run `nav.ts --dry-run` to preview comment changes
-7. **Present full cleanup plan:**
-   - Git: rebase strategy (merge vs squash --onto), branches to force-push
-   - Git: branch to delete locally
-   - GitHub: PR base retargets
-   - Comments: nav comment updates (show new content)
-   - Stack split: if landing creates multiple roots, show new stacks
-8. **Wait for confirmation**
-9. Reparent children of the merged branch to the merged branch's parent
-10. Execute rebase:
-    - Merge strategy: `git rebase origin/main --update-refs` from topmost
-    - Squash strategy:
-      `git rebase --onto origin/main <merged-branch> <next-branch> --update-refs`
-11. Run `config.ts land-cleanup --stack=<name> --merged=<branch>`
-    - If this creates multiple roots, `land-cleanup` calls `split-stack`
-      automatically. Report each new stack with tree output.
-12. `git push --force-with-lease origin <remaining-branches>`
-13. `gh pr edit <next-pr> --base main` then `gh pr ready <next-pr>` (the next PR
-    now targets the base branch and must leave draft state per the submit draft
-    policy)
-14. Execute nav plan via `nav.ts`
-15. `git branch -d <merged-branch>`
+**Preferred path:** press `L` in the TUI. It plans and executes the full land
+automatically. Use the Claude-orchestrated steps below only when the TUI is not
+available or a fully manual walkthrough is needed.
+
+Two supported shapes are handled by `executeLand` (in `src/commands/land.ts`):
+
+- **root-merged:** exactly one root PR is merged, no other branch is merged.
+  Remaining branches are rebased onto the base branch and force-pushed.
+- **all-merged:** every PR in the stack is merged. No rebase or push is needed;
+  all branches are deleted and config is removed.
+
+**Claude-orchestrated steps (root-merged):**
+
+1. Run `cli.ts status --json` and read `prStateByBranch` to identify merged
+   branches.
+2. **No-op check:** if no branch has a merged PR, report and stop.
+3. Run `cli.ts restack --dry-run --json` (if applicable) to verify the tree.
+4. Run `cli.ts nav --dry-run` to preview nav comment changes.
+5. Determine repo owner/name via `gh repo view --json owner,name`.
+6. **Present full cleanup plan:**
+   - Linked worktrees to remove before execution (if any)
+   - Per-branch rebase:
+     `git rebase --rebase-merges --onto <new-target> <old-parent-sha> <branch>`
+     for each remaining branch in topological order
+   - Force-push each remaining branch:
+     `git push --force-with-lease=refs/heads/<branch>:<pre-lease-sha> origin <branch>`
+   - PR retargets: `gh pr edit <number> --base <new-base>` (plus
+     `gh pr ready <number>` only if the PR is currently a draft)
+   - Nav comment refresh via `cli.ts nav`
+   - Config cleanup (library call, not a CLI command): reparents children of the
+     merged root to the base branch; auto-splits if multiple roots result
+   - Branch deletion: `git branch -D <merged-root>` and any auto-merged branches
+     (HEAD is moved to the original ref before deletion)
+7. **Wait for confirmation** (required before any `git push`, `git rebase`,
+   `git branch -D`, or `gh` write call).
+8. Run `git fetch origin <base-branch>`.
+9. Remove any listed linked worktrees: `git worktree remove <path>`.
+10. For each rebase step in topological order:
+    - `git checkout <branch>`
+    - `git rebase --rebase-merges --onto <new-target> <old-parent-sha> <branch>`
+11. Force-push remaining branches leaves-first.
+12. Retarget and optionally un-draft PRs.
+13. Refresh nav comments via `cli.ts nav`.
+14. Move HEAD to the original ref, then `git branch -D <merged-root>`.
+
+**Claude-orchestrated steps (all-merged):**
+
+1-7. Same as root-merged steps 1-7 (plan, confirm).\
+8\. Remove any listed linked worktrees.\
+9\. Move HEAD to the original ref.\
+10\. Delete every branch in the stack: `git branch -D <branch>` (leaves-first).\
+11\. Remove stack git config keys (`stack.<name>.merge-strategy`, `base-branch`,
+`resume-state`); remove `branch.<name>.stack-name` and
+`branch.<name>.stack-parent` for every branch.
 
 ### `clean`
 
