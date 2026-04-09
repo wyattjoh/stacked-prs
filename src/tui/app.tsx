@@ -79,6 +79,11 @@ export function App(props: AppProps): React.ReactElement {
   const [scrollX, setScrollX] = useState(0);
   const [scrollY, setScrollY] = useState(0);
 
+  // Primary focus color, theme-derived. Used as the "selected" border color
+  // on the body wrapper and detail pane, and as a fallback by HeaderBox.
+  const theme = props.theme ?? detectTheme(Deno.env.get("COLORFGBG"));
+  const _primaryColor = theme === "light" ? "black" : "white";
+
   const runRunGit = (
     ...args: string[]
   ): Promise<{ code: number; stdout: string }> =>
