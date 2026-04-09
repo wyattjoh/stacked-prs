@@ -92,7 +92,18 @@ function headerTrunkSegments(
   return segs;
 }
 
-/** Initial trunk row: every stack's bar visible, originating at `main`. */
+/**
+ * Canopy row: joins all stack bars into a single horizontal line under
+ * `main`, so every stack visually flows into the base branch rather than
+ * each bar dangling in space.
+ *
+ * For `N=1` we fall back to a plain vertical bar — there's nothing to join.
+ * For `N>1` the row is `┌──┬──┬──┐` (solid) with one T-glyph per middle
+ * bar, `┌` at the leftmost bar col, and `┐` at the rightmost. Each glyph is
+ * colored with its owning stack so the transition into the per-stack bar
+ * below reads as continuous. Horizontal connectors between bar cols inherit
+ * the color of the stack to their left.
+ */
 function initialTrunkSegments(
   stackCount: number,
   colors: string[],
@@ -100,10 +111,22 @@ function initialTrunkSegments(
 ): TrunkSegment[] {
   const N = stackCount;
   const segs: TrunkSegment[] = [];
+  if (N === 1) {
+    segs.push({
+      text: `${trunkVertical(styles[0])}  `,
+      color: colors[0],
+    });
+    return segs;
+  }
   for (let j = 0; j < N; j++) {
     const barIdx = N - 1 - j;
+    let glyph: string;
+    if (j === 0) glyph = "┌";
+    else if (j === N - 1) glyph = "┐";
+    else glyph = "┬";
+    const suffix = j === N - 1 ? "  " : "──";
     segs.push({
-      text: `${trunkVertical(styles[barIdx])}  `,
+      text: `${glyph}${suffix}`,
       color: colors[barIdx],
     });
   }
