@@ -210,7 +210,8 @@ deno run --allow-run=git,gh,pbcopy,wl-copy,clip.exe --allow-env --allow-read \
 
 Launches a terminal UI that shows every stack in the repo as a horizontal tree,
 with per-stack colors, PR state glyphs, sync-status connectors, and a live
-commit detail pane. Read-only: no rebases, no pushes, no PR edits.
+commit detail pane. Mostly read-only: the only write operation is the `L`
+binding, which lands a stack whose root PR has been merged.
 
 Common keys:
 
@@ -219,6 +220,10 @@ Common keys:
 - `r`: refresh current tab
 - `o`: open focused PR in browser
 - `y` / `Y`: copy branch name / PR URL
+- `L`: land the focused stack (root merged, or every branch merged). Opens a
+  modal with the full plan (rebases, pushes, PR retargets, deletions), waits
+  for `y` to confirm, streams progress, and rolls back local branches +
+  attempts remote restore on failure.
 - `?`: toggle full key help
 - `q`: quit
 
