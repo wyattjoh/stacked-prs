@@ -1,7 +1,8 @@
 import type { StackTree } from "../lib/stack.ts";
 import type { SyncStatus } from "../commands/status.ts";
+import type { ThemeName } from "../lib/colors.ts";
 
-export type { SyncStatus };
+export type { SyncStatus, ThemeName };
 
 /** PR state surfaced by the TUI node glyphs. */
 export type PrState = "open" | "draft" | "merged" | "closed" | "none";
@@ -70,8 +71,6 @@ export interface Cursor {
 
 /** "all" or a specific stack name. */
 export type TabId = "all" | { stack: string };
-
-export type ThemeName = "light" | "dark";
 
 export interface Viewport {
   scrollX: number;

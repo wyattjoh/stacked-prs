@@ -9,6 +9,8 @@ import { verifyRefs } from "./commands/verify-refs.ts";
 import { discoverChain } from "./commands/import-discover.ts";
 import { computeSubmitPlan } from "./commands/submit-plan.ts";
 import { applyClean, detectStaleConfig } from "./commands/clean.ts";
+import { assignColors, detectTheme, readColorOverrides } from "./lib/colors.ts";
+import { ansiColor } from "./lib/ansi.ts";
 
 /** Resolve stack name from current branch's git config, with --stack-name override. */
 async function resolveStackName(
@@ -406,12 +408,50 @@ await new Command()
     }
 
     if (!options.json) {
+      // Build a per-stack color map matching the TUI's palette so the CLI's
+      // visual identity stays consistent. Reads `stack.<name>.color` overrides
+      // from git config and falls back to deterministic FNV-1a assignment.
+      const stackNames = Array.from(
+        new Set(
+          report.findings
+            .map((f) => f.stackName)
+            .filter((s): s is string => !!s),
+        ),
+      ).sort();
+      const theme = detectTheme(Deno.env.get("COLORFGBG"));
+      const overrides = await readColorOverrides(
+        dir,
+        stackNames,
+        async (...args: string[]) => {
+          const r = await runGitCommand(dir, ...args);
+          return { code: r.code, stdout: r.stdout };
+        },
+      );
+      const colorMap = assignColors(stackNames, overrides, theme);
+      const colorize = (
+        stackName: string | undefined,
+        text: string,
+      ): string => {
+        if (!stackName) return text;
+        const colorName = colorMap.get(stackName);
+        if (!colorName) return text;
+        return ansiColor(colorName)(text);
+      };
+
       console.log(
         `Found ${report.findings.length} stale config entry/entries:\n`,
       );
       for (const f of report.findings) {
         const subject = f.branch ?? f.stackName ?? "?";
-        console.log(`  [${f.kind}] ${subject}`);
+        // Branch-level findings show "(stack: <name>)" so the colored stack
+        // identity is always visible. Stack-level findings already use the
+        // stack name as the subject, so the parenthetical would just repeat.
+        const stackTag = f.branch && f.stackName
+          ? `  (stack: ${colorize(f.stackName, f.stackName)})`
+          : "";
+        console.log(
+          `  [${f.kind}] ${colorize(f.stackName, subject)}${stackTag}`,
+        );
         console.log(`    ${f.details}`);
         console.log(`    keys: ${f.configKeys.join(", ")}`);
         console.log("");

@@ -5,7 +5,11 @@ import type { StackTree } from "../lib/stack.ts";
 import { initialState, reducer } from "./state/reducer.ts";
 import { loadCommits, loadLocal, loadPrsProgressive } from "./state/loader.ts";
 import { buildGrid } from "./lib/layout.ts";
-import { assignColors, detectTheme, readColorOverrides } from "./lib/colors.ts";
+import {
+  assignColors,
+  detectTheme,
+  readColorOverrides,
+} from "../lib/colors.ts";
 import {
   moveDown,
   moveLeft,

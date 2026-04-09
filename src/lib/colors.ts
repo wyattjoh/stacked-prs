@@ -1,4 +1,5 @@
-import type { ThemeName } from "../types.ts";
+/** Light or dark terminal theme. Drives palette selection in `assignColors`. */
+export type ThemeName = "light" | "dark";
 
 export const DARK_PALETTE = [
   "cyan",

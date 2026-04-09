@@ -76,6 +76,7 @@ describe("detectStaleConfig", () => {
     const missing = report.findings.filter((f) => f.kind === "missing-branch");
     expect(missing).toHaveLength(1);
     expect(missing[0].branch).toBe("b");
+    expect(missing[0].stackName).toBe("test");
     expect(missing[0].configKeys).toContain("branch.b.stack-name");
     expect(missing[0].configKeys).toContain("branch.b.stack-parent");
   });
@@ -91,6 +92,7 @@ describe("detectStaleConfig", () => {
     );
     expect(stale).toHaveLength(1);
     expect(stale[0].branch).toBe("a");
+    expect(stale[0].stackName).toBe("test");
     expect(stale[0].configKeys).toEqual(["branch.a.stack-parent"]);
   });
 

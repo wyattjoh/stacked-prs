@@ -8,6 +8,7 @@
     "jsr:@std/assert@^1.0.14": "1.0.19",
     "jsr:@std/assert@^1.0.17": "1.0.19",
     "jsr:@std/expect@1": "1.0.17",
+    "jsr:@std/fmt@1": "1.0.9",
     "jsr:@std/fmt@^1.0.9": "1.0.9",
     "jsr:@std/internal@^1.0.10": "1.0.12",
     "jsr:@std/internal@^1.0.12": "1.0.12",
@@ -24,7 +25,7 @@
         "jsr:@cliffy/flags",
         "jsr:@cliffy/internal",
         "jsr:@cliffy/table",
-        "jsr:@std/fmt",
+        "jsr:@std/fmt@^1.0.9",
         "jsr:@std/text"
       ]
     },
@@ -41,7 +42,7 @@
     "@cliffy/table@1.0.0": {
       "integrity": "3fdaa9e1ef1ea62022108adabd826932bdea8dd05497079896febcd41322907f",
       "dependencies": [
-        "jsr:@std/fmt"
+        "jsr:@std/fmt@^1.0.9"
       ]
     },
     "@std/assert@1.0.19": {
@@ -341,6 +342,7 @@
     "dependencies": [
       "jsr:@cliffy/command@1",
       "jsr:@std/expect@1",
+      "jsr:@std/fmt@1",
       "jsr:@std/testing@1",
       "npm:ink-testing-library@4",
       "npm:ink@^5.0.1",
