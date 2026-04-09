@@ -133,7 +133,12 @@ import {
   listInProgressOperations,
   type WorktreeCollision,
 } from "../lib/worktrees.ts";
-import { getAllNodes, runGitCommand, type StackTree } from "../lib/stack.ts";
+import {
+  findNode,
+  getAllNodes,
+  runGitCommand,
+  type StackTree,
+} from "../lib/stack.ts";
 import { topologicalOrder } from "./restack.ts";
 
 export async function isShallowRepository(dir: string): Promise<boolean> {
@@ -363,4 +368,64 @@ export function buildPrUpdateSteps(
     });
   }
   return updates;
+}
+
+export interface LandCleanupPreview {
+  remainingRoots: string[];
+  splits: SplitInfo[];
+}
+
+/**
+ * Compute (in memory, no config writes) what `configLandCleanup` would
+ * do for the given tree and merged root: children of the merged root
+ * become new roots, and if more than one remains we anticipate a split.
+ */
+export function previewLandCleanup(
+  tree: StackTree,
+  mergedBranch: string,
+): LandCleanupPreview {
+  const mergedNode = findNode(tree, mergedBranch);
+  const remainingRoots: string[] = [];
+  for (const root of tree.roots) {
+    if (root.branch === mergedBranch) {
+      if (mergedNode) {
+        for (const child of mergedNode.children) {
+          remainingRoots.push(child.branch);
+        }
+      }
+      continue;
+    }
+    remainingRoots.push(root.branch);
+  }
+
+  if (remainingRoots.length <= 1) {
+    return { remainingRoots, splits: [] };
+  }
+
+  // Mirror the naming logic in configSplitStack.
+  const used = new Set<string>();
+  const splits: SplitInfo[] = [];
+  for (const rootBranch of remainingRoots) {
+    let name = rootBranch.replace(/^(?:feature|fix|chore)\//, "");
+    if (used.has(name)) {
+      let i = 2;
+      while (used.has(`${name}-${i}`)) i++;
+      name = `${name}-${i}`;
+    }
+    used.add(name);
+
+    const subRoot = findNode(tree, rootBranch);
+    const branches: string[] = [];
+    if (subRoot) {
+      const walk = (n: typeof subRoot): void => {
+        branches.push(n.branch);
+        for (const c of n.children) walk(c);
+      };
+      walk(subRoot);
+    }
+
+    splits.push({ stackName: name, branches });
+  }
+
+  return { remainingRoots, splits };
 }

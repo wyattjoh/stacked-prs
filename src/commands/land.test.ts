@@ -5,6 +5,7 @@ import {
   captureSnapshot,
   classifyLandCase,
   isShallowRepository,
+  previewLandCleanup,
   type PrStateByBranch,
   runLandPreflight,
   UnsupportedLandShape,
@@ -268,6 +269,42 @@ describe("buildPrUpdateSteps", () => {
       ]);
       const updates = buildPrUpdateSteps(tree, prInfoByBranch, "feat/a");
       expect(updates[0].flipToReady).toBe(false);
+    } finally {
+      await repo.cleanup();
+    }
+  });
+});
+
+describe("previewLandCleanup", () => {
+  it("returns no splits when the merged root has a single child", async () => {
+    const repo = await createTestRepo();
+    try {
+      await addBranch(repo.dir, "feat/a", "main");
+      await addBranch(repo.dir, "feat/b", "feat/a");
+      await initStack(repo, "s", [["feat/a", "main"], ["feat/b", "feat/a"]]);
+      const tree = await getStackTree(repo.dir, "s");
+      const preview = previewLandCleanup(tree, "feat/a");
+      expect(preview.splits).toEqual([]);
+      expect(preview.remainingRoots).toEqual(["feat/b"]);
+    } finally {
+      await repo.cleanup();
+    }
+  });
+
+  it("reports two splits when the merged root has two direct children", async () => {
+    const repo = await createTestRepo();
+    try {
+      await addBranch(repo.dir, "feat/a", "main");
+      await addBranch(repo.dir, "feat/b", "feat/a");
+      await addBranch(repo.dir, "feat/c", "feat/a");
+      await initStack(repo, "s", [
+        ["feat/a", "main"],
+        ["feat/b", "feat/a"],
+        ["feat/c", "feat/a"],
+      ]);
+      const tree = await getStackTree(repo.dir, "s");
+      const preview = previewLandCleanup(tree, "feat/a");
+      expect(preview.splits.length).toBe(2);
     } finally {
       await repo.cleanup();
     }
