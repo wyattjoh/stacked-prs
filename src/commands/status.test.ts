@@ -2,7 +2,12 @@ import { afterEach, beforeEach, describe, it as test } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { addBranch, createTestRepo, runGit } from "../lib/testdata/helpers.ts";
 import type { TestRepo } from "../lib/testdata/helpers.ts";
-import { setBaseBranch, setMergeStrategy, setStackNode } from "../lib/stack.ts";
+import {
+  runGitCommand,
+  setBaseBranch,
+  setMergeStrategy,
+  setStackNode,
+} from "../lib/stack.ts";
 import { setMockDir, writeFixture } from "../lib/gh.ts";
 import { getStackStatus } from "./status.ts";
 
@@ -217,5 +222,41 @@ describe("getStackStatus", () => {
       number: 117,
       state: "MERGED",
     });
+  });
+});
+
+describe("getStackStatus with merged nodes", () => {
+  let repo: TestRepo;
+  let mockDir: string;
+
+  beforeEach(async () => {
+    repo = await createTestRepo();
+    mockDir = await Deno.makeTempDir();
+    setMockDir(mockDir);
+  });
+
+  afterEach(async () => {
+    setMockDir(undefined);
+    await repo.cleanup();
+    await Deno.remove(mockDir, { recursive: true });
+  });
+
+  test("returns 'landed' sync status for stack-merged branches", async () => {
+    await addBranch(repo.dir, "feature/a", "main");
+    await addBranch(repo.dir, "feature/b", "main");
+    await setStackNode(repo.dir, "feature/a", "my-stack", "main");
+    await setStackNode(repo.dir, "feature/b", "my-stack", "main");
+    await setBaseBranch(repo.dir, "my-stack", "main");
+    await runGitCommand(
+      repo.dir,
+      "config",
+      "branch.feature/a.stack-merged",
+      "true",
+    );
+
+    const status = await getStackStatus(repo.dir, "my-stack");
+
+    const branchA = status.branches.find((b) => b.branch === "feature/a");
+    expect(branchA?.syncStatus).toBe("landed");
   });
 });

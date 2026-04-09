@@ -17,7 +17,7 @@ export interface PrInfo {
   createdAt?: string;
 }
 
-export type SyncStatus = "up-to-date" | "behind-parent" | "diverged";
+export type SyncStatus = "up-to-date" | "behind-parent" | "diverged" | "landed";
 
 export interface BranchStatus {
   branch: string;
@@ -137,9 +137,11 @@ export async function getStackStatus(
 
   const branches = await Promise.all(
     nodes.map(async (node): Promise<BranchStatus> => {
-      const [pr, syncStatus] = await Promise.all([
+      const syncStatus: SyncStatus = node.merged
+        ? "landed"
+        : await getSyncStatus(dir, node.parent, node.branch);
+      const [pr] = await Promise.all([
         queryPr(node.branch, owner, repo),
-        getSyncStatus(dir, node.parent, node.branch),
       ]);
 
       const { depth, isLastChild } = depthMap.get(node.branch) ?? {
