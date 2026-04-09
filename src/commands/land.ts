@@ -143,6 +143,7 @@ import {
   type StackTree,
 } from "../lib/stack.ts";
 import { topologicalOrder } from "./restack.ts";
+import { configLandCleanup } from "./config.ts";
 
 export async function isShallowRepository(dir: string): Promise<boolean> {
   const { code, stdout } = await runGitCommand(
@@ -908,10 +909,85 @@ async function executeCaseA(
 
   await executeCaseAPrCloses(dir, plan, hooks, state);
 
-  // nav, config-cleanup, delete, restore-head phases follow in Tasks 21-23.
-  throw new Error(
-    "executeLand case A: post-pr-close phases not yet implemented",
-  );
+  // Nav updates happen in Task 22 (inserted before config cleanup).
+
+  // Config cleanup: reparent children of the merged root to the base branch.
+  emit(hooks, { kind: "config-cleanup" }, "running");
+  const mergedRoot = plan.branchesToDelete[0];
+  let cleanupResult;
+  try {
+    cleanupResult = await configLandCleanup(dir, plan.stackName, mergedRoot);
+    state.configCleanupDone = true;
+    emit(hooks, { kind: "config-cleanup" }, "ok");
+  } catch (err) {
+    emit(
+      hooks,
+      { kind: "config-cleanup" },
+      "failed",
+      (err as Error).message,
+    );
+    await rollbackPrUpdates(dir, plan, state);
+    await rollbackRemotePushes(dir, plan, state);
+    await rollbackLocalRebases(dir, plan, state);
+    throw new LandError(
+      (err as Error).message,
+      plan,
+      state.rollback,
+      { kind: "config-cleanup" },
+    );
+  }
+
+  // Delete the merged root and any auto-merged branches. Deletion failures
+  // are best-effort: the stack has already landed at this point.
+  const toDelete = [mergedRoot, ...state.autoMerged];
+  for (const branch of toDelete) {
+    emit(hooks, { kind: "delete", branch }, "running");
+    const { code, stderr } = await runGitCommand(dir, "branch", "-D", branch);
+    if (code !== 0) {
+      emit(hooks, { kind: "delete", branch }, "failed", stderr);
+      continue;
+    }
+    await removeStackBranch(dir, branch);
+    emit(hooks, { kind: "delete", branch }, "ok");
+  }
+
+  await restoreHead(dir, plan, hooks);
+
+  return {
+    plan,
+    autoMergedBranches: [...state.autoMerged],
+    split: cleanupResult.splitInto,
+  };
+}
+
+async function restoreHead(
+  dir: string,
+  plan: LandPlan,
+  hooks: LandHooks,
+): Promise<void> {
+  emit(hooks, { kind: "restore-head" }, "running");
+  const ref = plan.originalHeadRef;
+  if (ref.startsWith("refs/")) {
+    const branchName = ref.replace(/^refs\/heads\//, "");
+    const { code, stderr } = await runGitCommand(dir, "checkout", branchName);
+    if (code !== 0) {
+      emit(hooks, { kind: "restore-head" }, "failed", stderr);
+      return;
+    }
+  } else {
+    // Detached HEAD: checkout the raw SHA.
+    const { code, stderr } = await runGitCommand(
+      dir,
+      "checkout",
+      "--detach",
+      ref,
+    );
+    if (code !== 0) {
+      emit(hooks, { kind: "restore-head" }, "failed", stderr);
+      return;
+    }
+  }
+  emit(hooks, { kind: "restore-head" }, "ok");
 }
 
 async function executeCaseAPrCloses(

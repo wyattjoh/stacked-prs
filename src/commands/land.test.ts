@@ -804,3 +804,65 @@ describe("executeLand case A pr-close phase", () => {
     }
   });
 });
+
+describe("executeLand case A cleanup phase", () => {
+  it("reparents children, deletes merged root, and restores HEAD", async () => {
+    const env = await createRepoWithOrigin();
+    try {
+      await addBranch(env.dir, "feat/a", "main");
+      await runGit(env.dir, "push", "origin", "feat/a");
+      await addBranch(env.dir, "feat/b", "feat/a");
+      await runGit(env.dir, "push", "origin", "feat/b");
+      await initStack(env, "s", [["feat/a", "main"], ["feat/b", "feat/a"]]);
+
+      await runGit(env.dir, "checkout", "main");
+      await runGit(env.dir, "merge", "feat/a", "--no-ff", "-m", "Merge feat/a");
+      await runGit(env.dir, "push", "origin", "main");
+      await runGit(env.dir, "fetch", "origin", "main");
+
+      const prStates: PrStateByBranch = new Map([
+        ["feat/a", "MERGED"],
+        ["feat/b", "OPEN"],
+      ]);
+      const prInfo = new Map<string, PrInfo>([
+        ["feat/b", { number: 20, url: "", state: "OPEN", isDraft: true }],
+      ]);
+
+      const mockDir = await Deno.makeTempDir();
+      setMockDir(mockDir);
+
+      try {
+        await executeLand(
+          env.dir,
+          await planLand(env.dir, "s", prStates, prInfo),
+          {
+            onProgress: () => {},
+            freshPrStates: () => Promise.resolve(prStates),
+          },
+        );
+      } finally {
+        setMockDir(undefined);
+      }
+
+      // feat/a is deleted locally
+      const aExists = await runGitCommand(
+        env.dir,
+        "rev-parse",
+        "--verify",
+        "refs/heads/feat/a",
+      );
+      expect(aExists.code).not.toBe(0);
+
+      // feat/b's parent in config is now main
+      const parent = await runGitCommand(
+        env.dir,
+        "config",
+        "branch.feat/b.stack-parent",
+      );
+      expect(parent.stdout).toBe("main");
+    } finally {
+      await env.cleanup();
+      setMockDir(undefined);
+    }
+  });
+});
