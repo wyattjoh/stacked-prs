@@ -47,6 +47,8 @@ export interface LandPlan {
   prUpdates: LandPrUpdate[];
   navUpdates: NavAction[];
   branchesToDelete: string[];
+  /** Clean linked worktrees that will be removed before the land executes. */
+  worktreesToRemove: WorktreeCollision[];
   snapshot: BranchSnapshot[];
   originalHeadRef: string;
   splitPreview: SplitInfo[];
@@ -55,6 +57,7 @@ export interface LandPlan {
 export type LandStep =
   | { kind: "preflight" }
   | { kind: "fetch" }
+  | { kind: "remove-worktree"; branch: string }
   | { kind: "rebase"; branch: string }
   | { kind: "push"; branch: string }
   | { kind: "pr-update"; branch: string }
@@ -124,7 +127,7 @@ export class UnsupportedLandShape extends Error {
 
 // Suppress unused-import warnings at the module boundary. These types are
 // re-used by land-related helpers in later tasks (preflight, plan, execute).
-export type { DirtyWorktree, NavAction, PrInfo, SplitInfo };
+export type { DirtyWorktree, NavAction, PrInfo, SplitInfo, WorktreeCollision };
 
 import {
   checkWorktreeSafety,
@@ -176,8 +179,15 @@ export interface LandPreflightReport {
 export async function runLandPreflight(
   dir: string,
   branches: string[],
+  /**
+   * Branches whose linked worktrees will be removed by the land plan before
+   * execution reaches the delete step. Collision blockers are suppressed for
+   * these branches because the plan has already accounted for them.
+   */
+  worktreeBranchesToSkip: string[] = [],
 ): Promise<LandPreflightReport> {
   const blockers: LandBlocker[] = [];
+  const skipSet = new Set(worktreeBranchesToSkip);
 
   const isShallow = await isShallowRepository(dir);
   if (isShallow) blockers.push({ kind: "shallow-repo" });
@@ -189,7 +199,9 @@ export async function runLandPreflight(
 
   const collisions = await findWorktreeCollisions(dir, branches);
   for (const c of collisions) {
-    blockers.push({ kind: "worktree-collision", collision: c });
+    if (!skipSet.has(c.branch)) {
+      blockers.push({ kind: "worktree-collision", collision: c });
+    }
   }
 
   const dirty = await checkWorktreeSafety(dir, branches);
@@ -470,6 +482,11 @@ export async function planLand(
     .map((n) => n.branch);
 
   if (landCase === "all-merged") {
+    // All branches are being deleted; check worktrees for all of them.
+    const worktreesToRemove = await detectCleanWorktreeCollisions(
+      dir,
+      mergedBranches,
+    );
     return {
       stackName,
       baseBranch: tree.baseBranch,
@@ -480,14 +497,21 @@ export async function planLand(
       prUpdates: [],
       navUpdates: [],
       branchesToDelete: mergedBranches,
+      worktreesToRemove,
       snapshot,
       originalHeadRef,
       splitPreview: [],
     };
   }
 
-  // root-merged
+  // root-merged: only the merged root is deleted; surviving branches are
+  // rebased. A clean worktree for a surviving branch is a hard blocker (git
+  // refuses to rebase a branch checked out in another worktree), so we only
+  // check the deleted root's worktree here.
   const mergedRoot = tree.roots[0].branch;
+  const worktreesToRemove = await detectCleanWorktreeCollisions(dir, [
+    mergedRoot,
+  ]);
 
   const rebaseSteps = buildRebaseSteps(tree, snapshot, mergedRoot);
   const pushSteps = buildPushSteps(tree, snapshot, mergedRoot);
@@ -504,10 +528,32 @@ export async function planLand(
     prUpdates,
     navUpdates: [],
     branchesToDelete: [mergedRoot],
+    worktreesToRemove,
     snapshot,
     originalHeadRef,
     splitPreview: preview.splits,
   };
+}
+
+/**
+ * Find clean linked-worktree collisions for `branches`. Throws
+ * `UnsupportedLandShape` if any collision is dirty (the user must clean up
+ * those manually before landing).
+ */
+async function detectCleanWorktreeCollisions(
+  dir: string,
+  branches: string[],
+): Promise<WorktreeCollision[]> {
+  const collisions = await findWorktreeCollisions(dir, branches);
+  const dirty = collisions.filter((c) => c.dirty);
+  if (dirty.length > 0) {
+    throw new UnsupportedLandShape(
+      `branches are checked out in dirty worktrees: ${
+        dirty.map((c) => `${c.branch} (${c.worktreePath})`).join(", ")
+      }`,
+    );
+  }
+  return collisions;
 }
 
 function emit(
@@ -1056,7 +1102,12 @@ export async function executeLand(
 ): Promise<LandResult> {
   emit(hooks, { kind: "preflight" }, "running");
   const allBranches = plan.snapshot.map((s) => s.branch);
-  const preflight = await runLandPreflight(dir, allBranches);
+  const worktreeBranchesToSkip = plan.worktreesToRemove.map((wt) => wt.branch);
+  const preflight = await runLandPreflight(
+    dir,
+    allBranches,
+    worktreeBranchesToSkip,
+  );
   if (preflight.blockers.length > 0) {
     emit(
       hooks,
@@ -1093,6 +1144,31 @@ export async function executeLand(
   }
 
   emit(hooks, { kind: "preflight" }, "ok");
+
+  for (const wt of plan.worktreesToRemove) {
+    emit(hooks, { kind: "remove-worktree", branch: wt.branch }, "running");
+    const { code, stderr } = await runGitCommand(
+      dir,
+      "worktree",
+      "remove",
+      wt.worktreePath,
+    );
+    if (code !== 0) {
+      emit(
+        hooks,
+        { kind: "remove-worktree", branch: wt.branch },
+        "failed",
+        stderr.trim(),
+      );
+      throw new LandError(
+        `Failed to remove worktree at ${wt.worktreePath}: ${stderr.trim()}`,
+        plan,
+        emptyRollback(),
+        { kind: "remove-worktree", branch: wt.branch },
+      );
+    }
+    emit(hooks, { kind: "remove-worktree", branch: wt.branch }, "ok");
+  }
 
   if (plan.case === "all-merged") {
     return await executeCaseBCleanup(dir, plan, hooks);

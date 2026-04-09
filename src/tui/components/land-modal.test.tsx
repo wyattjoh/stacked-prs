@@ -25,6 +25,7 @@ const fakePlan = (): LandPlan => ({
   }],
   navUpdates: [],
   branchesToDelete: ["feat/a"],
+  worktreesToRemove: [],
   snapshot: [],
   originalHeadRef: "refs/heads/main",
   splitPreview: [],

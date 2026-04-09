@@ -243,6 +243,8 @@ async function fileExists(path: string): Promise<boolean> {
 export interface WorktreeCollision {
   branch: string;
   worktreePath: string;
+  /** True when `git status` in the collision worktree reports any changes. */
+  dirty: boolean;
 }
 
 /**
@@ -279,7 +281,8 @@ export async function findWorktreeCollisions(
     if (wt.path === primary) continue;
     if (wt.branch === null) continue;
     if (!scope.has(wt.branch)) continue;
-    collisions.push({ branch: wt.branch, worktreePath: wt.path });
+    const dirty = await isWorktreeDirty(wt.path);
+    collisions.push({ branch: wt.branch, worktreePath: wt.path, dirty });
   }
 
   return collisions;

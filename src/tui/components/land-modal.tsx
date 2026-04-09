@@ -75,6 +75,20 @@ function PlanSummary({ plan }: { plan: LandPlan }): React.ReactElement {
         </Box>
       )}
 
+      {plan.worktreesToRemove.length > 0 && (
+        <Box flexDirection="column" marginTop={1}>
+          <Text bold color="yellow">
+            Delete worktree directories from disk
+          </Text>
+          {plan.worktreesToRemove.map((wt) => (
+            <Box key={`wt-${wt.branch}`} flexDirection="column">
+              <Text color="yellow">{wt.branch}</Text>
+              <Text dimColor>{wt.worktreePath}</Text>
+            </Box>
+          ))}
+        </Box>
+      )}
+
       {plan.branchesToDelete.length > 0 && (
         <Box flexDirection="column" marginTop={1}>
           <Text bold>Delete</Text>

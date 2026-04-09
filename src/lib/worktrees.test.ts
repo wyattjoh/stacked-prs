@@ -182,6 +182,7 @@ describe("findWorktreeCollisions", () => {
       expect(collisions.length).toBe(1);
       expect(collisions[0].branch).toBe("feat/a");
       expect(collisions[0].worktreePath).toBe(wtPath);
+      expect(collisions[0].dirty).toBe(false);
     } finally {
       await runGit(repo.dir, "worktree", "remove", "--force", wtPath).catch(
         () => {},
