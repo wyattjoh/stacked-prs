@@ -82,7 +82,7 @@ export function App(props: AppProps): React.ReactElement {
   // Primary focus color, theme-derived. Used as the "selected" border color
   // on the body wrapper and detail pane, and as a fallback by HeaderBox.
   const theme = props.theme ?? detectTheme(Deno.env.get("COLORFGBG"));
-  const _primaryColor = theme === "light" ? "black" : "white";
+  const primaryColor = theme === "light" ? "black" : "white";
 
   const runRunGit = (
     ...args: string[]
@@ -530,6 +530,7 @@ export function App(props: AppProps): React.ReactElement {
               focused={state.focusedSection === "detail"}
               scrollX={state.detailScroll.scrollX}
               scrollY={state.detailScroll.scrollY}
+              primaryColor={primaryColor}
             />
           </>
         )}

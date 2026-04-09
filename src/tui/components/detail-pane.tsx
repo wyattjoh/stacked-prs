@@ -12,6 +12,7 @@ export interface DetailPaneProps {
   focused?: boolean;
   scrollX?: number;
   scrollY?: number;
+  primaryColor?: string;
 }
 
 function headerLine(
@@ -35,7 +36,7 @@ function headerLine(
 }
 
 export function DetailPane(props: DetailPaneProps): React.ReactElement {
-  const borderColor = props.focused ? "cyan" : undefined;
+  const borderColor = props.focused ? (props.primaryColor ?? "white") : "gray";
 
   if (!props.branch) {
     return (
