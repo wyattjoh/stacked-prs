@@ -199,23 +199,47 @@ Detach a branch and reattach it as a child of a different parent.
 
 ### `sync`
 
-Fetch main, rebase the stack tree, then push to remote.
+Fetch origin base, pre-flight verify-refs, dry-run plan, worktree safety check,
+plan, confirm, rebase, post-flight verify-refs, push.
 
 **Flags:** `--upstack-from=<branch>`, `--downstack-from=<branch>`,
 `--only=<branch>` (default: full stack)
 
-1. `git fetch origin main:main` (read-only, no gate needed)
-2. **No-op check:** if all branches are already up-to-date (run
-   `restack.ts --json` to check), report "Stack is already fully synced with
-   main" and stop
-3. **Present plan:**
-   - Branches to rebase (shown as tree)
-   - Branches to force-push
-4. **Wait for confirmation**
-5. Run `restack.ts --stack-name=<name> [flags]`
-   - If conflicts: pause, help resolve, run `restack.ts --resume`
-6. `git push --force-with-lease origin <all-affected-branches>`
-7. Report result
+1. `git fetch origin <base-branch>` (no refspec; local base is never updated).
+   If fetch fails (offline, auth), stop with the error.
+2. Run `cli.ts verify-refs --stack-name=<name>` (read-only). Parse the JSON:
+   - If it reports duplicate patches on unrelated branches or other structural
+     problems the per-branch rebase cannot fix, stop and show the report. Tell
+     the user to resolve manually.
+   - If it reports drift (a parent that is not an ancestor of a child), remember
+     the findings for the plan presentation. Do not stop.
+   - If clean, continue.
+3. Run `cli.ts restack --dry-run --json --stack-name=<name> [flags]`. Parse the
+   `rebases` array.
+4. **No-op check:** if every entry has status `skipped-clean` AND pre-flight
+   `verify-refs` was clean, report "Stack is already fully synced with
+   origin/<base-branch>" and stop.
+5. Collect branches with status `planned` from the dry-run. Run the worktree
+   safety check (library function `checkWorktreeSafety`). If any dirty worktrees
+   are returned, present the list with cleanup commands
+   (`git -C <path> stash push -u` or manual commit) and stop. No mutation.
+6. **Present the full plan:**
+   - Base: rebasing against `origin/<base-branch>`.
+   - Drift notes from pre-flight `verify-refs`, if any (e.g. "propagating
+     previously-unpropagated commits from <branch> into descendants").
+   - Per-branch rebase list as a tree, showing old-parent to new-target.
+   - Branches to force-push.
+7. **Wait for confirmation.**
+8. Run `cli.ts restack --stack-name=<name> [flags]`.
+   - If conflicts: the rebase stops at the first conflicted branch and leaves
+     git mid-rebase. Pause, help the user resolve the files, then run
+     `git rebase --continue` (or re-invoke `cli.ts restack` with `--resume` to
+     pick up the remaining branches).
+9. Run `cli.ts verify-refs --stack-name=<name>` (post-flight). If it is not
+   clean, **abort the push**, print the report, and tell the user to inspect. Do
+   not roll back automatically.
+10. `git push --force-with-lease origin <rebased-branches>`.
+11. Report result.
 
 ### `restack`
 
@@ -225,16 +249,20 @@ reorganization before reviewing the diff.
 **Flags:** `--upstack-from=<branch>`, `--downstack-from=<branch>`,
 `--only=<branch>` (default: full stack)
 
-1. Read the stack via `status.ts --json`
-2. **No-op check:** run `restack.ts --json` to check sync status. If all
-   branches are up-to-date, report "Stack is already fully synced" and stop
-3. **Present plan:**
-   - Branches to rebase (shown as tree)
-   - No push step
-4. **Wait for confirmation**
-5. Run `restack.ts --stack-name=<name> [flags]`
-   - If conflicts: pause, help resolve, run `restack.ts --resume`
-6. Report result
+1. Run `cli.ts verify-refs --stack-name=<name>` (read-only). If it reports
+   structural problems, stop. If it reports drift, remember for the plan.
+2. Run `cli.ts restack --dry-run --json --stack-name=<name> [flags]`.
+3. **No-op check:** if every entry is `skipped-clean` and verify-refs was clean,
+   report "Stack is already fully synced" and stop.
+4. Collect `planned` branches from the dry-run and run `checkWorktreeSafety`. If
+   any dirty worktrees, present and stop.
+5. **Present plan** (tree with old-parent to new-target, drift notes if any).
+6. **Wait for confirmation.**
+7. Run `cli.ts restack --stack-name=<name> [flags]`. On conflict, the rebase
+   stops at the first conflicted branch; resolve the files and run
+   `git rebase --continue` or `cli.ts restack --stack-name=<name> --resume`.
+8. Run `cli.ts verify-refs` (informational only, do not gate; there is no push
+   step). If it reports problems, print them so the user can inspect.
 
 ### `submit`
 
@@ -457,7 +485,7 @@ command.
 - `deno run ... cli.ts status -i` / `--interactive`
 - `deno run ... cli.ts nav --dry-run`
 - `deno run ... cli.ts verify-refs`
-- `deno run ... cli.ts restack --json`
+- `deno run ... cli.ts restack --dry-run` (with or without `--json`)
 
 **If the plan changes mid-execution** (e.g., rebase conflicts), pause and
 re-present the remaining operations before continuing.
@@ -495,14 +523,20 @@ deno run --allow-run=git,gh --allow-env --allow-read ${CLAUDE_PLUGIN_ROOT}/src/c
   [--downstack-from=<branch>] \
   [--only=<branch>] \
   [--resume] \
+  [--dry-run] \
   [--json]
 ```
 
-Performs segment-based rebase of the tree. Decomposes the tree into linear
-segments, sorts them topologically, and rebases each with `--update-refs`.
-Independent sibling segments continue even when one fails. Pass `--resume` after
-resolving conflicts to continue from where it left off. Pass `--json` for
-structured output (used by `sync` and `restack` sub-commands).
+Performs per-branch topological rebase of the tree. Walks the tree in DFS order,
+snapshots each branch's parent SHA before any mutation, and rebases each branch
+individually with an explicit `git rebase --onto` call against the new target
+and the snapshotted old-parent SHA. Root branches target `origin/<base-branch>`;
+intermediate branches target their parent's current (possibly just-rewritten)
+tip. On the first conflicted branch the walk stops and leaves git mid-rebase;
+resolve the files and run `git rebase --continue` or re-invoke with `--resume`
+to pick up the remaining branches. Pass `--dry-run` to report the plan without
+touching git (combine with `--json` for structured output). Pass `--json` for
+structured output of an executed run.
 
 ### `nav`
 
