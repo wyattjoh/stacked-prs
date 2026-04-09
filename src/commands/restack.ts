@@ -127,9 +127,8 @@ async function revParse(dir: string, ref: string): Promise<string> {
 
 /**
  * Filter the tree into the set of nodes that are in scope for this restack.
- * Currently this duplicates the semantics of the old `filterSegments` but
- * operates on nodes directly. Moved to a standalone helper so dry-run and
- * execute share the same filter.
+ * Shared by the dry-run planner and the executor so both apply the same
+ * scope semantics for `--upstack-from`, `--downstack-from`, and `--only`.
  */
 function filterNodes(
   tree: StackTree,
