@@ -4,12 +4,14 @@ import {
   runGitCommand,
   type StackTree,
 } from "../../lib/stack.ts";
-import { gh } from "../../lib/gh.ts";
-import type { CommitInfo, PrInfo, SyncStatus } from "../types.ts";
+import { gh, selectBestPr } from "../../lib/gh.ts";
+import { listBranchWorktrees } from "../../lib/worktrees.ts";
+import type { CommitInfo, PrInfo, SyncStatus, WorktreeInfo } from "../types.ts";
 
 export interface LoadLocalResult {
   trees: StackTree[];
   syncByBranch: Map<string, SyncStatus>;
+  worktreeByBranch: Map<string, WorktreeInfo>;
   allBranches: string[];
   currentBranch: string | null;
 }
@@ -53,10 +55,26 @@ export async function loadLocal(dir: string): Promise<LoadLocalResult> {
     }
   }
 
+  // Worktree info is best-effort: a failure here (e.g. older git without
+  // worktree porcelain) should not take down the TUI initial load.
+  let worktreeByBranch = new Map<string, WorktreeInfo>();
+  try {
+    const res = await listBranchWorktrees(dir);
+    worktreeByBranch = res.byBranch;
+  } catch {
+    // leave empty
+  }
+
   const { code, stdout } = await runGitCommand(dir, "branch", "--show-current");
   const currentBranch = code === 0 && stdout ? stdout : null;
 
-  return { trees, syncByBranch, allBranches, currentBranch };
+  return {
+    trees,
+    syncByBranch,
+    worktreeByBranch,
+    allBranches,
+    currentBranch,
+  };
 }
 
 export interface LoadPrsOptions {
@@ -84,12 +102,14 @@ export async function loadPrsProgressive(
           "list",
           "--head",
           branch,
+          "--state",
+          "all",
           "--json",
-          "number,url,state,isDraft",
+          "number,url,state,isDraft,createdAt",
         );
         if (opts.signal?.aborted) return;
         const parsed = JSON.parse(out) as PrInfo[];
-        opts.onLoaded(branch, parsed.length > 0 ? parsed[0] : null);
+        opts.onLoaded(branch, selectBestPr(parsed));
       } catch (err) {
         if ((err as Error).name === "AbortError") return;
         opts.onError(branch, (err as Error).message);

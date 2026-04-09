@@ -77,6 +77,64 @@ describe("loadPrsProgressive", () => {
     expect(byBranch.get("feat/b")).toBe(null);
   });
 
+  test("surfaces merged PR when no open PR exists", async () => {
+    await writeFixture(
+      mockDir,
+      ["pr", "list", "--head", "feat/landed"],
+      [{
+        number: 117,
+        url: "https://github.com/o/r/pull/117",
+        state: "MERGED",
+        isDraft: false,
+        createdAt: "2026-04-07T00:00:00Z",
+      }],
+    );
+
+    const loaded: Array<{ branch: string; pr: unknown }> = [];
+    await loadPrsProgressive({
+      branches: ["feat/landed"],
+      concurrency: 1,
+      onLoaded: (branch, pr) => loaded.push({ branch, pr }),
+      onError: () => {},
+    });
+
+    expect(loaded).toHaveLength(1);
+    expect(loaded[0].pr).toMatchObject({ number: 117, state: "MERGED" });
+  });
+
+  test("prefers open PR over merged PR on same head ref", async () => {
+    await writeFixture(
+      mockDir,
+      ["pr", "list", "--head", "feat/reopened"],
+      [
+        {
+          number: 200,
+          url: "https://github.com/o/r/pull/200",
+          state: "OPEN",
+          isDraft: false,
+          createdAt: "2026-04-08T00:00:00Z",
+        },
+        {
+          number: 199,
+          url: "https://github.com/o/r/pull/199",
+          state: "MERGED",
+          isDraft: false,
+          createdAt: "2026-04-01T00:00:00Z",
+        },
+      ],
+    );
+
+    const loaded: Array<{ branch: string; pr: unknown }> = [];
+    await loadPrsProgressive({
+      branches: ["feat/reopened"],
+      concurrency: 1,
+      onLoaded: (branch, pr) => loaded.push({ branch, pr }),
+      onError: () => {},
+    });
+
+    expect(loaded[0].pr).toMatchObject({ number: 200, state: "OPEN" });
+  });
+
   test("aborts cleanly when signal triggers", async () => {
     await writeFixture(
       mockDir,

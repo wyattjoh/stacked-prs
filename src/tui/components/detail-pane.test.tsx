@@ -15,6 +15,7 @@ describe("DetailPane", () => {
         }}
         syncStatus="behind-parent"
         commitsCell={{ status: "loaded", commits: [] }}
+        worktree={undefined}
       />,
     );
     const f = lastFrame() ?? "";
@@ -38,12 +39,46 @@ describe("DetailPane", () => {
             { sha: "def5678", subject: "test: cover thing" },
           ],
         }}
+        worktree={undefined}
       />,
     );
     const f = lastFrame() ?? "";
     expect(f).toContain("abc1234");
     expect(f).toContain("feat: add thing");
     expect(f).toContain("def5678");
+    unmount();
+  });
+
+  test("renders clean worktree line", () => {
+    const { lastFrame, unmount } = render(
+      <DetailPane
+        branch="alpha-3"
+        prCell={{ status: "loaded", pr: null }}
+        syncStatus="up-to-date"
+        commitsCell={{ status: "loaded", commits: [] }}
+        worktree={{ displayPath: "~/Code/repo", dirty: false }}
+      />,
+    );
+    const f = lastFrame() ?? "";
+    expect(f).toContain("worktree");
+    expect(f).toContain("~/Code/repo");
+    expect(f.includes("*")).toBe(false);
+    unmount();
+  });
+
+  test("renders dirty worktree line with marker", () => {
+    const { lastFrame, unmount } = render(
+      <DetailPane
+        branch="alpha-3"
+        prCell={{ status: "loaded", pr: null }}
+        syncStatus="up-to-date"
+        commitsCell={{ status: "loaded", commits: [] }}
+        worktree={{ displayPath: "../repo-feat", dirty: true }}
+      />,
+    );
+    const f = lastFrame() ?? "";
+    expect(f).toContain("../repo-feat");
+    expect(f).toContain("*");
     unmount();
   });
 
@@ -54,6 +89,7 @@ describe("DetailPane", () => {
         prCell={undefined}
         syncStatus={undefined}
         commitsCell={undefined}
+        worktree={undefined}
       />,
     );
     expect(lastFrame()).toContain("no branch selected");

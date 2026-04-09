@@ -191,9 +191,11 @@ export function StackMap(props: StackMapProps): React.ReactElement {
         marginLeft={-scrollX}
         marginTop={-scrollY}
       >
-        {/* Shared base-branch label. */}
+        {/* Shared base-branch label. Selectable as a cursor target. */}
         <Box flexShrink={0}>
-          <Text dimColor>{visible[0].baseBranch}</Text>
+          {cursor?.branch === visible[0].baseBranch
+            ? <Text inverse>{visible[0].baseBranch}</Text>
+            : <Text dimColor>{visible[0].baseBranch}</Text>}
         </Box>
         {/* Initial trunk row: all bars originate here, one per stack. */}
         <Box flexDirection="row" flexShrink={0}>

@@ -39,11 +39,11 @@ export interface AppProps {
 
 /**
  * Fixed chrome reserved around the stack-map viewport. Current total:
- * HeaderBox (3) + body border (2) + detail pane (8, hard-coded in
- * `DetailPane`) + status bar (1) = 14. The optional gh-unavailable warning
+ * HeaderBox (3) + body border (2) + detail pane (10, hard-coded in
+ * `DetailPane`) + status bar (1) = 16. The optional gh-unavailable warning
  * adds one more line, applied on top of this base.
  */
-const CHROME_HEIGHT_BASE = 3 + 2 + 8 + 1;
+const CHROME_HEIGHT_BASE = 3 + 2 + 10 + 1;
 
 /**
  * Minimum stack-map viewport height. Each branch row is 2 lines (name +
@@ -108,6 +108,7 @@ export function App(props: AppProps): React.ReactElement {
       type: "LOCAL_LOADED",
       trees: local.trees,
       syncByBranch: local.syncByBranch,
+      worktreeByBranch: local.worktreeByBranch,
       grid,
       colorByStack,
       currentBranch: local.currentBranch,
@@ -148,7 +149,13 @@ export function App(props: AppProps): React.ReactElement {
     if (!branch) return;
     if (state.commits.has(branch)) return;
     const parent = parentOf(state, branch);
-    if (!parent) return;
+    if (!parent) {
+      // Cursor is on the base branch (or a branch not in any stack tree).
+      // Nothing to diff against, so record an empty commits list rather
+      // than leaving the detail pane stuck in a "loading commits" state.
+      dispatch({ type: "COMMITS_LOADED", branch, commits: [] });
+      return;
+    }
     dispatch({ type: "COMMITS_LOAD_START", branch });
     loadCommits(props.dir, branch, parent).then((commits) => {
       dispatch({ type: "COMMITS_LOADED", branch, commits });
@@ -228,10 +235,27 @@ export function App(props: AppProps): React.ReactElement {
   // clipped the cursor's trailing characters whenever the content row was
   // wider than the terminal. `computeScrollX` encapsulates the minimal-
   // movement policy so it's unit-testable in isolation.
+  // First visible stack's base branch is the one rendered at the top of the
+  // stack map. The cursor can land on it as a selectable target even though
+  // it is not part of the grid.
+  const baseBranch: string | undefined = visibleTrees[0]?.baseBranch;
+
   useEffect(() => {
     if (!state.cursor) return;
+    // Base-branch cursor: snap both scroll axes to 0 so the top label and all
+    // trunk rails stay visible.
+    if (state.cursor.branch === baseBranch) {
+      setScrollX(0);
+      return;
+    }
     const cell = state.grid.byBranch.get(state.cursor.branch);
     if (!cell) return;
+    // At depth 0 (root of a stack) snap scrollX to 0 so all of the vertical
+    // trunk rails for other stacks stay visible to the left of the cursor.
+    if (cell.depth === 0) {
+      setScrollX(0);
+      return;
+    }
     const stackCount = visibleTrees.length;
     const cursorX = branchNameContentX(stackCount, cell.depth);
     setScrollX((prev: number) =>
@@ -258,6 +282,11 @@ export function App(props: AppProps): React.ReactElement {
   useEffect(() => {
     const cursorBranch = state.cursor?.branch;
     if (!cursorBranch) return;
+    // Base-branch row sits at y=0, so snap scrollY to 0 when it is focused.
+    if (cursorBranch === baseBranch) {
+      setScrollY(0);
+      return;
+    }
     setScrollY((prev: number) =>
       computeScrollY({
         visibleStacks: visibleStackNames,
@@ -412,15 +441,34 @@ export function App(props: AppProps): React.ReactElement {
     const scopedStack = state.activeTab === "all"
       ? undefined
       : state.activeTab.stack;
+
+    // Base-branch cursor: the only valid moves are down / right into the
+    // first root of the first visible stack. Left / up / g / G / pgup /
+    // pgdn are no-ops.
+    if (cursor.branch === baseBranch && !grid.byBranch.has(cursor.branch)) {
+      if (key.downArrow || key.rightArrow) {
+        const firstStack = visibleTrees[0];
+        if (firstStack) {
+          const target = moveToStackStart(grid, firstStack.stackName);
+          if (target) dispatch({ type: "CURSOR_SET", cursor: target });
+        }
+      }
+      return;
+    }
+
     if (key.leftArrow) {
       dispatch({ type: "CURSOR_SET", cursor: moveLeft(grid, cursor) });
     } else if (key.rightArrow) {
       dispatch({ type: "CURSOR_SET", cursor: moveRight(grid, cursor) });
     } else if (key.upArrow) {
-      dispatch({
-        type: "CURSOR_SET",
-        cursor: moveUp(grid, cursor, scopedStack),
-      });
+      const next = moveUp(grid, cursor, scopedStack);
+      if (next.branch === cursor.branch && baseBranch) {
+        // Already at the top of the visible grid: step up onto the base
+        // branch label.
+        dispatch({ type: "CURSOR_SET", cursor: { branch: baseBranch } });
+      } else {
+        dispatch({ type: "CURSOR_SET", cursor: next });
+      }
     } else if (key.downArrow) {
       dispatch({
         type: "CURSOR_SET",
@@ -552,6 +600,9 @@ export function App(props: AppProps): React.ReactElement {
                 : undefined}
               commitsCell={focusedBranch
                 ? state.commits.get(focusedBranch)
+                : undefined}
+              worktree={focusedBranch
+                ? state.worktreeByBranch.get(focusedBranch)
                 : undefined}
               focused={state.focusedSection === "detail"}
               scrollX={state.detailScroll.scrollX}

@@ -187,4 +187,35 @@ describe("getStackStatus", () => {
     // Display should include the PR number
     expect(status.display).toContain("#101");
   });
+
+  test("surfaces merged PR when gh reports MERGED state", async () => {
+    await addBranch(repo.dir, "feature/landed", "main");
+
+    await setStackNode(repo.dir, "feature/landed", "landed-stack", "main");
+    await setBaseBranch(repo.dir, "landed-stack", "main");
+
+    await writeFixture(
+      mockDir,
+      ["pr", "list", "--head", "feature/landed", "--repo", "test/repo"],
+      [{
+        number: 117,
+        url: "https://github.com/test/repo/pull/117",
+        state: "MERGED",
+        isDraft: false,
+        createdAt: "2026-04-07T00:00:00Z",
+      }],
+    );
+
+    const status = await getStackStatus(
+      repo.dir,
+      "landed-stack",
+      "test",
+      "repo",
+    );
+
+    expect(status.branches[0].pr).toMatchObject({
+      number: 117,
+      state: "MERGED",
+    });
+  });
 });

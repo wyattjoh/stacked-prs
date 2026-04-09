@@ -303,14 +303,14 @@ Deno.test({
         // header row wrapped, these assertions would shift.
         expect(lines[1]).toContain("stacked-prs");
         expect(lines[1]).toContain("All stacks");
-        // Chrome: HeaderBox (3) + body border (2) + detail pane (8) + status
-        // bar (1) = 14. The body wrapper's top border is the first `┌` in the
+        // Chrome: HeaderBox (3) + body border (2) + detail pane (10) + status
+        // bar (1) = 16. The body wrapper's top border is the first `┌` in the
         // frame. The HeaderBox uses round corners (╭/╰) so its borders are not
         // captured. The HeaderBox occupies rows 0-2, so the body wrapper's `┌`
         // is at row 3. The detail pane's `┌` sits immediately after the body
         // wrapper's bottom border; the body wrapper is `stackMapHeight + 2`
-        // rows tall, where stackMapHeight = 24 - 14 = 10, giving a wrapper of
-        // 12 rows (rows 3..14) and the detail pane's `┌` at row 15. Note: the
+        // rows tall, where stackMapHeight = 24 - 16 = 8, giving a wrapper of
+        // 10 rows (rows 3..12) and the detail pane's `┌` at row 13. Note: the
         // canopy row inside the body wrapper also starts with `┌`, so we use
         // the first and last `┌` lines to identify the body wrapper and detail
         // pane borders respectively.
@@ -319,7 +319,7 @@ Deno.test({
           if (lines[i].includes("┌")) borderLines.push(i);
         }
         expect(borderLines[0]).toBe(3); // body wrapper top border
-        expect(borderLines.at(-1)).toBe(15); // detail pane top border
+        expect(borderLines.at(-1)).toBe(13); // detail pane top border
       } finally {
         instance.unmount();
       }

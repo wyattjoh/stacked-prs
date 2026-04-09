@@ -18,10 +18,14 @@ function getMockDir(): string | undefined {
 
 /** Derive a fixture filename from gh CLI arguments. */
 export function fixtureKey(args: string[]): string {
-  // Strip --json and its following value
+  // Strip query-modifier flags and their following values. These describe
+  // *how* a query is shaped (which fields, which states) rather than *what*
+  // is being queried, so a fixture keyed by "branch X" should match regardless
+  // of the field/state modifiers the caller used.
+  const STRIPPED_FLAGS = new Set(["--json", "--state"]);
   const filtered: string[] = [];
   for (let i = 0; i < args.length; i++) {
-    if (args[i] === "--json") {
+    if (STRIPPED_FLAGS.has(args[i])) {
       i++; // skip the value too
       continue;
     }
@@ -95,6 +99,41 @@ export async function gh(
     throw new Error(new TextDecoder().decode(stderr));
   }
   return new TextDecoder().decode(stdout);
+}
+
+/**
+ * Pick a single PR to surface from a `gh pr list --state all` result.
+ *
+ * Precedence (newest-first within each state, by `createdAt`):
+ *   OPEN > MERGED > CLOSED
+ *
+ * An open PR shadows any prior merged/closed PR on the same head ref, so a
+ * reopened workflow reads as "open" rather than flickering to "merged". When
+ * there's no open PR, the most recent MERGED surfaces — this is the fix for
+ * branches whose GitHub PR has been squash-merged and whose remote head ref
+ * is gone.
+ */
+export function selectBestPr<
+  T extends { state: string; createdAt?: string },
+>(prs: T[]): T | null {
+  if (prs.length === 0) return null;
+  const byPriority = (s: string): number => {
+    const u = s.toUpperCase();
+    if (u === "OPEN") return 0;
+    if (u === "MERGED") return 1;
+    return 2; // CLOSED / anything else
+  };
+  const sorted = [...prs].sort((a, b) => {
+    const pa = byPriority(a.state);
+    const pb = byPriority(b.state);
+    if (pa !== pb) return pa - pb;
+    const ca = a.createdAt ?? "";
+    const cb = b.createdAt ?? "";
+    // Newest first within the same bucket.
+    if (ca !== cb) return cb.localeCompare(ca);
+    return 0;
+  });
+  return sorted[0];
 }
 
 /** Write a fixture file for tests. */

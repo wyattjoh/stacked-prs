@@ -10,12 +10,20 @@ export type PrState = "open" | "draft" | "merged" | "closed" | "none";
 /** Line style for tree connectors. */
 export type ConnectorStyle = "solid" | "dashed" | "double";
 
+/** Per-branch worktree display info surfaced in the stack map. */
+export interface WorktreeInfo {
+  displayPath: string;
+  dirty: boolean;
+}
+
 /** Raw PR info returned by `gh pr list`. */
 export interface PrInfo {
   number: number;
   url: string;
   state: string;
   isDraft: boolean;
+  /** ISO timestamp; present when the query asks for `createdAt`. */
+  createdAt?: string;
 }
 
 /** Per-branch PR load state. */
@@ -83,6 +91,7 @@ export interface Viewport {
 export interface State {
   trees: StackTree[];
   syncByBranch: Map<string, SyncStatus>;
+  worktreeByBranch: Map<string, WorktreeInfo>;
   grid: GridLayout;
   prData: Map<string, PrCellState>;
   commits: Map<string, CommitsCellState>;
@@ -109,6 +118,7 @@ export type Action =
     type: "LOCAL_LOADED";
     trees: StackTree[];
     syncByBranch: Map<string, SyncStatus>;
+    worktreeByBranch: Map<string, WorktreeInfo>;
     grid: GridLayout;
     colorByStack: Map<string, string>;
     currentBranch: string | null;

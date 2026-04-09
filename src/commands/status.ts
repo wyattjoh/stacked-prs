@@ -6,13 +6,15 @@ import {
   type StackNode,
   type StackTree,
 } from "../lib/stack.ts";
-import { gh } from "../lib/gh.ts";
+import { gh, selectBestPr } from "../lib/gh.ts";
 
 export interface PrInfo {
   number: number;
   url: string;
   state: string;
   isDraft: boolean;
+  /** ISO timestamp; present when the query asks for `createdAt`. */
+  createdAt?: string;
 }
 
 export type SyncStatus = "up-to-date" | "behind-parent" | "diverged";
@@ -49,10 +51,11 @@ async function queryPr(
   if (owner && repo) {
     args.push("--repo", `${owner}/${repo}`);
   }
-  args.push("--json", "number,url,state,isDraft");
+  args.push("--state", "all");
+  args.push("--json", "number,url,state,isDraft,createdAt");
   const result = await gh(...args);
   const parsed = JSON.parse(result) as PrInfo[];
-  return parsed.length > 0 ? parsed[0] : null;
+  return selectBestPr(parsed);
 }
 
 async function getSyncStatus(

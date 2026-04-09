@@ -6,6 +6,7 @@ export function initialState(): State {
   return {
     trees: [],
     syncByBranch: new Map(),
+    worktreeByBranch: new Map(),
     grid: buildGrid([], new Map()),
     prData: new Map(),
     commits: new Map(),
@@ -47,6 +48,7 @@ export function reducer(state: State, action: Action): State {
         ...state,
         trees: action.trees,
         syncByBranch: action.syncByBranch,
+        worktreeByBranch: action.worktreeByBranch,
         grid: action.grid,
         colorByStack: action.colorByStack,
         currentBranch: action.currentBranch,

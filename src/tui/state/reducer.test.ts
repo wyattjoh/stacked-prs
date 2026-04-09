@@ -25,6 +25,7 @@ describe("reducer", () => {
       type: "LOCAL_LOADED",
       trees: [],
       syncByBranch: new Map(),
+      worktreeByBranch: new Map(),
       grid: emptyGrid,
       colorByStack: new Map([["alpha", "cyan"]]),
       currentBranch: "a1",

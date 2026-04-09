@@ -1,3 +1,4 @@
+import { relative as pathRelative } from "@std/path";
 import { runGitCommand, runGitCommandRaw } from "./stack.ts";
 
 export interface DirtyWorktree {
@@ -12,6 +13,94 @@ export interface DirtyWorktree {
 interface ParsedWorktree {
   path: string;
   branch: string | null;
+}
+
+/** Per-branch worktree info for TUI display. */
+export interface BranchWorktreeInfo {
+  /** Absolute path to the worktree. */
+  path: string;
+  /**
+   * Display path. For the branch checked out in the main (primary) worktree
+   * this is the absolute main-worktree path with `$HOME` replaced by `~`.
+   * For branches in other worktrees, this is the path relative to the main
+   * worktree (e.g. `../stacked-prs-feat-foo`).
+   */
+  displayPath: string;
+  /** True when `git status` in that worktree reports any changes. */
+  dirty: boolean;
+}
+
+export interface BranchWorktreesResult {
+  /** Absolute path to the main (primary) worktree. */
+  mainPath: string;
+  byBranch: Map<string, BranchWorktreeInfo>;
+}
+
+function withTilde(path: string, home: string | undefined): string {
+  if (!home) return path;
+  if (path === home) return "~";
+  if (path.startsWith(home + "/")) return "~" + path.slice(home.length);
+  return path;
+}
+
+async function isWorktreeDirty(wtPath: string): Promise<boolean> {
+  const { code, stdout } = await runGitCommandRaw(
+    wtPath,
+    "status",
+    "--porcelain=v1",
+    "-z",
+  );
+  if (code !== 0) return false;
+  return stdout.length > 0;
+}
+
+/**
+ * List every git worktree in `dir` and, for each one with a branch checked
+ * out, return its display path and dirty state. The first worktree entry
+ * from `git worktree list --porcelain` is treated as the main worktree;
+ * all other worktrees' display paths are computed relative to it.
+ */
+export async function listBranchWorktrees(
+  dir: string,
+): Promise<BranchWorktreesResult> {
+  const { code, stdout, stderr } = await runGitCommand(
+    dir,
+    "worktree",
+    "list",
+    "--porcelain",
+  );
+  if (code !== 0) {
+    throw new Error(`git worktree list failed: ${stderr}`);
+  }
+
+  const worktrees = parseWorktreeList(stdout);
+  const byBranch = new Map<string, BranchWorktreeInfo>();
+  if (worktrees.length === 0) {
+    return { mainPath: dir, byBranch };
+  }
+
+  const mainPath = worktrees[0].path;
+  const home = Deno.env.get("HOME");
+
+  const entries = await Promise.all(
+    worktrees
+      .filter((wt): wt is ParsedWorktree & { branch: string } =>
+        wt.branch !== null
+      )
+      .map(async (wt) => {
+        const dirty = await isWorktreeDirty(wt.path);
+        const displayPath = wt.path === mainPath
+          ? withTilde(mainPath, home)
+          : pathRelative(mainPath, wt.path);
+        return [wt.branch, { path: wt.path, displayPath, dirty }] as const;
+      }),
+  );
+
+  for (const [branch, info] of entries) {
+    byBranch.set(branch, info);
+  }
+
+  return { mainPath, byBranch };
 }
 
 function parseWorktreeList(porcelain: string): ParsedWorktree[] {
