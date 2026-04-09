@@ -16,7 +16,7 @@ export const STATUS_BAR_ITEMS: readonly string[] = [
   "[?]",
   "[q]",
   "[tab]",
-  "[\u2190\u2191\u2193\u2192]",
+  "[←↑↓→]",
   "[L]",
   "[p]",
   "[b]",
