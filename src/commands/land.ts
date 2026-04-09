@@ -614,6 +614,155 @@ async function executeCaseBCleanup(
   return { plan, autoMergedBranches: [], split: [] };
 }
 
+interface ExecState {
+  rollback: LandRollbackReport;
+  rebased: Set<string>;
+  pushed: Set<string>;
+  prUpdated: Set<number>;
+  prClosed: Set<number>;
+  configCleanupDone: boolean;
+  autoMerged: Set<string>;
+}
+
+function initExecState(): ExecState {
+  return {
+    rollback: emptyRollback(),
+    rebased: new Set(),
+    pushed: new Set(),
+    prUpdated: new Set(),
+    prClosed: new Set(),
+    configCleanupDone: false,
+    autoMerged: new Set(),
+  };
+}
+
+async function rollbackLocalRebases(
+  dir: string,
+  plan: LandPlan,
+  state: ExecState,
+): Promise<void> {
+  const snapByBranch = new Map(plan.snapshot.map((s) => [s.branch, s]));
+  for (const branch of state.rebased) {
+    const snap = snapByBranch.get(branch);
+    if (!snap) continue;
+    const { code, stderr } = await runGitCommand(
+      dir,
+      "update-ref",
+      `refs/heads/${branch}`,
+      snap.tipSha,
+    );
+    if (code === 0) {
+      state.rollback.localRestored.push(branch);
+    } else {
+      state.rollback.localFailed.push({ branch, reason: stderr });
+    }
+  }
+}
+
+async function executeCaseARebases(
+  dir: string,
+  plan: LandPlan,
+  hooks: LandHooks,
+  state: ExecState,
+): Promise<void> {
+  for (const step of plan.rebaseSteps) {
+    emit(hooks, { kind: "rebase", branch: step.branch }, "running");
+
+    const checkout = await runGitCommand(dir, "checkout", step.branch);
+    if (checkout.code !== 0) {
+      emit(
+        hooks,
+        { kind: "rebase", branch: step.branch },
+        "failed",
+        checkout.stderr,
+      );
+      await rollbackLocalRebases(dir, plan, state);
+      throw new LandError(
+        `Failed to checkout ${step.branch}: ${checkout.stderr}`,
+        plan,
+        state.rollback,
+        { kind: "rebase", branch: step.branch },
+      );
+    }
+
+    const rebase = await runGitCommand(
+      dir,
+      "rebase",
+      "--rebase-merges",
+      "--onto",
+      step.newTarget,
+      step.oldParentSha,
+      step.branch,
+    );
+
+    if (rebase.code !== 0) {
+      await runGitCommand(dir, "rebase", "--abort");
+      emit(
+        hooks,
+        { kind: "rebase", branch: step.branch },
+        "failed",
+        rebase.stderr,
+      );
+      await rollbackLocalRebases(dir, plan, state);
+      throw new LandError(
+        `Rebase of ${step.branch} failed: ${rebase.stderr}`,
+        plan,
+        state.rollback,
+        { kind: "rebase", branch: step.branch },
+      );
+    }
+
+    state.rebased.add(step.branch);
+
+    // Empty-branch detection: rebase dropped every commit via patch-id.
+    const countResult = await runGitCommand(
+      dir,
+      "rev-list",
+      "--count",
+      `${step.newTarget}..${step.branch}`,
+    );
+    if (countResult.code === 0 && countResult.stdout === "0") {
+      state.autoMerged.add(step.branch);
+      emit(
+        hooks,
+        { kind: "rebase", branch: step.branch },
+        "ok",
+        "auto-merged (patch-id drop)",
+      );
+    } else {
+      emit(hooks, { kind: "rebase", branch: step.branch }, "ok");
+    }
+  }
+}
+
+async function executeCaseA(
+  dir: string,
+  plan: LandPlan,
+  hooks: LandHooks,
+): Promise<LandResult> {
+  const state = initExecState();
+
+  emit(hooks, { kind: "fetch" }, "running");
+  try {
+    await fetchBase(dir, plan.baseBranch);
+    emit(hooks, { kind: "fetch" }, "ok");
+  } catch (err) {
+    emit(hooks, { kind: "fetch" }, "failed", (err as Error).message);
+    throw new LandError(
+      (err as Error).message,
+      plan,
+      state.rollback,
+      { kind: "fetch" },
+    );
+  }
+
+  await executeCaseARebases(dir, plan, hooks, state);
+
+  // Push, PR update, nav, config-cleanup, delete, restore-head phases
+  // follow in Tasks 18-23.
+  throw new Error("executeLand case A: post-rebase phases not yet implemented");
+}
+
 export async function executeLand(
   dir: string,
   plan: LandPlan,
@@ -641,7 +790,5 @@ export async function executeLand(
   if (plan.case === "all-merged") {
     return await executeCaseBCleanup(dir, plan, hooks);
   }
-
-  // Case A (root-merged) implementation arrives in Tasks 15-23.
-  throw new Error("executeLand: root-merged case not yet implemented");
+  return await executeCaseA(dir, plan, hooks);
 }

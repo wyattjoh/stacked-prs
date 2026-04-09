@@ -26,6 +26,7 @@ import {
   setBaseBranch,
   setStackNode,
 } from "../lib/stack.ts";
+import { setMockDir } from "../lib/gh.ts";
 
 async function initStack(
   repo: TestRepo,
@@ -36,6 +37,24 @@ async function initStack(
   for (const [branch, parent] of branches) {
     await setStackNode(repo.dir, branch, name, parent);
   }
+}
+
+async function createRepoWithOrigin(): Promise<TestRepo & { origin: string }> {
+  const origin = await Deno.makeTempDir({ prefix: "stacked-prs-origin-" });
+  await runGit(origin, "init", "--bare", "--initial-branch=main");
+
+  const work = await createTestRepo();
+  await runGit(work.dir, "remote", "add", "origin", origin);
+  await runGit(work.dir, "push", "origin", "main");
+
+  return {
+    dir: work.dir,
+    origin,
+    cleanup: async () => {
+      await work.cleanup();
+      await Deno.remove(origin, { recursive: true });
+    },
+  };
 }
 
 describe("land types", () => {
@@ -443,6 +462,85 @@ describe("planLand", () => {
       expect([...plan.branchesToDelete].sort()).toEqual(["feat/a", "feat/b"]);
     } finally {
       await repo.cleanup();
+    }
+  });
+});
+
+describe("executeLand case A rebase phase", () => {
+  it("rebases child onto origin/main for merge-strategy root-merged", async () => {
+    const env = await createRepoWithOrigin();
+    try {
+      await addBranch(env.dir, "feat/a", "main");
+      await runGit(env.dir, "push", "origin", "feat/a");
+      await addBranch(env.dir, "feat/b", "feat/a");
+      await runGit(env.dir, "push", "origin", "feat/b");
+      await initStack(env, "s", [["feat/a", "main"], ["feat/b", "feat/a"]]);
+
+      // Simulate the merge of feat/a into main on origin.
+      await runGit(env.dir, "checkout", "main");
+      await runGit(env.dir, "merge", "feat/a", "--no-ff", "-m", "Merge feat/a");
+      await runGit(env.dir, "push", "origin", "main");
+      await runGit(env.dir, "fetch", "origin", "main");
+
+      const prStates: PrStateByBranch = new Map([
+        ["feat/a", "MERGED"],
+        ["feat/b", "OPEN"],
+      ]);
+      const prInfo = new Map<string, PrInfo>([
+        ["feat/b", { number: 20, url: "", state: "OPEN", isDraft: true }],
+      ]);
+
+      const mockDir = await Deno.makeTempDir();
+      setMockDir(mockDir);
+
+      const events: LandProgressEvent[] = [];
+      try {
+        // Later phases (push, pr-update, nav, delete) are not yet
+        // implemented and will throw. We only verify the rebase phase here.
+        await executeLand(
+          env.dir,
+          await planLand(env.dir, "s", prStates, prInfo),
+          {
+            onProgress: (e) => events.push(e),
+            freshPrStates: () => Promise.resolve(prStates),
+          },
+        );
+      } catch {
+        // expected: later phases not yet implemented
+      } finally {
+        setMockDir(undefined);
+      }
+
+      const rebaseOk = events.find(
+        (e) =>
+          e.step.kind === "rebase" &&
+          (e.step as { kind: "rebase"; branch: string }).branch === "feat/b" &&
+          e.status === "ok",
+      );
+      expect(rebaseOk).toBeDefined();
+
+      // feat/b is now rooted on origin/main.
+      const branchShaResult = await runGitCommand(
+        env.dir,
+        "rev-parse",
+        "feat/b",
+      );
+      const originMainShaResult = await runGitCommand(
+        env.dir,
+        "rev-parse",
+        "origin/main",
+      );
+      const isAncestorResult = await runGitCommand(
+        env.dir,
+        "merge-base",
+        "--is-ancestor",
+        originMainShaResult.stdout,
+        branchShaResult.stdout,
+      );
+      expect(isAncestorResult.code).toBe(0);
+    } finally {
+      await env.cleanup();
+      setMockDir(undefined);
     }
   });
 });
