@@ -171,3 +171,57 @@ describe("captureSnapshot", () => {
     }
   });
 });
+
+describe("buildRebaseSteps", () => {
+  it("for root-merged linear stack, first child targets origin/base", async () => {
+    const repo = await createTestRepo();
+    try {
+      await addBranch(repo.dir, "feat/a", "main");
+      await addBranch(repo.dir, "feat/b", "feat/a");
+      await addBranch(repo.dir, "feat/c", "feat/b");
+      await initStack(repo, "s", [
+        ["feat/a", "main"],
+        ["feat/b", "feat/a"],
+        ["feat/c", "feat/b"],
+      ]);
+      const tree = await getStackTree(repo.dir, "s");
+      const snap = await captureSnapshot(repo.dir, tree);
+      const { buildRebaseSteps } = await import("./land.ts");
+      const steps = buildRebaseSteps(tree, snap, "feat/a");
+      expect(steps.length).toBe(2);
+      expect(steps[0].branch).toBe("feat/b");
+      expect(steps[0].newTarget).toBe("origin/main");
+      expect(steps[1].branch).toBe("feat/c");
+      expect(steps[1].newTarget).toBe("feat/b");
+      const snapA = snap.find((s) => s.branch === "feat/a")!;
+      const snapB = snap.find((s) => s.branch === "feat/b")!;
+      expect(steps[0].oldParentSha).toBe(snapA.tipSha);
+      expect(steps[1].oldParentSha).toBe(snapB.tipSha);
+    } finally {
+      await repo.cleanup();
+    }
+  });
+});
+
+describe("buildPushSteps", () => {
+  it("returns steps in leaves-first order", async () => {
+    const repo = await createTestRepo();
+    try {
+      await addBranch(repo.dir, "feat/a", "main");
+      await addBranch(repo.dir, "feat/b", "feat/a");
+      await addBranch(repo.dir, "feat/c", "feat/b");
+      await initStack(repo, "s", [
+        ["feat/a", "main"],
+        ["feat/b", "feat/a"],
+        ["feat/c", "feat/b"],
+      ]);
+      const tree = await getStackTree(repo.dir, "s");
+      const snap = await captureSnapshot(repo.dir, tree);
+      const { buildPushSteps } = await import("./land.ts");
+      const pushes = buildPushSteps(tree, snap, "feat/a");
+      expect(pushes.map((p) => p.branch)).toEqual(["feat/c", "feat/b"]);
+    } finally {
+      await repo.cleanup();
+    }
+  });
+});

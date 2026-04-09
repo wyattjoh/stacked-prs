@@ -134,6 +134,7 @@ import {
   type WorktreeCollision,
 } from "../lib/worktrees.ts";
 import { getAllNodes, runGitCommand, type StackTree } from "../lib/stack.ts";
+import { topologicalOrder } from "./restack.ts";
 
 export async function isShallowRepository(dir: string): Promise<boolean> {
   const { code, stdout } = await runGitCommand(
@@ -278,4 +279,58 @@ export async function captureOriginalHead(dir: string): Promise<string> {
   if (code === 0) return stdout;
   // Detached HEAD: fall back to raw SHA so we can restore it.
   return await revParse(dir, "HEAD");
+}
+
+/**
+ * Build per-branch rebase steps for the "root-merged" case. Walks the
+ * tree in DFS topological order, skipping the merged root. The first
+ * step after the root targets `origin/<base>`; deeper steps target the
+ * parent branch name (which will have been rebased by the time they run).
+ */
+export function buildRebaseSteps(
+  tree: StackTree,
+  snapshot: BranchSnapshot[],
+  mergedRoot: string,
+): LandRebaseStep[] {
+  const byBranch = new Map(snapshot.map((s) => [s.branch, s]));
+  const steps: LandRebaseStep[] = [];
+  for (const node of topologicalOrder(tree)) {
+    if (node.branch === mergedRoot) continue;
+    const parentSnap = byBranch.get(node.parent);
+    const oldParentSha = parentSnap?.tipSha;
+    if (oldParentSha === undefined) {
+      throw new Error(
+        `buildRebaseSteps: no snapshot for parent ${node.parent} of ${node.branch}`,
+      );
+    }
+    const newTarget = node.parent === mergedRoot
+      ? `origin/${tree.baseBranch}`
+      : node.parent;
+    steps.push({
+      branch: node.branch,
+      oldParentSha,
+      newTarget,
+    });
+  }
+  return steps;
+}
+
+/**
+ * Build leaves-first push steps from a rebase plan. `snapshot` is used
+ * to recover each branch's pre-land tip SHA for the lease expectation.
+ */
+export function buildPushSteps(
+  tree: StackTree,
+  snapshot: BranchSnapshot[],
+  mergedRoot: string,
+): LandPushStep[] {
+  const byBranch = new Map(snapshot.map((s) => [s.branch, s]));
+  const order = topologicalOrder(tree).filter((n) => n.branch !== mergedRoot);
+  const steps: LandPushStep[] = [];
+  for (const node of [...order].reverse()) {
+    const snap = byBranch.get(node.branch);
+    if (!snap) continue;
+    steps.push({ branch: node.branch, preLeaseSha: snap.tipSha });
+  }
+  return steps;
 }
