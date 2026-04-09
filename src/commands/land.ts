@@ -133,6 +133,7 @@ import {
   listInProgressOperations,
   type WorktreeCollision,
 } from "../lib/worktrees.ts";
+import { gh } from "../lib/gh.ts";
 import {
   findNode,
   getAllNodes,
@@ -817,6 +818,67 @@ async function executeCaseAPushes(
   }
 }
 
+async function rollbackPrUpdates(
+  _dir: string,
+  plan: LandPlan,
+  state: ExecState,
+): Promise<void> {
+  for (const update of plan.prUpdates) {
+    if (!state.prUpdated.has(update.prNumber)) continue;
+    try {
+      await gh("pr", "edit", String(update.prNumber), "--base", update.oldBase);
+      if (update.flipToReady) {
+        await gh("pr", "ready", String(update.prNumber), "--undo");
+      }
+      state.rollback.prRestored.push(update.prNumber);
+    } catch (err) {
+      state.rollback.prFailed.push({
+        prNumber: update.prNumber,
+        reason: (err as Error).message,
+      });
+    }
+  }
+}
+
+async function executeCaseAPrUpdates(
+  dir: string,
+  plan: LandPlan,
+  hooks: LandHooks,
+  state: ExecState,
+): Promise<void> {
+  for (const update of plan.prUpdates) {
+    if (state.autoMerged.has(update.branch)) {
+      // Auto-merged branches are handled by the PR close phase (Task 20).
+      continue;
+    }
+    emit(hooks, { kind: "pr-update", branch: update.branch }, "running");
+    try {
+      await gh("pr", "edit", String(update.prNumber), "--base", update.newBase);
+      if (update.flipToReady) {
+        await gh("pr", "ready", String(update.prNumber));
+      }
+      state.prUpdated.add(update.prNumber);
+      emit(hooks, { kind: "pr-update", branch: update.branch }, "ok");
+    } catch (err) {
+      emit(
+        hooks,
+        { kind: "pr-update", branch: update.branch },
+        "failed",
+        (err as Error).message,
+      );
+      await rollbackPrUpdates(dir, plan, state);
+      await rollbackRemotePushes(dir, plan, state);
+      await rollbackLocalRebases(dir, plan, state);
+      throw new LandError(
+        `PR update for ${update.branch} failed: ${(err as Error).message}`,
+        plan,
+        state.rollback,
+        { kind: "pr-update", branch: update.branch },
+      );
+    }
+  }
+}
+
 async function executeCaseA(
   dir: string,
   plan: LandPlan,
@@ -842,9 +904,12 @@ async function executeCaseA(
 
   await executeCaseAPushes(dir, plan, hooks, state);
 
-  // PR updates, nav, config-cleanup, delete, restore-head phases
-  // follow in Tasks 19-23.
-  throw new Error("executeLand case A: post-push phases not yet implemented");
+  await executeCaseAPrUpdates(dir, plan, hooks, state);
+
+  // nav, config-cleanup, delete, restore-head phases follow in Tasks 20-23.
+  throw new Error(
+    "executeLand case A: post-pr-update phases not yet implemented",
+  );
 }
 
 export async function executeLand(

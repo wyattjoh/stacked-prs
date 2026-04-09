@@ -612,6 +612,59 @@ describe("executeLand case A push phase", () => {
   });
 });
 
+describe("executeLand case A pr-update phase", () => {
+  it("retargets PR base and flips draft to ready", async () => {
+    const env = await createRepoWithOrigin();
+    try {
+      await addBranch(env.dir, "feat/a", "main");
+      await runGit(env.dir, "push", "origin", "feat/a");
+      await addBranch(env.dir, "feat/b", "feat/a");
+      await runGit(env.dir, "push", "origin", "feat/b");
+      await initStack(env, "s", [["feat/a", "main"], ["feat/b", "feat/a"]]);
+
+      await runGit(env.dir, "checkout", "main");
+      await runGit(env.dir, "merge", "feat/a", "--no-ff", "-m", "Merge feat/a");
+      await runGit(env.dir, "push", "origin", "main");
+      await runGit(env.dir, "fetch", "origin", "main");
+
+      const prStates: PrStateByBranch = new Map([
+        ["feat/a", "MERGED"],
+        ["feat/b", "OPEN"],
+      ]);
+      const prInfo = new Map<string, PrInfo>([
+        ["feat/b", { number: 20, url: "", state: "OPEN", isDraft: true }],
+      ]);
+
+      const mockDir = await Deno.makeTempDir();
+      setMockDir(mockDir);
+
+      const events: LandProgressEvent[] = [];
+      try {
+        await executeLand(
+          env.dir,
+          await planLand(env.dir, "s", prStates, prInfo),
+          {
+            onProgress: (e) => events.push(e),
+            freshPrStates: () => Promise.resolve(prStates),
+          },
+        );
+      } catch {
+        // later phases may still error
+      } finally {
+        setMockDir(undefined);
+      }
+
+      const prUpdate = events.find(
+        (e) => e.step.kind === "pr-update" && e.status === "ok",
+      );
+      expect(prUpdate).toBeDefined();
+    } finally {
+      await env.cleanup();
+      setMockDir(undefined);
+    }
+  });
+});
+
 describe("executeLand case A rebase phase", () => {
   it("rebases child onto origin/main for merge-strategy root-merged", async () => {
     const env = await createRepoWithOrigin();
