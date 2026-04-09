@@ -38,14 +38,11 @@ export interface AppProps {
 }
 
 /**
- * Fixed chrome reserved around the stack-map viewport: tab bar (1) + body
- * border (2) + detail pane (8, hard-coded in `DetailPane`) + status bar (1).
- * The optional gh-unavailable warning adds one more line, applied on top of
- * this base.
- *
- * Chrome = header (3) + body border (2) + detail pane (8) + status bar (1).
- * Updated in-progress: this task adds the body border (+2). Task 6 bumps
- * the header from 1 → 3 (+2 more) when HeaderBox replaces TabBar.
+ * Fixed chrome reserved around the stack-map viewport. Current total:
+ * tab bar (1) + body border (2) + detail pane (8, hard-coded in
+ * `DetailPane`) + status bar (1) = 12. The optional gh-unavailable warning
+ * adds one more line, applied on top of this base. Task 6 will replace the
+ * 1-row tab bar with a 3-row boxed HeaderBox, bumping this to 14.
  */
 const CHROME_HEIGHT_BASE = 1 + 2 + 8 + 1;
 
@@ -514,6 +511,16 @@ export function App(props: AppProps): React.ReactElement {
         )
         : (
           <>
+            {
+              /*
+              Body wrapper. `stackMapHeight` is the INNER content height
+              <StackMap> receives. The wrapper adds 2 for its own border rows
+              (top + bottom), and those 2 rows are already accounted for in
+              CHROME_HEIGHT_BASE. Do not subtract the border from
+              `stackMapHeight` inside <StackMap> or feed `stackMapHeight + 2`
+              into scroll math — computeScrollY uses the inner viewport height.
+            */
+            }
             <Box
               borderStyle="single"
               borderColor={state.focusedSection === "body"

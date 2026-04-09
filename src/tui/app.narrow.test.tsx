@@ -79,14 +79,16 @@ function stripAnsi(s: string): string {
  */
 function regions(frame: string): { stackMap: string; detailHeader: string } {
   const lines = frame.split("\n");
-  // Find the two border blocks: first is the body wrapper, second is the
-  // detail pane. Content between them is the stack map interior.
+  // Collect `┌` border lines and index from the end so this helper keeps
+  // working when future chrome changes add more border blocks above the
+  // body wrapper (e.g., the Task 6 HeaderBox). The last `┌` is always the
+  // detail pane; the second-to-last is the body wrapper.
   const borders: number[] = [];
   for (let i = 1; i < lines.length; i++) {
     if (lines[i].includes("┌")) borders.push(i);
   }
-  const bodyTop = borders[0] ?? -1;
-  const detailTop = borders[1] ?? lines.length;
+  const detailTop = borders.at(-1) ?? lines.length;
+  const bodyTop = borders.at(-2) ?? -1;
   const stackMap = lines.slice(bodyTop + 1, detailTop).join("\n");
   const detailHeader = lines[detailTop + 1] ?? "";
   return { stackMap, detailHeader };
