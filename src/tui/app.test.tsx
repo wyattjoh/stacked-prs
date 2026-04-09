@@ -49,4 +49,42 @@ describe("App integration", () => {
     expect(lastFrame()).toContain("feat/a");
     unmount();
   });
+
+  test("pressing L on a stack with a merged PR enters the land modal", async () => {
+    await addBranch(repo.dir, "feat/a", "main");
+    await setStackNode(repo.dir, "feat/a", "s", "main");
+    await setBaseBranch(repo.dir, "s", "main");
+    // Mock gh pr list for feat/a to return MERGED.
+    await writeFixture(
+      mockDir,
+      ["pr", "list", "--head", "feat/a"],
+      [
+        {
+          number: 10,
+          url: "https://example.com/10",
+          state: "MERGED",
+          isDraft: false,
+          createdAt: "2026-04-01T00:00:00Z",
+        },
+      ],
+    );
+
+    const { stdin, lastFrame, unmount } = render(<App dir={repo.dir} />);
+    try {
+      // Give the initial load a tick to populate PR data.
+      await new Promise((r) => setTimeout(r, 300));
+      stdin.write("L");
+      await new Promise((r) => setTimeout(r, 100));
+      const frame = lastFrame() ?? "";
+      // After L, we're either in planning, confirming (plan already loaded),
+      // or all the way through the all-merged fast path.
+      const entered = frame.includes("Computing land plan") ||
+        frame.includes("Land stack") ||
+        frame.includes("Landed stack") ||
+        frame.includes("Land failed");
+      expect(entered).toBe(true);
+    } finally {
+      unmount();
+    }
+  });
 });
