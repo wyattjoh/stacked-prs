@@ -312,7 +312,12 @@ export function App(props: AppProps): React.ReactElement {
       const branch = state.cursor.branch;
       const prCell = state.prData.get(branch);
       if (prCell?.status === "loaded" && prCell.pr) {
-        gh("pr", "view", "--web", String(prCell.pr.number)).catch(() => {});
+        const pr = prCell.pr;
+        gh("pr", "view", "--web", String(pr.number)).catch(() => {});
+        dispatch({
+          type: "NOTICE_SHOW",
+          message: `Opening PR #${pr.number} in browser`,
+        });
         return;
       }
       const message = prCell?.status === "loading"
