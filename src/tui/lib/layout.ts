@@ -48,6 +48,7 @@ function walkTree(
       parent,
       firstChild: node.children[0]?.branch ?? null,
       connectorStyle: styleFromSync(syncByBranch.get(node.branch)),
+      ...(node.merged ? { merged: true } : {}),
     });
 
     // When descending from a depth-0 root, we don't append a rail entry
@@ -71,7 +72,13 @@ function walkTree(
   // Multiple roots in one stack are treated as independent subtrees: each
   // is rendered with isLastSibling=true so no shared rail is drawn between
   // them. This matches how they relate to the base branch, not each other.
-  for (const root of tree.roots) {
+  // Merged roots are walked first so they appear above live roots in the grid.
+  const mergedRoots = tree.roots.filter((n) => n.merged);
+  const liveRoots = tree.roots.filter((n) => !n.merged);
+  for (const root of mergedRoots) {
+    visit(root, 0, true, [], null);
+  }
+  for (const root of liveRoots) {
     visit(root, 0, true, [], null);
   }
 

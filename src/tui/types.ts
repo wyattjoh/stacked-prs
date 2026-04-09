@@ -68,6 +68,8 @@ export interface GridCell {
   parent: string | null;
   firstChild: string | null;
   connectorStyle: ConnectorStyle;
+  /** True for historically merged branches (stack-merged = true). */
+  merged?: boolean;
 }
 
 export interface GridLayout {

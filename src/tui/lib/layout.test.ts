@@ -176,3 +176,37 @@ describe("buildGrid", () => {
     expect(grid.totalRows).toBe(0);
   });
 });
+
+describe("buildGrid with merged nodes", () => {
+  test("places merged cells before live cells in row order", () => {
+    const mergedNode = {
+      branch: "feature/a",
+      stackName: "my-stack",
+      parent: "main",
+      children: [],
+      merged: true as const,
+    };
+    const liveNode = {
+      branch: "feature/b",
+      stackName: "my-stack",
+      parent: "main",
+      children: [],
+    };
+    const tree: StackTree = {
+      stackName: "my-stack",
+      baseBranch: "main",
+      mergeStrategy: undefined,
+      roots: [mergedNode, liveNode],
+    };
+
+    const grid = buildGrid([tree], new Map());
+    const cellA = grid.byBranch.get("feature/a");
+    const cellB = grid.byBranch.get("feature/b");
+
+    expect(cellA).toBeDefined();
+    expect(cellB).toBeDefined();
+    expect(cellA!.merged).toBe(true);
+    expect(cellB!.merged).toBeUndefined();
+    expect(cellA!.row).toBeLessThan(cellB!.row);
+  });
+});
