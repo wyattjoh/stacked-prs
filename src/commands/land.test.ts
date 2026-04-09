@@ -925,3 +925,69 @@ describe("executeLand case A nav phase", () => {
     }
   });
 });
+
+describe("executeLand stale-plan detection", () => {
+  it("aborts before mutation when a merged PR has been reopened", async () => {
+    const env = await createRepoWithOrigin();
+    try {
+      await addBranch(env.dir, "feat/a", "main");
+      await runGit(env.dir, "push", "origin", "feat/a");
+      await addBranch(env.dir, "feat/b", "feat/a");
+      await runGit(env.dir, "push", "origin", "feat/b");
+      await initStack(env, "s", [["feat/a", "main"], ["feat/b", "feat/a"]]);
+      await runGit(env.dir, "checkout", "main");
+      await runGit(env.dir, "merge", "feat/a", "--no-ff", "-m", "Merge feat/a");
+      await runGit(env.dir, "push", "origin", "main");
+      await runGit(env.dir, "fetch", "origin", "main");
+
+      const planPrStates: PrStateByBranch = new Map([
+        ["feat/a", "MERGED"],
+        ["feat/b", "OPEN"],
+      ]);
+      const plan = await planLand(
+        env.dir,
+        "s",
+        planPrStates,
+        new Map([
+          ["feat/b", { number: 20, url: "", state: "OPEN", isDraft: true }],
+        ]),
+      );
+
+      // Between planning and execution, feat/a is reopened.
+      const freshStates: PrStateByBranch = new Map([
+        ["feat/a", "OPEN"],
+        ["feat/b", "OPEN"],
+      ]);
+
+      const mockDir = await Deno.makeTempDir();
+      setMockDir(mockDir);
+      let caught: LandError | null = null;
+      try {
+        await executeLand(env.dir, plan, {
+          onProgress: () => {},
+          freshPrStates: () => Promise.resolve(freshStates),
+        });
+      } catch (err) {
+        caught = err as LandError;
+      } finally {
+        setMockDir(undefined);
+      }
+
+      expect(caught).not.toBeNull();
+      expect(caught!.failedAt.kind).toBe("preflight");
+      expect(caught!.message.includes("stale")).toBe(true);
+
+      // feat/a still exists locally, untouched.
+      const aExists = await runGitCommand(
+        env.dir,
+        "rev-parse",
+        "--verify",
+        "refs/heads/feat/a",
+      );
+      expect(aExists.code).toBe(0);
+    } finally {
+      await env.cleanup();
+      setMockDir(undefined);
+    }
+  });
+});

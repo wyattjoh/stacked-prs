@@ -1071,6 +1071,27 @@ export async function executeLand(
       { kind: "preflight" },
     );
   }
+
+  // Stale-plan detection: re-read PR states and verify the set of merged
+  // branches hasn't changed since the plan was built. Protects against
+  // reopened/closed/re-merged PRs during the confirm dialog.
+  const freshStates = await hooks.freshPrStates(allBranches);
+  const freshMerged = new Set(
+    allBranches.filter((b) => freshStates.get(b) === "MERGED"),
+  );
+  const planMerged = new Set(plan.mergedBranches);
+  const mergedUnchanged = freshMerged.size === planMerged.size &&
+    [...freshMerged].every((b) => planMerged.has(b));
+  if (!mergedUnchanged) {
+    emit(hooks, { kind: "preflight" }, "failed", "plan is stale");
+    throw new LandError(
+      "plan is stale: PR states changed between planning and execution; re-run land",
+      plan,
+      emptyRollback(),
+      { kind: "preflight" },
+    );
+  }
+
   emit(hooks, { kind: "preflight" }, "ok");
 
   if (plan.case === "all-merged") {
