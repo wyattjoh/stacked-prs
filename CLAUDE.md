@@ -134,6 +134,7 @@ can be continued across process invocations.
 | `src/commands/verify-refs.ts`     | Post-rebase verification                   | `cli.ts verify-refs`                             |
 | `src/commands/import-discover.ts` | Branch tree detection                      | `cli.ts import-discover`                         |
 | `src/commands/submit-plan.ts`     | Submit planning                            | `cli.ts submit-plan`                             |
+| `src/commands/land.ts`            | Land library (pure plan + impure execute)  | Imported by the TUI; not a CLI subcommand        |
 | `src/tui/app.tsx`                 | Root Ink component, owns reducer + effects | Launched by `cli.ts status -i`                   |
 
 ### Git config schema
@@ -224,6 +225,14 @@ Keyboard navigation:
 The status bar at the bottom is built dynamically from `STATUS_BAR_ITEMS` in
 `help-overlay.tsx`: `buildStatusBar(termSize.cols)` greedily includes shortcuts
 until the next one would overflow the terminal width.
+
+The TUI now owns one write operation: the `L` key lands a stack whose root PR
+has been merged (or every PR in the stack is merged). The logic lives in
+`src/commands/land.ts` (pure `planLand` plus impure `executeLand` with a
+snapshot-based rollback path); the TUI is a launcher that shows a plan modal,
+streams progress events, and displays a rollback report on failure.
+Confirmation gates move into the Ink modal (`[y]`/`[n]`) for this path; the
+`SKILL.md` `land` runbook remains the Claude-orchestrated alternative.
 
 ### Testing
 
