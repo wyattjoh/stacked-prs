@@ -1,4 +1,10 @@
-import { afterEach, beforeEach, describe, it as test } from "@std/testing/bdd";
+import {
+  afterEach,
+  beforeEach,
+  describe,
+  it,
+  it as test,
+} from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import {
   addBranch,
@@ -8,6 +14,8 @@ import {
 } from "../lib/testdata/helpers.ts";
 import type { TestRepo } from "../lib/testdata/helpers.ts";
 import {
+  getStackTree,
+  runGitCommand,
   setBaseBranch,
   setStackNode,
   type StackNode,
@@ -1088,5 +1096,32 @@ describe("executeRestack (deleted branches)", () => {
       // good, config not set
     }
     expect(stateExists).toBe(false);
+  });
+});
+
+describe("topologicalOrder skips merged nodes", () => {
+  it("does not include stack-merged branches in the rebase walk", async () => {
+    const repo = await createTestRepo();
+    try {
+      await addBranch(repo.dir, "feature/a", "main");
+      await addBranch(repo.dir, "feature/b", "feature/a");
+      await setStackNode(repo.dir, "feature/a", "my-stack", "main");
+      await setStackNode(repo.dir, "feature/b", "my-stack", "feature/a");
+      await setBaseBranch(repo.dir, "my-stack", "main");
+      await runGitCommand(
+        repo.dir,
+        "config",
+        "branch.feature/a.stack-merged",
+        "true",
+      );
+
+      const tree = await getStackTree(repo.dir, "my-stack");
+      const order = topologicalOrder(tree);
+
+      expect(order.map((n) => n.branch)).not.toContain("feature/a");
+      expect(order.map((n) => n.branch)).toContain("feature/b");
+    } finally {
+      await repo.cleanup();
+    }
   });
 });

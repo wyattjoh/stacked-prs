@@ -54,7 +54,9 @@ export interface RestackResult {
 export function topologicalOrder(tree: StackTree): StackNode[] {
   const order: StackNode[] = [];
   const walk = (node: StackNode): void => {
-    order.push(node);
+    if (!node.merged) {
+      order.push(node);
+    }
     // Deterministic child order: already sorted alphabetically by getStackTree
     for (const child of node.children) walk(child);
   };
