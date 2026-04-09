@@ -146,7 +146,7 @@ Deno.test({
       await buildLinearStack(repo, mockDir, 10);
       await runGitCommand(repo.dir, "checkout", "feat/br-09");
 
-      const stdout = new SizedStdout(50, 16);
+      const stdout = new SizedStdout(50, 18);
       const stdin = new TestStdin();
       const instance = render(<App dir={repo.dir} />, {
         stdout: stdout as never,
@@ -295,16 +295,29 @@ Deno.test({
         await new Promise((r) => setTimeout(r, 400));
         const frame = stripAnsi(latestFrame(stdout));
         const lines = frame.split("\n");
-        // The tab bar is the very first rendered line and must contain
-        // both the "stacked-prs" logo and at least the [All] tab. If it
-        // wrapped, the logo would be on line 0 and [All] on line 1.
-        expect(lines[0]).toContain("stacked-prs");
-        expect(lines[0]).toContain("[All]");
-        // Chrome (intermediate state, Task 5): tab bar (1) + body border (2) +
-        // detail pane (8) + status bar (1) = 12. The first `┌` is the body
-        // wrapper's top border, expected at row 1 (tab bar row 0).
-        const firstBorder = lines.findIndex((l) => l.includes("┌"));
-        expect(firstBorder).toBe(1);
+        // The HeaderBox spans rows 0-2 (top border, content, bottom border).
+        // The content row (line 1) must contain both the "stacked-prs" label and
+        // the "All stacks" text (active tab is All after initial load). If any
+        // header row wrapped, these assertions would shift.
+        expect(lines[1]).toContain("stacked-prs");
+        expect(lines[1]).toContain("All stacks");
+        // Chrome: HeaderBox (3) + body border (2) + detail pane (8) + status
+        // bar (1) = 14. The body wrapper's top border is the first `┌` in the
+        // frame. The HeaderBox uses round corners (╭/╰) so its borders are not
+        // captured. The HeaderBox occupies rows 0-2, so the body wrapper's `┌`
+        // is at row 3. The detail pane's `┌` sits immediately after the body
+        // wrapper's bottom border; the body wrapper is `stackMapHeight + 2`
+        // rows tall, where stackMapHeight = 24 - 14 = 10, giving a wrapper of
+        // 12 rows (rows 3..14) and the detail pane's `┌` at row 15. Note: the
+        // canopy row inside the body wrapper also starts with `┌`, so we use
+        // the first and last `┌` lines to identify the body wrapper and detail
+        // pane borders respectively.
+        const borderLines: number[] = [];
+        for (let i = 0; i < lines.length; i++) {
+          if (lines[i].includes("┌")) borderLines.push(i);
+        }
+        expect(borderLines[0]).toBe(3); // body wrapper top border
+        expect(borderLines.at(-1)).toBe(15); // detail pane top border
       } finally {
         instance.unmount();
       }
@@ -430,7 +443,7 @@ Deno.test({
         }
 
         stdout.cols = 50;
-        stdout.rowsN = 14;
+        stdout.rowsN = 18;
         stdout.emit("resize");
         await new Promise((r) => setTimeout(r, 100));
 

@@ -27,7 +27,7 @@ import {
 import { copyToClipboard } from "./lib/clipboard.ts";
 import { gh } from "../lib/gh.ts";
 import { runGitCommand } from "../lib/stack.ts";
-import { TabBar } from "./components/tab-bar.tsx";
+import { HeaderBox } from "./components/header-box.tsx";
 import { StackMap } from "./components/stack-map.tsx";
 import { DetailPane } from "./components/detail-pane.tsx";
 import { buildStatusBar, HelpOverlay } from "./components/help-overlay.tsx";
@@ -39,12 +39,11 @@ export interface AppProps {
 
 /**
  * Fixed chrome reserved around the stack-map viewport. Current total:
- * tab bar (1) + body border (2) + detail pane (8, hard-coded in
- * `DetailPane`) + status bar (1) = 12. The optional gh-unavailable warning
- * adds one more line, applied on top of this base. Task 6 will replace the
- * 1-row tab bar with a 3-row boxed HeaderBox, bumping this to 14.
+ * HeaderBox (3) + body border (2) + detail pane (8, hard-coded in
+ * `DetailPane`) + status bar (1) = 14. The optional gh-unavailable warning
+ * adds one more line, applied on top of this base.
  */
-const CHROME_HEIGHT_BASE = 1 + 2 + 8 + 1;
+const CHROME_HEIGHT_BASE = 3 + 2 + 8 + 1;
 
 /**
  * Minimum stack-map viewport height. Each branch row is 2 lines (name +
@@ -493,12 +492,14 @@ export function App(props: AppProps): React.ReactElement {
       width={termSize.cols}
       height={termSize.rows}
     >
-      <TabBar
+      <HeaderBox
         stacks={stackNames}
         activeTab={state.activeTab}
         loadingCount={state.loadingCount}
         totalLoadCount={state.totalLoadCount}
         focused={state.focusedSection === "header"}
+        colorByStack={state.colorByStack}
+        primaryColor={primaryColor}
       />
       {state.ghUnavailable && (
         <Text dimColor>gh unavailable - showing topology only</Text>
