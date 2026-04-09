@@ -27,7 +27,7 @@ import {
   setBaseBranch,
   setStackNode,
 } from "../lib/stack.ts";
-import { setMockDir } from "../lib/gh.ts";
+import { setMockDir, writeFixture } from "../lib/gh.ts";
 
 async function initStack(
   repo: TestRepo,
@@ -860,6 +860,65 @@ describe("executeLand case A cleanup phase", () => {
         "branch.feat/b.stack-parent",
       );
       expect(parent.stdout).toBe("main");
+    } finally {
+      await env.cleanup();
+      setMockDir(undefined);
+    }
+  });
+});
+
+describe("executeLand case A nav phase", () => {
+  it("emits a nav event after PR retarget", async () => {
+    const env = await createRepoWithOrigin();
+    try {
+      await addBranch(env.dir, "feat/a", "main");
+      await runGit(env.dir, "push", "origin", "feat/a");
+      await addBranch(env.dir, "feat/b", "feat/a");
+      await runGit(env.dir, "push", "origin", "feat/b");
+      await initStack(env, "s", [["feat/a", "main"], ["feat/b", "feat/a"]]);
+
+      await runGit(env.dir, "checkout", "main");
+      await runGit(env.dir, "merge", "feat/a", "--no-ff", "-m", "Merge feat/a");
+      await runGit(env.dir, "push", "origin", "main");
+      await runGit(env.dir, "fetch", "origin", "main");
+
+      const prStates: PrStateByBranch = new Map([
+        ["feat/a", "MERGED"],
+        ["feat/b", "OPEN"],
+      ]);
+      const prInfo = new Map<string, PrInfo>([
+        ["feat/b", { number: 20, url: "", state: "OPEN", isDraft: true }],
+      ]);
+
+      const mockDir = await Deno.makeTempDir();
+      setMockDir(mockDir);
+      // buildNavPlan resolves owner/name via `gh repo view`; stub it.
+      await writeFixture(mockDir, ["repo", "view"], {
+        owner: { login: "acme" },
+        name: "widgets",
+      });
+
+      const events: LandProgressEvent[] = [];
+      try {
+        await executeLand(
+          env.dir,
+          await planLand(env.dir, "s", prStates, prInfo),
+          {
+            onProgress: (e) => events.push(e),
+            freshPrStates: () => Promise.resolve(prStates),
+          },
+        );
+      } finally {
+        setMockDir(undefined);
+      }
+
+      const navEvent = events.findLast(
+        (e) => e.step.kind === "nav" && e.status !== "running",
+      );
+      expect(navEvent).toBeDefined();
+      expect(navEvent!.status === "ok" || navEvent!.status === "skipped").toBe(
+        true,
+      );
     } finally {
       await env.cleanup();
       setMockDir(undefined);

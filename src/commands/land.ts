@@ -144,6 +144,7 @@ import {
 } from "../lib/stack.ts";
 import { topologicalOrder } from "./restack.ts";
 import { configLandCleanup } from "./config.ts";
+import { buildNavPlan, executeNavAction } from "./nav.ts";
 
 export async function isShallowRepository(dir: string): Promise<boolean> {
   const { code, stdout } = await runGitCommand(
@@ -909,7 +910,29 @@ async function executeCaseA(
 
   await executeCaseAPrCloses(dir, plan, hooks, state);
 
-  // Nav updates happen in Task 22 (inserted before config cleanup).
+  // Nav comment refresh. Computed after PR retargets so the rendered
+  // markdown reflects the post-land tree shape. Failures are non-fatal:
+  // the stack has already landed, rolling back nav is not meaningful.
+  emit(hooks, { kind: "nav" }, "running");
+  try {
+    const repoInfo = await gh("repo", "view", "--json", "owner,name");
+    const parsed = JSON.parse(repoInfo) as {
+      owner: { login: string };
+      name: string;
+    };
+    const navActions = await buildNavPlan(
+      dir,
+      plan.stackName,
+      parsed.owner.login,
+      parsed.name,
+    );
+    for (const action of navActions) {
+      await executeNavAction(parsed.owner.login, parsed.name, action);
+    }
+    emit(hooks, { kind: "nav" }, navActions.length === 0 ? "skipped" : "ok");
+  } catch (err) {
+    emit(hooks, { kind: "nav" }, "failed", (err as Error).message);
+  }
 
   // Config cleanup: reparent children of the merged root to the base branch.
   emit(hooks, { kind: "config-cleanup" }, "running");
