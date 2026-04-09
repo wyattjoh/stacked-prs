@@ -96,4 +96,26 @@ describe("checkWorktreeSafety", () => {
     expect(result).toHaveLength(1);
     expect(result[0].dirtyFiles).toContain("untracked.txt");
   });
+
+  test("staged rename reports only the new path", async () => {
+    await runGit(repo.dir, "checkout", "-b", "feat/a");
+    await commitFile(repo.dir, "old-name.txt", "content\n");
+    await runGit(repo.dir, "mv", "old-name.txt", "new-name.txt");
+
+    const result = await checkWorktreeSafety(repo.dir, ["feat/a"]);
+
+    expect(result).toHaveLength(1);
+    expect(result[0].dirtyFiles).toEqual(["new-name.txt"]);
+  });
+
+  test("file with leading space in name is parsed correctly", async () => {
+    await runGit(repo.dir, "checkout", "-b", "feat/a");
+    await commitFile(repo.dir, "a.txt", "a\n");
+    await Deno.writeTextFile(`${repo.dir}/ leading.txt`, "x\n");
+
+    const result = await checkWorktreeSafety(repo.dir, ["feat/a"]);
+
+    expect(result).toHaveLength(1);
+    expect(result[0].dirtyFiles).toContain(" leading.txt");
+  });
 });

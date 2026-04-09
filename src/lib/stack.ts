@@ -9,8 +9,12 @@ export interface SetStackBranchOpts {
 
 const decoder = new TextDecoder();
 
-/** Run a git command, return { code, stdout, stderr } with decoded strings. */
-export async function runGitCommand(
+/**
+ * Run a git command, return { code, stdout, stderr } with decoded strings.
+ * stdout and stderr are returned raw (not trimmed). Prefer `runGitCommand`
+ * unless you need to preserve leading/trailing whitespace or NUL bytes.
+ */
+export async function runGitCommandRaw(
   dir: string,
   ...args: string[]
 ): Promise<{ code: number; stdout: string; stderr: string }> {
@@ -23,8 +27,21 @@ export async function runGitCommand(
   const output = await cmd.output();
   return {
     code: output.code,
-    stdout: decoder.decode(output.stdout).trim(),
-    stderr: decoder.decode(output.stderr).trim(),
+    stdout: decoder.decode(output.stdout),
+    stderr: decoder.decode(output.stderr),
+  };
+}
+
+/** Run a git command, return { code, stdout, stderr } with trimmed strings. */
+export async function runGitCommand(
+  dir: string,
+  ...args: string[]
+): Promise<{ code: number; stdout: string; stderr: string }> {
+  const result = await runGitCommandRaw(dir, ...args);
+  return {
+    code: result.code,
+    stdout: result.stdout.trim(),
+    stderr: result.stderr.trim(),
   };
 }
 

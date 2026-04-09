@@ -1,4 +1,4 @@
-import { runGitCommand } from "./stack.ts";
+import { runGitCommand, runGitCommandRaw } from "./stack.ts";
 
 export interface DirtyWorktree {
   /** Absolute path to the worktree. */
@@ -46,17 +46,32 @@ function parseWorktreeList(porcelain: string): ParsedWorktree[] {
   return worktrees;
 }
 
-function parseStatusPorcelain(porcelain: string): string[] {
-  if (!porcelain) return [];
-  // Porcelain v1 format: "XY path" where XY is two status chars. Note that
-  // `runGitCommand` trims stdout, so a leading space in the first line's
-  // status (e.g. " M path") may have been stripped. Match the status chars
-  // and any whitespace, then capture the path.
+/**
+ * Parse NUL-delimited `git status --porcelain=v1 -z` output.
+ *
+ * Each record is `XY <path>` where XY is the two-character status and column
+ * 2 is a literal space. Rename (`R`) and copy (`C`) entries emit two records:
+ * the new path first, then the old path. We report only the new path.
+ */
+function parseStatusPorcelainZ(raw: string): string[] {
+  const records = raw.split("\0").filter((r) => r.length > 0);
   const files: string[] = [];
-  for (const line of porcelain.split("\n")) {
-    if (!line) continue;
-    const match = line.match(/^.{1,2}\s+(.+)$/);
-    if (match) files.push(match[1]);
+  let i = 0;
+  while (i < records.length) {
+    const rec = records[i];
+    if (rec.length < 3) {
+      i++;
+      continue;
+    }
+    const xy = rec.slice(0, 2);
+    const path = rec.slice(3);
+    files.push(path);
+    // Rename/copy entries consume the old path as the next record.
+    if (xy[0] === "R" || xy[0] === "C" || xy[1] === "R" || xy[1] === "C") {
+      i += 2;
+    } else {
+      i += 1;
+    }
   }
   return files;
 }
@@ -89,18 +104,19 @@ export async function checkWorktreeSafety(
     if (wt.branch === null) continue;
     if (!scope.has(wt.branch)) continue;
 
-    const statusResult = await runGitCommand(
+    const statusResult = await runGitCommandRaw(
       wt.path,
       "status",
-      "--porcelain",
+      "--porcelain=v1",
+      "-z",
     );
     if (statusResult.code !== 0) {
       throw new Error(
-        `git status failed in ${wt.path}: ${statusResult.stderr}`,
+        `git status failed in ${wt.path}: ${statusResult.stderr.trim()}`,
       );
     }
 
-    const dirtyFiles = parseStatusPorcelain(statusResult.stdout);
+    const dirtyFiles = parseStatusPorcelainZ(statusResult.stdout);
     if (dirtyFiles.length > 0) {
       dirty.push({ path: wt.path, branch: wt.branch, dirtyFiles });
     }
