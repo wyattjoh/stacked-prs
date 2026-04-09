@@ -7,39 +7,39 @@ export interface KeyBinding {
 }
 
 /**
- * Compact status-bar entries in priority order. The status bar shows as
- * many of these as fit in the terminal width, left-to-right. Keep each
- * label short; full descriptions live in {@link KEY_BINDINGS}.
+ * Compact status-bar entries in priority order. Each entry is a bracketed
+ * key hint. The status bar greedily fits as many as will fit in the terminal
+ * width, left-to-right. Full descriptions live in {@link KEY_BINDINGS} and
+ * are shown via the help overlay (`?`).
  */
-export const STATUS_BAR_ITEMS: KeyBinding[] = [
-  { keys: "?", action: "help" },
-  { keys: "q", action: "quit" },
-  { keys: "tab", action: "focus section" },
-  { keys: "←↑↓→", action: "navigate" },
-  { keys: "p", action: "open PR" },
-  { keys: "b", action: "copy branch" },
-  { keys: "r", action: "refresh" },
-  { keys: "g/G", action: "top/bot" },
-  { keys: "PgUp/PgDn", action: "prev/next stack" },
+export const STATUS_BAR_ITEMS: readonly string[] = [
+  "[?]",
+  "[q]",
+  "[tab]",
+  "[\u2190\u2191\u2193\u2192]",
+  "[L]",
+  "[p]",
+  "[b]",
+  "[r]",
+  "[g/G]",
+  "[pgup/pgdn]",
 ];
 
 /**
  * Build a status bar line that fits in `width` columns. Items are joined
- * with a two-space separator and truncated greedily when the next item
- * would overflow. Always renders at least the first item to keep the bar
- * from ever being empty.
+ * with a single space and truncated greedily when the next item would
+ * overflow. Always renders at least the first item.
  */
 export function buildStatusBar(width: number): string {
-  const sep = "  ";
+  const sep = " ";
   const parts: string[] = [];
   let used = 0;
   for (const item of STATUS_BAR_ITEMS) {
-    const piece = `${item.keys} ${item.action}`;
     const next = parts.length === 0
-      ? piece.length
-      : used + sep.length + piece.length;
+      ? item.length
+      : used + sep.length + item.length;
     if (parts.length > 0 && next > width) break;
-    parts.push(piece);
+    parts.push(item);
     used = next;
   }
   return parts.join(sep);
