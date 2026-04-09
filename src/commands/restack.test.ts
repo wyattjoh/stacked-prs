@@ -264,6 +264,52 @@ describe("executeRestack (clean cases)", () => {
     expect(cLog.match(/add a-drift\.txt/g)).toHaveLength(1);
   });
 
+  test("regression: inserted branch with new commit propagates to reparented upstack children", async () => {
+    // Scenario from conversation: a new branch is inserted between two existing
+    // stack branches, then a commit is added to the inserted branch. Old
+    // segment-based restack left the reparented children diverged; per-branch
+    // --onto must rebase them correctly.
+    //
+    // Stack before insert: main -> a -> b -> c
+    // After inserting x between a and b: main -> a -> x -> b -> c
+    //   (b is reparented in config but still based on a's old tip)
+    // After adding a commit to x, b and c don't have that commit yet.
+
+    await addBranch(repo.dir, "a", "main");
+    await addBranch(repo.dir, "b", "a");
+    await addBranch(repo.dir, "c", "b");
+    await setBaseBranch(repo.dir, "test", "main");
+    await setStackNode(repo.dir, "a", "test", "main");
+    await setStackNode(repo.dir, "b", "test", "a");
+    await setStackNode(repo.dir, "c", "test", "b");
+
+    // Simulate inserting x between a and b: create x from a, reparent b to x.
+    await runGit(repo.dir, "checkout", "-b", "x", "a");
+    await setStackNode(repo.dir, "x", "test", "a");
+    await setStackNode(repo.dir, "b", "test", "x");
+
+    // Add a commit to x (b and c still don't have this commit).
+    await commitFile(repo.dir, "x-fix.txt", "inserted fix\n");
+
+    await setupFakeOrigin(repo.dir);
+    await runGit(repo.dir, "checkout", "main");
+    await runGit(repo.dir, "push", "origin", "main");
+
+    const result = await executeRestack(repo.dir, "test", {});
+
+    expect(result.ok).toBe(true);
+
+    // b and c must have x's commit propagated upward.
+    const bLog = await runGit(repo.dir, "log", "--format=%s", "b");
+    const cLog = await runGit(repo.dir, "log", "--format=%s", "c");
+    expect(bLog).toContain("add x-fix.txt");
+    expect(cLog).toContain("add x-fix.txt");
+
+    // The x commit must appear exactly once in each upstack branch history.
+    expect(bLog.match(/add x-fix\.txt/g)).toHaveLength(1);
+    expect(cLog.match(/add x-fix\.txt/g)).toHaveLength(1);
+  });
+
   test("preserves merge commits in stack branches", async () => {
     // main initial commit already exists from createTestRepo.
 
