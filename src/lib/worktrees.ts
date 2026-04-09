@@ -240,6 +240,51 @@ async function fileExists(path: string): Promise<boolean> {
   }
 }
 
+export interface WorktreeCollision {
+  branch: string;
+  worktreePath: string;
+}
+
+/**
+ * Return branches from `branches` that are checked out in a linked
+ * (non-primary) worktree. The primary worktree is the first entry
+ * returned by `git worktree list --porcelain`; collisions are defined
+ * against the other worktrees because the land sequence operates in the
+ * primary.
+ */
+export async function findWorktreeCollisions(
+  dir: string,
+  branches: string[],
+): Promise<WorktreeCollision[]> {
+  if (branches.length === 0) return [];
+
+  const { code, stdout, stderr } = await runGitCommand(
+    dir,
+    "worktree",
+    "list",
+    "--porcelain",
+  );
+  if (code !== 0) {
+    throw new Error(`git worktree list failed: ${stderr}`);
+  }
+
+  const worktrees = parseWorktreeList(stdout);
+  if (worktrees.length === 0) return [];
+
+  const primary = worktrees[0].path;
+  const scope = new Set(branches);
+  const collisions: WorktreeCollision[] = [];
+
+  for (const wt of worktrees) {
+    if (wt.path === primary) continue;
+    if (wt.branch === null) continue;
+    if (!scope.has(wt.branch)) continue;
+    collisions.push({ branch: wt.branch, worktreePath: wt.path });
+  }
+
+  return collisions;
+}
+
 /**
  * List every in-progress git operation across all worktrees. For each
  * worktree, check its per-worktree gitdir for operation marker files.

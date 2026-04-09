@@ -150,3 +150,43 @@ describe("listInProgressOperations", () => {
     expect(ops[0].operation).toBe("cherry-pick");
   });
 });
+
+describe("findWorktreeCollisions", () => {
+  let repo: TestRepo;
+
+  beforeEach(async () => {
+    repo = await createTestRepo();
+  });
+
+  afterEach(async () => {
+    await repo.cleanup();
+  });
+
+  test("reports no collisions when branches are only in the primary worktree", async () => {
+    const { findWorktreeCollisions } = await import("./worktrees.ts");
+    const { addBranch } = await import("./testdata/helpers.ts");
+    await addBranch(repo.dir, "feat/a", "main");
+    const collisions = await findWorktreeCollisions(repo.dir, ["feat/a"]);
+    expect(collisions).toEqual([]);
+  });
+
+  test("reports a collision when a branch is checked out in a linked worktree", async () => {
+    const { findWorktreeCollisions } = await import("./worktrees.ts");
+    const { addBranch } = await import("./testdata/helpers.ts");
+    await addBranch(repo.dir, "feat/a", "main");
+    const wtPathRaw = await Deno.makeTempDir({ prefix: "stacked-prs-wt-" });
+    const wtPath = await Deno.realPath(wtPathRaw);
+    try {
+      await runGit(repo.dir, "worktree", "add", wtPath, "feat/a");
+      const collisions = await findWorktreeCollisions(repo.dir, ["feat/a"]);
+      expect(collisions.length).toBe(1);
+      expect(collisions[0].branch).toBe("feat/a");
+      expect(collisions[0].worktreePath).toBe(wtPath);
+    } finally {
+      await runGit(repo.dir, "worktree", "remove", "--force", wtPath).catch(
+        () => {},
+      );
+      await Deno.remove(wtPath, { recursive: true }).catch(() => {});
+    }
+  });
+});
