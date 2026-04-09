@@ -5,6 +5,7 @@ import {
   captureSnapshot,
   classifyLandCase,
   executeLand,
+  executeLandFromCli,
   isShallowRepository,
   LandError,
   type LandProgressEvent,
@@ -1146,6 +1147,48 @@ describe("classifyLandCase with historical merged nodes", () => {
       expect(() => classifyLandCase(tree, prStates)).toThrow(
         UnsupportedLandShape,
       );
+    } finally {
+      await repo.cleanup();
+    }
+  });
+});
+
+describe("executeLandFromCli resume guard", () => {
+  it("throws when --resume is passed but no land-resume-state exists", async () => {
+    const repo = await createRepoWithOrigin();
+    try {
+      await addBranch(repo.dir, "feature/a", "main");
+      await setStackNode(repo.dir, "feature/a", "my-stack", "main");
+      await setBaseBranch(repo.dir, "my-stack", "main");
+
+      await expect(
+        executeLandFromCli(repo.dir, "my-stack", new Map(), new Map(), {
+          resume: true,
+        }),
+      ).rejects.toThrow("No land in progress");
+    } finally {
+      await repo.cleanup();
+    }
+  });
+
+  it("throws when no --resume but land-resume-state already exists", async () => {
+    const repo = await createRepoWithOrigin();
+    try {
+      await addBranch(repo.dir, "feature/a", "main");
+      await setStackNode(repo.dir, "feature/a", "my-stack", "main");
+      await setBaseBranch(repo.dir, "my-stack", "main");
+
+      // Write a dummy resume state
+      await runGitCommand(
+        repo.dir,
+        "config",
+        "stack.my-stack.land-resume-state",
+        JSON.stringify({ plan: {}, completedRebases: [] }),
+      );
+
+      await expect(
+        executeLandFromCli(repo.dir, "my-stack", new Map(), new Map(), {}),
+      ).rejects.toThrow("land already in progress");
     } finally {
       await repo.cleanup();
     }

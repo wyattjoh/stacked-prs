@@ -88,6 +88,36 @@ export interface LandResult {
   split: SplitInfo[];
 }
 
+export interface LandResumeState {
+  plan: LandPlan;
+  completedRebases: string[];
+  completedPushes: string[];
+  prUpdated: number[];
+  prClosed: number[];
+  navDone: boolean;
+  configCleanupDone: boolean;
+  deletedBranches: string[];
+  conflictedBranch?: string;
+}
+
+export interface LandCliResult {
+  ok: boolean;
+  error?: "conflict" | "blocked" | "other";
+  plan?: LandPlan;
+  result?: LandResult;
+  completedSteps?: {
+    rebased: string[];
+    pushed: string[];
+    prUpdated: number[];
+    prClosed: number[];
+    navDone: boolean;
+    configCleanupDone: boolean;
+  };
+  conflictedAt?: LandStep;
+  conflictFiles?: string[];
+  recovery?: { resolve: string; abort: string; resume: string };
+}
+
 /** PR state input to planLand. Only "MERGED" matters for classification. */
 export type PrStateByBranch = Map<
   string,
@@ -1227,4 +1257,300 @@ export async function executeLand(
     return await executeCaseBCleanup(dir, plan, hooks);
   }
   return await executeCaseA(dir, plan, hooks);
+}
+
+async function readLandResumeState(
+  dir: string,
+  stackName: string,
+): Promise<LandResumeState | null> {
+  const { code, stdout } = await runGitCommand(
+    dir,
+    "config",
+    `stack.${stackName}.land-resume-state`,
+  );
+  if (code !== 0) return null;
+  try {
+    return JSON.parse(stdout) as LandResumeState;
+  } catch {
+    return null;
+  }
+}
+
+async function writeLandResumeState(
+  dir: string,
+  stackName: string,
+  state: LandResumeState,
+): Promise<void> {
+  await runGitCommand(
+    dir,
+    "config",
+    `stack.${stackName}.land-resume-state`,
+    JSON.stringify(state),
+  );
+}
+
+async function clearLandResumeState(
+  dir: string,
+  stackName: string,
+): Promise<void> {
+  await runGitCommand(
+    dir,
+    "config",
+    "--unset",
+    `stack.${stackName}.land-resume-state`,
+  );
+}
+
+async function getConflictFilesForCli(dir: string): Promise<string[]> {
+  const { stdout } = await runGitCommand(
+    dir,
+    "diff",
+    "--name-only",
+    "--diff-filter=U",
+  );
+  return stdout ? stdout.split("\n").filter(Boolean) : [];
+}
+
+export async function executeLandFromCli(
+  dir: string,
+  stackName: string,
+  prStateByBranch: PrStateByBranch,
+  prInfoByBranch: Map<string, PrInfo>,
+  opts: { resume?: boolean },
+): Promise<LandCliResult> {
+  const existingState = await readLandResumeState(dir, stackName);
+
+  if (opts.resume && !existingState) {
+    throw new Error("No land in progress to resume");
+  }
+  if (!opts.resume && existingState) {
+    throw new Error(
+      `land already in progress for stack "${stackName}". ` +
+        `Run with --resume or clear stack.${stackName}.land-resume-state manually.`,
+    );
+  }
+
+  const makeRecovery = (sn: string): LandCliResult["recovery"] => ({
+    resolve: "git add <conflicting files> && git rebase --continue",
+    abort: "git rebase --abort",
+    resume: `deno run --allow-run=git,gh --allow-env --allow-read ${
+      Deno.env.get("CLAUDE_PLUGIN_ROOT") ?? "."
+    }/src/cli.ts land --stack-name=${sn} --resume`,
+  });
+
+  let plan: LandPlan;
+  if (existingState) {
+    plan = existingState.plan;
+    // If a rebase was in progress, continue it first.
+    if (existingState.conflictedBranch) {
+      const continueResult = await runGitCommand(dir, "rebase", "--continue");
+      if (continueResult.code !== 0) {
+        const conflictFiles = await getConflictFilesForCli(dir);
+        if (conflictFiles.length > 0) {
+          return {
+            ok: false,
+            error: "conflict",
+            plan,
+            conflictFiles,
+            recovery: makeRecovery(stackName),
+          };
+        }
+        return { ok: false, error: "other", plan };
+      }
+      existingState.completedRebases.push(existingState.conflictedBranch);
+      existingState.conflictedBranch = undefined;
+    }
+  } else {
+    plan = await planLand(dir, stackName, prStateByBranch, prInfoByBranch);
+  }
+
+  // Preflight
+  const allBranches = plan.snapshot.map((s) => s.branch);
+  const worktreesToSkip = plan.worktreesToRemove.map((wt) => wt.branch);
+  const preflight = await runLandPreflight(dir, allBranches, worktreesToSkip);
+  if (preflight.blockers.length > 0) {
+    return { ok: false, error: "blocked", plan };
+  }
+
+  // Remove clean worktrees that collide with branches in the plan
+  for (const wt of plan.worktreesToRemove) {
+    await runGitCommand(dir, "worktree", "remove", "--force", wt.worktreePath);
+  }
+
+  // Initialize state tracker
+  const completed: LandResumeState = existingState ?? {
+    plan,
+    completedRebases: [],
+    completedPushes: [],
+    prUpdated: [],
+    prClosed: [],
+    navDone: false,
+    configCleanupDone: false,
+    deletedBranches: [],
+  };
+
+  // Write initial resume state before any mutations
+  if (!existingState) {
+    await writeLandResumeState(dir, stackName, { ...completed, plan });
+  }
+
+  if (plan.case === "all-merged") {
+    await detachHeadFromDeleted(dir, plan.branchesToDelete);
+    const order = [...plan.branchesToDelete].reverse();
+    for (const branch of order) {
+      if (completed.deletedBranches.includes(branch)) continue;
+      const { code: existsCode } = await runGitCommand(
+        dir,
+        "rev-parse",
+        "--verify",
+        `refs/heads/${branch}`,
+      );
+      if (existsCode !== 0) {
+        completed.deletedBranches.push(branch);
+        continue;
+      }
+      await runGitCommand(dir, "branch", "-D", branch);
+      await removeStackBranch(dir, branch);
+      completed.deletedBranches.push(branch);
+      await writeLandResumeState(dir, stackName, completed);
+    }
+    await unsetConfig(dir, `stack.${stackName}.merge-strategy`);
+    await unsetConfig(dir, `stack.${stackName}.base-branch`);
+    await unsetConfig(dir, `stack.${stackName}.resume-state`);
+    await clearLandResumeState(dir, stackName);
+    await restoreHead(dir, plan, {
+      onProgress: () => {},
+      freshPrStates: () => Promise.resolve(new Map()),
+    });
+    return {
+      ok: true,
+      plan,
+      result: { plan, autoMergedBranches: [], split: [] },
+    };
+  }
+
+  // root-merged path
+  await fetchBase(dir, plan.baseBranch);
+
+  for (const step of plan.rebaseSteps) {
+    if (completed.completedRebases.includes(step.branch)) continue;
+
+    await runGitCommand(dir, "checkout", step.branch);
+    const rebase = await runGitCommand(
+      dir,
+      "rebase",
+      "--rebase-merges",
+      "--onto",
+      step.newTarget,
+      step.oldParentSha,
+      step.branch,
+    );
+
+    if (rebase.code !== 0) {
+      const conflictFiles = await getConflictFilesForCli(dir);
+      completed.conflictedBranch = step.branch;
+      await writeLandResumeState(dir, stackName, completed);
+      return {
+        ok: false,
+        error: "conflict",
+        plan,
+        completedSteps: {
+          rebased: completed.completedRebases,
+          pushed: completed.completedPushes,
+          prUpdated: completed.prUpdated,
+          prClosed: completed.prClosed,
+          navDone: completed.navDone,
+          configCleanupDone: completed.configCleanupDone,
+        },
+        conflictedAt: { kind: "rebase", branch: step.branch },
+        conflictFiles,
+        recovery: makeRecovery(stackName),
+      };
+    }
+
+    completed.completedRebases.push(step.branch);
+    await writeLandResumeState(dir, stackName, completed);
+  }
+
+  for (const step of plan.pushSteps) {
+    if (completed.completedPushes.includes(step.branch)) continue;
+    await runGitCommand(
+      dir,
+      "push",
+      `--force-with-lease=refs/heads/${step.branch}:${step.preLeaseSha}`,
+      "origin",
+      step.branch,
+    );
+    completed.completedPushes.push(step.branch);
+    await writeLandResumeState(dir, stackName, completed);
+  }
+
+  for (const update of plan.prUpdates) {
+    if (completed.prUpdated.includes(update.prNumber)) continue;
+    await gh("pr", "edit", String(update.prNumber), "--base", update.newBase);
+    if (update.flipToReady) {
+      await gh("pr", "ready", String(update.prNumber));
+    }
+    completed.prUpdated.push(update.prNumber);
+    await writeLandResumeState(dir, stackName, completed);
+  }
+
+  if (!completed.navDone) {
+    const repoInfo = await gh("repo", "view", "--json", "owner,name");
+    const parsed = JSON.parse(repoInfo) as {
+      owner: { login: string };
+      name: string;
+    };
+    const navActions = await buildNavPlan(
+      dir,
+      stackName,
+      parsed.owner.login,
+      parsed.name,
+    );
+    for (const action of navActions) {
+      await executeNavAction(parsed.owner.login, parsed.name, action);
+    }
+    completed.navDone = true;
+    await writeLandResumeState(dir, stackName, completed);
+  }
+
+  if (!completed.configCleanupDone) {
+    const mergedRoot = plan.branchesToDelete[0];
+    await configLandCleanup(dir, stackName, mergedRoot);
+    completed.configCleanupDone = true;
+    await writeLandResumeState(dir, stackName, completed);
+  }
+
+  const mergedRoot = plan.branchesToDelete[0];
+  await detachHeadFromDeleted(dir, plan.branchesToDelete);
+  for (const branch of plan.branchesToDelete) {
+    if (completed.deletedBranches.includes(branch)) continue;
+    const { code: existsCode } = await runGitCommand(
+      dir,
+      "rev-parse",
+      "--verify",
+      `refs/heads/${branch}`,
+    );
+    if (existsCode !== 0) {
+      completed.deletedBranches.push(branch);
+      continue;
+    }
+    await runGitCommand(dir, "branch", "-D", branch);
+    if (branch !== mergedRoot) {
+      await removeStackBranch(dir, branch);
+    }
+    completed.deletedBranches.push(branch);
+    await writeLandResumeState(dir, stackName, completed);
+  }
+
+  await clearLandResumeState(dir, stackName);
+  await restoreHead(dir, plan, {
+    onProgress: () => {},
+    freshPrStates: () => Promise.resolve(new Map()),
+  });
+  return {
+    ok: true,
+    plan,
+    result: { plan, autoMergedBranches: [], split: [] },
+  };
 }
