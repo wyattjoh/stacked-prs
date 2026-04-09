@@ -48,11 +48,11 @@ Start a new stack from the current branch.
 3. Ask for stack name (default: current branch name)
 4. Ask for merge strategy: "merge" (recommended for stacks) or "squash"
 5. **Present plan** (config entries to write) and **wait for confirmation**
-6. Write git config via `stack.ts`:
-   - `branch.<name>.stack-name = <stack-name>`
-   - `branch.<name>.stack-parent = main`
-   - `stack.<stack-name>.merge-strategy = <strategy>`
-   - `stack.<stack-name>.base-branch = main`
+6. Write git config:
+   - `git config branch.<name>.stack-name <stack-name>`
+   - `git config branch.<name>.stack-parent main`
+   - `git config stack.<stack-name>.merge-strategy <strategy>`
+   - `git config stack.<stack-name>.base-branch main`
 7. Report stack created
 
 ### `import`
@@ -62,7 +62,8 @@ Discover and register an existing chain of branches/PRs as a stack.
 1. **Guard:** check if current branch already has stack metadata
    (`git config branch.<name>.stack-name`). If it does, report "Branch is
    already part of stack '<name>'" and suggest `status` instead
-2. Run `import-discover.ts [--branch=<name>] [--owner=<owner> --repo=<repo>]`
+2. Run
+   `cli.ts import-discover [--branch=<name>] [--owner=<owner> --repo=<repo>]`
 3. **Guard:** if `branches` array is empty, report "No branch chain found
    between this branch and main" and stop
 4. If there are `warnings` (e.g., PR base mismatches), present them to the user
@@ -70,10 +71,11 @@ Discover and register an existing chain of branches/PRs as a stack.
 5. Present discovered tree for confirmation
 6. Ask for stack name and merge strategy
 7. **Present plan** (all config writes + optional nav updates) and **confirm**
-8. Write git config for all branches via `config.ts`:
-   - For each branch:
-     `config.ts set-branch --branch=<name> --stack=<stack> --parent=<parent>`
-   - `config.ts set-strategy --stack=<stack> --strategy=<strategy>`
+8. Write git config for all branches:
+   - For each branch: `git config branch.<name>.stack-name <stack>`
+     `git config branch.<name>.stack-parent <parent>`
+   - `git config stack.<stack>.merge-strategy <strategy>`
+   - `git config stack.<stack>.base-branch <base-branch>`
 9. Offer to run `submit` to add nav comments to existing PRs
 
 ### `create`
@@ -84,16 +86,16 @@ Create a new child branch off the current branch.
 2. Ask for new branch name
 3. **Present plan** (branch creation, config writes) and **confirm**
 4. `git checkout -b <new-branch>` from current branch
-5. Write git config via `stack.ts`:
-   - `branch.<new-branch>.stack-name = <stack-name>`
-   - `branch.<new-branch>.stack-parent = <current-branch>`
+5. Write git config:
+   - `git config branch.<new-branch>.stack-name <stack-name>`
+   - `git config branch.<new-branch>.stack-parent <current-branch>`
 6. If staged changes exist, offer to commit them
 
 ### `insert`
 
 Insert a new branch between a branch and its parent.
 
-1. Run `status.ts --json` to read the stack tree
+1. Run `cli.ts status --stack-name=<name> --json` to read the stack tree
 2. Display the tree, ask which branch to insert before (the new branch will
    become a child of that branch's current parent, and the selected branch gets
    reparented to the new branch) and ask for the new branch name
@@ -102,9 +104,10 @@ Insert a new branch between a branch and its parent.
    - Selected branch gets reparented to the new branch
 4. **Wait for confirmation**
 5. `git checkout -b <new-branch> <parent-of-selected>`
-6. Run
-   `config.ts insert-branch --stack=<name> --branch=<new-branch>
-   --child=<selected-branch> --parent=<parent-of-selected>`
+6. Write git config to insert the branch:
+   - `git config branch.<new-branch>.stack-name <stack>`
+   - `git config branch.<new-branch>.stack-parent <parent-of-selected>`
+   - `git config branch.<selected-branch>.stack-parent <new-branch>`
 7. If staged changes exist, offer to commit them
 8. Suggest `sync --upstack-from=<new-branch>` after committing work to align git
    history
@@ -117,7 +120,7 @@ Split a branch's content into two branches.
 
 Original branch keeps earlier commits; new branch above gets later commits.
 
-1. Run `status.ts --json`, identify current branch
+1. Run `cli.ts status --stack-name=<name> --json`, identify current branch
 2. Run `git log --oneline <parent>..<current-branch>` to list commits
 3. **Guard:** if there is only one commit, report "Branch has only one commit,
    nothing to split" and stop
@@ -131,7 +134,11 @@ Original branch keeps earlier commits; new branch above gets later commits.
 8. Save current tip: `tip=$(git rev-parse HEAD)`
 9. Reset original branch: `git reset --hard <commit-N>`
 10. Create new branch: `git checkout -b <new-branch> <tip>`
-11. Run `config.ts insert-branch` to register above original
+11. Write git config to register new-branch above original:
+    - `git config branch.<new-branch>.stack-name <stack>`
+    - `git config branch.<new-branch>.stack-parent <original-branch>`
+    - Reparent each child of original-branch:
+      `git config branch.<child>.stack-parent <new-branch>`
 12. Suggest `sync --upstack-from=<new-branch>` if there are children
 
 #### `--by-file`
@@ -140,7 +147,7 @@ Extract files matching a pathspec into a new branch inserted **below** the
 original. Note: this is inherently lossy with commit history. Ask user for new
 commit messages.
 
-1. Run `status.ts --json`, identify current branch
+1. Run `cli.ts status --stack-name=<name> --json`, identify current branch
 2. Run `git diff --name-only <parent>..<current-branch>` to list changed files
 3. **Guard:** if no changed files are found, report "Branch has no file changes
    relative to its parent" and stop
@@ -156,14 +163,18 @@ commit messages.
 10. `git checkout <original-branch> -- <matched-files>` then commit
 11. Back on original: `git checkout <original-branch>`
 12. `git reset --soft <parent>` then re-commit excluding extracted files
-13. Run `config.ts insert-branch` to register below original
+13. Write git config to register new-branch below original (between original and
+    its parent):
+    - `git config branch.<new-branch>.stack-name <stack>`
+    - `git config branch.<new-branch>.stack-parent <parent-of-original>`
+    - `git config branch.<original-branch>.stack-parent <new-branch>`
 14. Suggest `sync --upstack-from=<original-branch>` if needed
 
 ### `fold`
 
 Merge a branch into its parent. Inverse of split.
 
-1. Run `status.ts --json`, identify current branch
+1. Run `cli.ts status --stack-name=<name> --json`, identify current branch
 2. **Guard:** if the stack has only one branch, report "Cannot fold the only
    branch in the stack" and stop
 3. Verify parent is a stack member (not the base branch)
@@ -177,7 +188,11 @@ Merge a branch into its parent. Inverse of split.
 8. Ask user: preserve individual commits or squash?
    - FF: `git merge --ff-only <current-branch>`
    - Squash: `git merge --squash <current-branch> && git commit`
-9. Run `config.ts fold-branch --stack=<name> --branch=<folded-branch>`
+9. Write git config to fold the branch:
+   - For each child of the folded branch:
+     `git config branch.<child>.stack-parent <parent-branch>`
+   - `git config --unset branch.<folded-branch>.stack-name`
+   - `git config --unset branch.<folded-branch>.stack-parent`
 10. `git branch -d <folded-branch>`
 11. Suggest `sync --upstack-from=<parent-branch>` if there were children
 
@@ -185,7 +200,7 @@ Merge a branch into its parent. Inverse of split.
 
 Detach a branch and reattach it as a child of a different parent.
 
-1. Run `status.ts --json`, display the tree
+1. Run `cli.ts status --stack-name=<name> --json`, display the tree
 2. Ask which branch to move and which branch to use as the new parent
 3. **No-op check:** if the branch's current parent already equals the target
    parent, report "Branch is already a child of <target-parent>" and stop
@@ -193,7 +208,10 @@ Detach a branch and reattach it as a child of a different parent.
    - Branch detaches (its children reparent to its former parent)
    - Branch reattaches as a child of the new parent
 5. **Wait for confirmation**
-6. Run `config.ts move-branch --stack=<name> --branch=<X> --new-parent=<Y>`
+6. Write git config to move the branch:
+   - For each child of the moved branch:
+     `git config branch.<child>.stack-parent <old-parent>`
+   - `git config branch.<moved-branch>.stack-parent <new-parent>`
 7. `git rebase --onto <new-parent> <old-parent> <moved-branch>`
 8. Suggest `sync --upstack-from=<moved-branch>` for descendants
 
@@ -275,7 +293,7 @@ merged out of order. The submit plan reconciles drift on every run via the
 `desiredDraft` and `draftAction` fields per branch.
 
 1. Determine repo owner/name from `gh repo view --json owner,name`
-2. Run `submit-plan.ts --stack-name=<name> --owner=<owner> --repo=<repo>`
+2. Run `cli.ts submit-plan --stack-name=<name> --owner=<owner> --repo=<repo>`
 3. **No-op check:** if `isNoOp` is true, report "All PRs are up to date with
    correct bases, draft state, and nav comments" and stop
 4. **Present full plan:**
@@ -296,14 +314,14 @@ merged out of order. The submit plan reconciles drift on every run via the
    - For action "update-base": run `gh pr edit <num> --base <new-parent>`
    - For draftAction "to-draft": run `gh pr ready <num> --undo`
    - For draftAction "to-ready": run `gh pr ready <num>`
-8. Execute nav plan via `nav.ts`
+8. Execute nav plan via `cli.ts nav --stack-name=<name>`
 9. Report all PR URLs
 
 ### `status`
 
 Show current stack state. **No confirmation needed** (read-only).
 
-1. Run `status.ts --stack-name=<name>` to get tree output
+1. Run `cli.ts status --stack-name=<name>` to get tree output
 2. Display formatted (tree shape with box-drawing characters):
    ```
    Stack: auth-rework (squash merge)
