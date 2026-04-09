@@ -2,6 +2,7 @@ import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import type { LandCase } from "./land.ts";
 import {
+  captureSnapshot,
   classifyLandCase,
   isShallowRepository,
   type PrStateByBranch,
@@ -145,6 +146,26 @@ describe("classifyLandCase", () => {
       expect(() => classifyLandCase(tree, prStates)).toThrow(
         UnsupportedLandShape,
       );
+    } finally {
+      await repo.cleanup();
+    }
+  });
+});
+
+describe("captureSnapshot", () => {
+  it("records tip and parent-tip for every branch", async () => {
+    const repo = await createTestRepo();
+    try {
+      await addBranch(repo.dir, "feat/a", "main");
+      await addBranch(repo.dir, "feat/b", "feat/a");
+      await initStack(repo, "s", [["feat/a", "main"], ["feat/b", "feat/a"]]);
+      const tree = await getStackTree(repo.dir, "s");
+      const snap = await captureSnapshot(repo.dir, tree);
+      expect(snap.length).toBe(2);
+      const a = snap.find((s) => s.branch === "feat/a")!;
+      expect(a.recordedParent).toBe("main");
+      expect(a.tipSha.length).toBe(40);
+      expect(a.parentTipSha.length).toBe(40);
     } finally {
       await repo.cleanup();
     }

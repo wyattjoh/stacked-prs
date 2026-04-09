@@ -240,3 +240,42 @@ export function classifyLandCase(
 
   return "root-merged";
 }
+
+async function revParse(dir: string, ref: string): Promise<string> {
+  const { code, stdout, stderr } = await runGitCommand(dir, "rev-parse", ref);
+  if (code !== 0) {
+    throw new Error(`git rev-parse ${ref} failed: ${stderr}`);
+  }
+  return stdout;
+}
+
+export async function captureSnapshot(
+  dir: string,
+  tree: StackTree,
+): Promise<BranchSnapshot[]> {
+  const nodes = getAllNodes(tree);
+  const snapshots: BranchSnapshot[] = [];
+  for (const node of nodes) {
+    const tipSha = await revParse(dir, node.branch);
+    const parentTipSha = await revParse(dir, node.parent);
+    snapshots.push({
+      branch: node.branch,
+      tipSha,
+      recordedParent: node.parent,
+      parentTipSha,
+    });
+  }
+  return snapshots;
+}
+
+export async function captureOriginalHead(dir: string): Promise<string> {
+  const { code, stdout } = await runGitCommand(
+    dir,
+    "symbolic-ref",
+    "--quiet",
+    "HEAD",
+  );
+  if (code === 0) return stdout;
+  // Detached HEAD: fall back to raw SHA so we can restore it.
+  return await revParse(dir, "HEAD");
+}
