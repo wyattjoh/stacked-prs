@@ -31,6 +31,16 @@ import { HeaderBox } from "./components/header-box.tsx";
 import { StackMap } from "./components/stack-map.tsx";
 import { DetailPane } from "./components/detail-pane.tsx";
 import { buildStatusBar, HelpOverlay } from "./components/help-overlay.tsx";
+import { LandModal } from "./components/land-modal.tsx";
+import {
+  executeLand,
+  type LandPlan,
+  planLand,
+  type PrStateByBranch,
+  UnsupportedLandShape,
+} from "../commands/land.ts";
+import type { PrInfo } from "./types.ts";
+import { selectBestPr } from "../lib/gh.ts";
 
 export interface AppProps {
   dir: string;
@@ -216,6 +226,32 @@ export function App(props: AppProps): React.ReactElement {
     termSize.rows - CHROME_HEIGHT_BASE - (state.ghUnavailable ? 1 : 0),
   );
 
+  // Map the loaded PR cells down to the shapes `planLand` / `executeLand`
+  // expect. Computed every render, but the derivations are cheap and
+  // memoizing would require deep comparison of the Map to avoid staleness.
+  const prStateByBranch: PrStateByBranch = (() => {
+    const map: PrStateByBranch = new Map();
+    for (const [branch, cell] of state.prData) {
+      if (cell.status !== "loaded") continue;
+      if (cell.pr === null) map.set(branch, "NONE");
+      else if (cell.pr.state === "MERGED") map.set(branch, "MERGED");
+      else if (cell.pr.state === "CLOSED") map.set(branch, "CLOSED");
+      else if (cell.pr.isDraft) map.set(branch, "DRAFT");
+      else map.set(branch, "OPEN");
+    }
+    return map;
+  })();
+
+  const prInfoByBranch = (() => {
+    const map = new Map<string, PrInfo>();
+    for (const [branch, cell] of state.prData) {
+      if (cell.status === "loaded" && cell.pr) {
+        map.set(branch, cell.pr);
+      }
+    }
+    return map;
+  })();
+
   // Auto-dismiss transient notices after a short delay. Re-runs whenever a
   // new notice is raised (tracked by `id`) so back-to-back notices extend
   // the visible window instead of cutting each other off.
@@ -227,6 +263,132 @@ export function App(props: AppProps): React.ReactElement {
     }, 2500);
     return () => clearTimeout(timer);
   }, [state.notice?.id]);
+
+  // Planning: build a LandPlan when the land state slice enters "planning".
+  // UnsupportedLandShape is surfaced as a transient notice rather than an
+  // error modal because it is an expected no-op, not a failure.
+  useEffect(() => {
+    if (state.land.phase !== "planning") return;
+    const stackName = state.land.stackName;
+    let cancelled = false;
+    (async () => {
+      try {
+        const plan = await planLand(
+          props.dir,
+          stackName,
+          prStateByBranch,
+          prInfoByBranch,
+        );
+        if (cancelled) return;
+        dispatch({ type: "LAND_PLAN_LOADED", plan });
+      } catch (err) {
+        if (cancelled) return;
+        if (err instanceof UnsupportedLandShape) {
+          dispatch({ type: "LAND_DISMISS" });
+          dispatch({
+            type: "NOTICE_SHOW",
+            message: `Cannot land ${stackName}: ${err.message}`,
+          });
+          return;
+        }
+        dispatch({
+          type: "LAND_ERROR",
+          plan: null,
+          events: [],
+          message: (err as Error).message,
+          rollback: null,
+        });
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state.land.phase === "planning" ? state.land.stackName : null]);
+
+  // Executing: run executeLand and stream progress events back into the
+  // reducer. freshPrStates re-reads gh pr list for every plan branch so
+  // stale plans (PR reopened while the modal was up) abort before mutating
+  // anything.
+  useEffect(() => {
+    if (state.land.phase !== "executing") return;
+    const plan = state.land.plan;
+    let cancelled = false;
+    (async () => {
+      try {
+        const result = await executeLand(props.dir, plan, {
+          onProgress: (event) => {
+            if (cancelled) return;
+            dispatch({ type: "LAND_PROGRESS", event });
+          },
+          freshPrStates: async (branches) => {
+            const fresh: PrStateByBranch = new Map();
+            await Promise.all(branches.map(async (b) => {
+              try {
+                const out = await gh(
+                  "pr",
+                  "list",
+                  "--head",
+                  b,
+                  "--state",
+                  "all",
+                  "--json",
+                  "number,url,state,isDraft,createdAt",
+                );
+                const rows = JSON.parse(out) as Array<{
+                  state: string;
+                  isDraft: boolean;
+                  createdAt?: string;
+                }>;
+                const best = selectBestPr(rows);
+                if (!best) fresh.set(b, "NONE");
+                else if (best.state === "MERGED") fresh.set(b, "MERGED");
+                else if (best.state === "CLOSED") fresh.set(b, "CLOSED");
+                else if (best.isDraft) fresh.set(b, "DRAFT");
+                else fresh.set(b, "OPEN");
+              } catch {
+                fresh.set(b, "NONE");
+              }
+            }));
+            return fresh;
+          },
+        });
+        if (cancelled) return;
+        dispatch({ type: "LAND_DONE", result });
+      } catch (err) {
+        if (cancelled) return;
+        const e = err as Error & {
+          plan?: LandPlan;
+          rollback?: unknown;
+          failedAt?: unknown;
+        };
+        dispatch({
+          type: "LAND_ERROR",
+          plan: e.plan ?? plan,
+          events: state.land.phase === "executing" ? state.land.events : [],
+          message: e.message,
+          // deno-lint-ignore no-explicit-any
+          rollback: (e.rollback ?? null) as any,
+        });
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state.land.phase === "executing" ? state.land.plan : null]);
+
+  // Auto-refresh the tree once a land succeeds, then auto-dismiss the modal
+  // after a short delay so the user sees the "Landed" summary briefly.
+  useEffect(() => {
+    if (state.land.phase !== "done") return;
+    doInitialLoad().catch(() => {});
+    const timer = setTimeout(() => {
+      dispatch({ type: "LAND_DISMISS" });
+    }, 2500);
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state.land.phase]);
 
   // Keep the cursor's branch name fully visible horizontally. The content
   // x of a branch name is `stackCount * 3` (contentPrefix filler) plus
@@ -305,6 +467,31 @@ export function App(props: AppProps): React.ReactElement {
   ]);
 
   useInput((input, key) => {
+    // Land modal captures most input. Accept only y/n/esc in the confirming
+    // phase and esc in the error/done phases; swallow everything else so
+    // background navigation can't run while a land is in flight.
+    if (state.land.phase !== "idle") {
+      if (state.land.phase === "confirming") {
+        if (input === "y") {
+          dispatch({ type: "LAND_CONFIRM" });
+          return;
+        }
+        if (input === "n" || key.escape) {
+          dispatch({ type: "LAND_CANCEL" });
+          return;
+        }
+        return;
+      }
+      if (
+        (state.land.phase === "error" || state.land.phase === "done") &&
+        key.escape
+      ) {
+        dispatch({ type: "LAND_DISMISS" });
+        return;
+      }
+      return;
+    }
+
     if (state.showHelp && input !== "?") {
       if (key.escape || input === "q") {
         dispatch({ type: "HELP_TOGGLE" });
@@ -361,6 +548,13 @@ export function App(props: AppProps): React.ReactElement {
         ? `PR lookup failed for ${branch}`
         : `No PR to open for ${branch}`;
       dispatch({ type: "NOTICE_SHOW", message });
+      return;
+    }
+    if (input === "L") {
+      if (!state.cursor) return;
+      const cell = state.grid.byBranch.get(state.cursor.branch);
+      if (!cell) return;
+      dispatch({ type: "LAND_START", stackName: cell.stackName });
       return;
     }
     if (input === "b") {
@@ -552,7 +746,13 @@ export function App(props: AppProps): React.ReactElement {
       {state.ghUnavailable && (
         <Text dimColor>gh unavailable - showing topology only</Text>
       )}
-      {state.showHelp
+      {state.land.phase !== "idle"
+        ? (
+          <Box flexGrow={1} width={termSize.cols} overflowY="hidden">
+            <LandModal phase={state.land} />
+          </Box>
+        )
+        : state.showHelp
         ? (
           <Box flexGrow={1} width={termSize.cols} overflowY="hidden">
             <HelpOverlay />
