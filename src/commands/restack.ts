@@ -294,3 +294,48 @@ export async function restack(
     skipped,
   };
 }
+
+// =========================================================================
+// New per-branch rebase implementation (spec: 2026-04-08-restack-correctness)
+// =========================================================================
+
+export type RebaseStatus =
+  | "planned"
+  | "skipped-clean"
+  | "rebased"
+  | "conflict"
+  | "skipped-due-to-conflict";
+
+export interface RebasePlan {
+  branch: string;
+  /** The parent SHA captured before any rebases ran. */
+  oldParentSha: string;
+  /** The rebase target (e.g. "origin/main" or a parent branch name). */
+  newTarget: string;
+  status: RebaseStatus;
+  conflictFiles?: string[];
+  stderr?: string;
+}
+
+export interface RestackResultV2 {
+  ok: boolean;
+  error?: "conflict" | "other";
+  rebases: RebasePlan[];
+  recovery?: {
+    resolve: string;
+    abort: string;
+    resume: string;
+  };
+}
+
+/** DFS topological order over the filtered tree (parents before children). */
+export function topologicalOrder(tree: StackTree): StackNode[] {
+  const order: StackNode[] = [];
+  const walk = (node: StackNode): void => {
+    order.push(node);
+    // Deterministic child order: already sorted alphabetically by getStackTree
+    for (const child of node.children) walk(child);
+  };
+  for (const root of tree.roots) walk(root);
+  return order;
+}

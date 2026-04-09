@@ -13,7 +13,7 @@ import {
   type StackNode,
   type StackTree,
 } from "../lib/stack.ts";
-import { decomposeSegments, restack } from "./restack.ts";
+import { decomposeSegments, restack, topologicalOrder } from "./restack.ts";
 
 // ---------------------------------------------------------------------------
 // Helpers to build minimal StackTree objects for pure-logic unit tests
@@ -333,5 +333,50 @@ describe("restack integration", () => {
     expect(skippedTips).toContain("auth-b");
 
     await runGit(repo.dir, "rebase", "--abort").catch(() => {});
+  });
+});
+
+describe("topologicalOrder", () => {
+  test("linear chain yields parents before children", () => {
+    const tree = makeTree("main", [
+      makeNode("a", "main", [
+        makeNode("b", "a", [
+          makeNode("c", "b"),
+        ]),
+      ]),
+    ]);
+
+    const order = topologicalOrder(tree).map((n) => n.branch);
+
+    expect(order).toEqual(["a", "b", "c"]);
+  });
+
+  test("fork yields parent before both children, left subtree before right", () => {
+    const tree = makeTree("main", [
+      makeNode("auth", "main", [
+        makeNode("auth-api", "auth"),
+        makeNode("auth-tests", "auth", [
+          makeNode("auth-ui", "auth-tests"),
+        ]),
+      ]),
+    ]);
+
+    const order = topologicalOrder(tree).map((n) => n.branch);
+
+    // auth comes first; auth-api (left) before auth-tests subtree
+    expect(order[0]).toBe("auth");
+    expect(order.indexOf("auth-api")).toBeLessThan(order.indexOf("auth-tests"));
+    expect(order.indexOf("auth-tests")).toBeLessThan(order.indexOf("auth-ui"));
+  });
+
+  test("multiple roots yield each root's subtree in order", () => {
+    const tree = makeTree("main", [
+      makeNode("x", "main"),
+      makeNode("y", "main", [makeNode("y1", "y")]),
+    ]);
+
+    const order = topologicalOrder(tree).map((n) => n.branch);
+
+    expect(order).toEqual(["x", "y", "y1"]);
   });
 });
