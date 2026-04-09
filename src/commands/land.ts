@@ -1064,10 +1064,18 @@ async function restoreHead(
   const ref = plan.originalHeadRef;
   if (ref.startsWith("refs/")) {
     const branchName = ref.replace(/^refs\/heads\//, "");
-    const { code, stderr } = await runGitCommand(dir, "checkout", branchName);
+    const { code } = await runGitCommand(dir, "checkout", branchName);
     if (code !== 0) {
-      emit(hooks, { kind: "restore-head" }, "failed", stderr);
-      return;
+      // Branch was deleted as part of the land; fall back to the base branch.
+      const { code: baseCode, stderr: baseSterr } = await runGitCommand(
+        dir,
+        "checkout",
+        plan.baseBranch,
+      );
+      if (baseCode !== 0) {
+        emit(hooks, { kind: "restore-head" }, "failed", baseSterr);
+        return;
+      }
     }
   } else {
     // Detached HEAD: checkout the raw SHA.

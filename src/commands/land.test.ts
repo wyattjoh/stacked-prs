@@ -970,6 +970,16 @@ describe("executeLand HEAD safety", () => {
       const deleteEvents = events.filter((e) => e.step.kind === "delete");
       expect(deleteEvents.length).toBeGreaterThan(0);
       expect(deleteEvents.every((e) => e.status !== "failed")).toBe(true);
+
+      // HEAD should not be detached; it should be on the base branch.
+      const headRef = await runGitCommand(
+        env.dir,
+        "symbolic-ref",
+        "--short",
+        "HEAD",
+      );
+      expect(headRef.code).toBe(0);
+      expect(headRef.stdout.trim()).toBe("main");
     } finally {
       await env.cleanup();
     }
