@@ -263,6 +263,74 @@ describe("executeRestack (clean cases)", () => {
     expect(bLog.match(/add a-drift\.txt/g)).toHaveLength(1);
     expect(cLog.match(/add a-drift\.txt/g)).toHaveLength(1);
   });
+
+  test("preserves merge commits in stack branches", async () => {
+    // main initial commit already exists from createTestRepo.
+
+    // Create a side branch off main with a commit. This is NOT in the stack,
+    // it's just something the stack branch will merge in.
+    await runGit(repo.dir, "checkout", "-b", "side", "main");
+    await commitFile(repo.dir, "side.txt", "side\n");
+
+    // Create the stack branch off main with its own commit.
+    await runGit(repo.dir, "checkout", "-b", "feat/a", "main");
+    await commitFile(repo.dir, "a.txt", "a\n");
+
+    // While on feat/a, merge `side` with --no-ff to force a merge commit.
+    await runGit(
+      repo.dir,
+      "merge",
+      "--no-ff",
+      "side",
+      "-m",
+      "merge side into feat/a",
+    );
+
+    // Confirm the merge commit exists pre-restack.
+    const preMergeCount =
+      (await runGit(repo.dir, "log", "--merges", "--format=%H", "feat/a"))
+        .split("\n")
+        .filter(Boolean).length;
+    expect(preMergeCount).toBe(1);
+
+    // Configure stack
+    await setBaseBranch(repo.dir, "test", "main");
+    await setStackNode(repo.dir, "feat/a", "test", "main");
+
+    // Advance origin/main so feat/a needs rebasing.
+    await setupFakeOrigin(repo.dir);
+    await runGit(repo.dir, "checkout", "main");
+    await commitFile(repo.dir, "main-extra.txt", "main extra\n");
+    await runGit(repo.dir, "push", "origin", "main");
+    await runGit(repo.dir, "reset", "--hard", "HEAD~1");
+
+    const result = await executeRestack(repo.dir, "test", {});
+
+    expect(result.ok).toBe(true);
+    expect(result.rebases).toHaveLength(1);
+    expect(result.rebases[0].status).toBe("rebased");
+
+    // After rebase, the merge commit must still exist.
+    const postMergeCount =
+      (await runGit(repo.dir, "log", "--merges", "--format=%H", "feat/a"))
+        .split("\n")
+        .filter(Boolean).length;
+    expect(postMergeCount).toBe(1);
+
+    // The merge commit's two parents should still be present.
+    const mergeSha =
+      (await runGit(repo.dir, "log", "--merges", "--format=%H", "feat/a"))
+        .split("\n")[0];
+    const parents =
+      (await runGit(repo.dir, "rev-list", "--parents", "-n", "1", mergeSha))
+        .split(" ");
+    // Output: <merge-sha> <parent1> <parent2>
+    expect(parents.length).toBe(3);
+
+    // The new main commit should be in feat/a's history (rebase moved it).
+    const log = await runGit(repo.dir, "log", "--format=%s", "feat/a");
+    expect(log).toContain("add main-extra.txt");
+  });
 });
 
 describe("executeRestack (conflict handling)", () => {

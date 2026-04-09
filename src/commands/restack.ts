@@ -295,6 +295,7 @@ async function rebaseBranch(
   const rebase = await runGitCommand(
     dir,
     "rebase",
+    "--rebase-merges",
     "--onto",
     newTarget,
     oldParentSha,
