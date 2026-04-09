@@ -44,7 +44,7 @@ function PlanSummary({ plan }: { plan: LandPlan }): React.ReactElement {
           <Text bold>Rebase ({plan.rebaseSteps.length})</Text>
           {plan.rebaseSteps.map((s) => (
             <Box key={`r-${s.branch}`}>
-              <Text>  {s.branch} -&gt; {s.newTarget}</Text>
+              <Text>{s.branch} -&gt; {s.newTarget}</Text>
             </Box>
           ))}
         </Box>
@@ -55,7 +55,7 @@ function PlanSummary({ plan }: { plan: LandPlan }): React.ReactElement {
           <Text bold>Push ({plan.pushSteps.length}, leaves-first)</Text>
           {plan.pushSteps.map((s) => (
             <Box key={`p-${s.branch}`}>
-              <Text>  {s.branch}</Text>
+              <Text>{s.branch}</Text>
             </Box>
           ))}
         </Box>
@@ -67,7 +67,7 @@ function PlanSummary({ plan }: { plan: LandPlan }): React.ReactElement {
           {plan.prUpdates.map((u) => (
             <Box key={`u-${u.prNumber}`}>
               <Text>
-                  #{u.prNumber} {u.branch}: base {u.oldBase} -&gt; {u.newBase}
+                #{u.prNumber} {u.branch}: base {u.oldBase} -&gt; {u.newBase}
                 {u.flipToReady ? " (ready)" : ""}
               </Text>
             </Box>
@@ -80,7 +80,7 @@ function PlanSummary({ plan }: { plan: LandPlan }): React.ReactElement {
           <Text bold>Delete</Text>
           {plan.branchesToDelete.map((b) => (
             <Box key={`d-${b}`}>
-              <Text>  {b}</Text>
+              <Text>{b}</Text>
             </Box>
           ))}
         </Box>
@@ -91,7 +91,7 @@ function PlanSummary({ plan }: { plan: LandPlan }): React.ReactElement {
           <Text bold color="yellow">Stack will split into:</Text>
           {plan.splitPreview.map((s) => (
             <Box key={`s-${s.stackName}`}>
-              <Text>  {s.stackName}: {s.branches.join(", ")}</Text>
+              <Text>{s.stackName}: {s.branches.join(", ")}</Text>
             </Box>
           ))}
         </Box>
@@ -118,7 +118,7 @@ export function LandModal(
       <Box borderStyle="double" flexDirection="column" padding={1}>
         <PlanSummary plan={phase.plan} />
         <Box marginTop={1}>
-          <Text dimColor>[y] confirm  [n/esc] cancel</Text>
+          <Text dimColor>[y] confirm [n/esc] cancel</Text>
         </Box>
       </Box>
     );
@@ -155,7 +155,7 @@ export function LandModal(
             <Text>Split into:</Text>
             {phase.result.split.map((s) => (
               <Box key={`ds-${s.stackName}`}>
-                <Text>  {s.stackName}</Text>
+                <Text>{s.stackName}</Text>
               </Box>
             ))}
           </Box>
@@ -187,31 +187,31 @@ export function LandModal(
             <Text bold>Rollback</Text>
             {phase.rollback.localRestored.length > 0 && (
               <Text>
-                  local restored: {phase.rollback.localRestored.join(", ")}
+                local restored: {phase.rollback.localRestored.join(", ")}
               </Text>
             )}
             {phase.rollback.localFailed.length > 0 && (
               <Text color="red">
-                  local FAILED: {phase.rollback.localFailed
+                local FAILED: {phase.rollback.localFailed
                   .map((f) => `${f.branch} (${f.reason})`)
                   .join("; ")}
               </Text>
             )}
             {phase.rollback.remoteRestored.length > 0 && (
               <Text>
-                  remote restored: {phase.rollback.remoteRestored.join(", ")}
+                remote restored: {phase.rollback.remoteRestored.join(", ")}
               </Text>
             )}
             {phase.rollback.remoteFailed.length > 0 && (
               <Text color="red">
-                  remote FAILED: {phase.rollback.remoteFailed
+                remote FAILED: {phase.rollback.remoteFailed
                   .map((f) => `${f.branch} (${f.reason})`)
                   .join("; ")}
               </Text>
             )}
             {phase.rollback.prFailed.length > 0 && (
               <Text color="red">
-                  pr FAILED: {phase.rollback.prFailed
+                pr FAILED: {phase.rollback.prFailed
                   .map((f) => `#${f.prNumber} (${f.reason})`)
                   .join("; ")}
               </Text>
