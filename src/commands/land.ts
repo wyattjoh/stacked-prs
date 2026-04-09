@@ -288,6 +288,24 @@ export async function captureOriginalHead(dir: string): Promise<string> {
   return await revParse(dir, "HEAD");
 }
 
+export async function fetchBase(
+  dir: string,
+  baseBranch: string,
+): Promise<void> {
+  const { code, stderr } = await runGitCommand(
+    dir,
+    "fetch",
+    "origin",
+    baseBranch,
+  );
+  if (code !== 0) {
+    throw new Error(
+      `git fetch origin ${baseBranch} failed: ${stderr.trim()}. ` +
+        `Check your network connection and origin remote.`,
+    );
+  }
+}
+
 /**
  * Build per-branch rebase steps for the "root-merged" case. Walks the
  * tree in DFS topological order, skipping the merged root. The first

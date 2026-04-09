@@ -377,6 +377,25 @@ describe("executeLand case B (all-merged)", () => {
   });
 });
 
+describe("fetchBase", () => {
+  it("throws a clear error when origin has no base branch", async () => {
+    const repo = await createTestRepo();
+    try {
+      const { fetchBase } = await import("./land.ts");
+      let caught: Error | null = null;
+      try {
+        await fetchBase(repo.dir, "main");
+      } catch (err) {
+        caught = err as Error;
+      }
+      expect(caught).not.toBeNull();
+      expect(caught!.message.includes("fetch")).toBe(true);
+    } finally {
+      await repo.cleanup();
+    }
+  });
+});
+
 describe("planLand", () => {
   it("builds a root-merged plan for a linear stack", async () => {
     const repo = await createTestRepo();
