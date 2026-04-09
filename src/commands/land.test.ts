@@ -1,8 +1,31 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import type { LandCase } from "./land.ts";
-import { isShallowRepository, runLandPreflight } from "./land.ts";
-import { addBranch, createTestRepo, runGit } from "../lib/testdata/helpers.ts";
+import {
+  classifyLandCase,
+  isShallowRepository,
+  type PrStateByBranch,
+  runLandPreflight,
+  UnsupportedLandShape,
+} from "./land.ts";
+import {
+  addBranch,
+  createTestRepo,
+  runGit,
+  type TestRepo,
+} from "../lib/testdata/helpers.ts";
+import { getStackTree, setBaseBranch, setStackNode } from "../lib/stack.ts";
+
+async function initStack(
+  repo: TestRepo,
+  name: string,
+  branches: Array<[string, string]>,
+): Promise<void> {
+  await setBaseBranch(repo.dir, name, "main");
+  for (const [branch, parent] of branches) {
+    await setStackNode(repo.dir, branch, name, parent);
+  }
+}
 
 describe("land types", () => {
   it("LandCase supports the two expected shapes", () => {
@@ -48,6 +71,80 @@ describe("runLandPreflight", () => {
       expect(
         report.blockers.some((b) => b.kind === "dirty-worktree"),
       ).toBe(true);
+    } finally {
+      await repo.cleanup();
+    }
+  });
+});
+
+describe("classifyLandCase", () => {
+  it("returns all-merged when every branch is merged", async () => {
+    const repo = await createTestRepo();
+    try {
+      await addBranch(repo.dir, "feat/a", "main");
+      await addBranch(repo.dir, "feat/b", "feat/a");
+      await initStack(repo, "s", [["feat/a", "main"], ["feat/b", "feat/a"]]);
+      const tree = await getStackTree(repo.dir, "s");
+      const prStates: PrStateByBranch = new Map([
+        ["feat/a", "MERGED"],
+        ["feat/b", "MERGED"],
+      ]);
+      expect(classifyLandCase(tree, prStates)).toBe("all-merged");
+    } finally {
+      await repo.cleanup();
+    }
+  });
+
+  it("returns root-merged when only the root is merged", async () => {
+    const repo = await createTestRepo();
+    try {
+      await addBranch(repo.dir, "feat/a", "main");
+      await addBranch(repo.dir, "feat/b", "feat/a");
+      await initStack(repo, "s", [["feat/a", "main"], ["feat/b", "feat/a"]]);
+      const tree = await getStackTree(repo.dir, "s");
+      const prStates: PrStateByBranch = new Map([
+        ["feat/a", "MERGED"],
+        ["feat/b", "OPEN"],
+      ]);
+      expect(classifyLandCase(tree, prStates)).toBe("root-merged");
+    } finally {
+      await repo.cleanup();
+    }
+  });
+
+  it("throws UnsupportedLandShape when only a leaf is merged", async () => {
+    const repo = await createTestRepo();
+    try {
+      await addBranch(repo.dir, "feat/a", "main");
+      await addBranch(repo.dir, "feat/b", "feat/a");
+      await initStack(repo, "s", [["feat/a", "main"], ["feat/b", "feat/a"]]);
+      const tree = await getStackTree(repo.dir, "s");
+      const prStates: PrStateByBranch = new Map([
+        ["feat/a", "OPEN"],
+        ["feat/b", "MERGED"],
+      ]);
+      expect(() => classifyLandCase(tree, prStates)).toThrow(
+        UnsupportedLandShape,
+      );
+    } finally {
+      await repo.cleanup();
+    }
+  });
+
+  it("throws for multi-root with only one merged root", async () => {
+    const repo = await createTestRepo();
+    try {
+      await addBranch(repo.dir, "feat/a", "main");
+      await addBranch(repo.dir, "feat/b", "main");
+      await initStack(repo, "s", [["feat/a", "main"], ["feat/b", "main"]]);
+      const tree = await getStackTree(repo.dir, "s");
+      const prStates: PrStateByBranch = new Map([
+        ["feat/a", "MERGED"],
+        ["feat/b", "OPEN"],
+      ]);
+      expect(() => classifyLandCase(tree, prStates)).toThrow(
+        UnsupportedLandShape,
+      );
     } finally {
       await repo.cleanup();
     }

@@ -133,7 +133,7 @@ import {
   listInProgressOperations,
   type WorktreeCollision,
 } from "../lib/worktrees.ts";
-import { runGitCommand } from "../lib/stack.ts";
+import { getAllNodes, runGitCommand, type StackTree } from "../lib/stack.ts";
 
 export async function isShallowRepository(dir: string): Promise<boolean> {
   const { code, stdout } = await runGitCommand(
@@ -187,4 +187,56 @@ export async function runLandPreflight(
   }
 
   return { isShallow, blockers };
+}
+
+/**
+ * Classify a stack + PR state map into one of the two supported land
+ * shapes. Throws `UnsupportedLandShape` for any other configuration.
+ *
+ * Supported shapes:
+ * - "all-merged": every branch in the stack has a MERGED PR.
+ * - "root-merged": the stack has exactly one root, that root is MERGED,
+ *   and no other branch is MERGED.
+ */
+export function classifyLandCase(
+  tree: StackTree,
+  prStateByBranch: PrStateByBranch,
+): LandCase {
+  const nodes = getAllNodes(tree);
+  if (nodes.length === 0) {
+    throw new UnsupportedLandShape("Stack has no branches to land");
+  }
+
+  const mergedSet = new Set(
+    nodes
+      .filter((n) => prStateByBranch.get(n.branch) === "MERGED")
+      .map((n) => n.branch),
+  );
+
+  if (mergedSet.size === 0) {
+    throw new UnsupportedLandShape("No merged PRs found in this stack");
+  }
+
+  if (mergedSet.size === nodes.length) {
+    return "all-merged";
+  }
+
+  if (tree.roots.length !== 1) {
+    throw new UnsupportedLandShape(
+      "Cannot land a multi-root stack unless every branch is merged",
+    );
+  }
+  const root = tree.roots[0];
+  if (!mergedSet.has(root.branch)) {
+    throw new UnsupportedLandShape(
+      "Root of the stack is not merged; only merged roots or fully merged stacks are supported",
+    );
+  }
+  if (mergedSet.size !== 1) {
+    throw new UnsupportedLandShape(
+      "Unsupported land shape: a non-root branch has a merged PR; only the root or every branch may be merged",
+    );
+  }
+
+  return "root-merged";
 }
