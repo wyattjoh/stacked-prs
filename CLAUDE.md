@@ -230,9 +230,9 @@ The TUI now owns one write operation: the `L` key lands a stack whose root PR
 has been merged (or every PR in the stack is merged). The logic lives in
 `src/commands/land.ts` (pure `planLand` plus impure `executeLand` with a
 snapshot-based rollback path); the TUI is a launcher that shows a plan modal,
-streams progress events, and displays a rollback report on failure.
-Confirmation gates move into the Ink modal (`[y]`/`[n]`) for this path; the
-`SKILL.md` `land` runbook remains the Claude-orchestrated alternative.
+streams progress events, and displays a rollback report on failure. Confirmation
+gates move into the Ink modal (`[y]`/`[n]`) for this path; the `SKILL.md` `land`
+runbook remains the Claude-orchestrated alternative.
 
 ### Testing
 

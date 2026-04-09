@@ -221,9 +221,9 @@ Common keys:
 - `o`: open focused PR in browser
 - `y` / `Y`: copy branch name / PR URL
 - `L`: land the focused stack (root merged, or every branch merged). Opens a
-  modal with the full plan (rebases, pushes, PR retargets, deletions), waits
-  for `y` to confirm, streams progress, and rolls back local branches +
-  attempts remote restore on failure.
+  modal with the full plan (rebases, pushes, PR retargets, deletions), waits for
+  `y` to confirm, streams progress, and rolls back local branches + attempts
+  remote restore on failure.
 - `?`: toggle full key help
 - `q`: quit
 
