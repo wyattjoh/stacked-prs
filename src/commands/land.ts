@@ -126,6 +126,13 @@ export class UnsupportedLandShape extends Error {
 // re-used by land-related helpers in later tasks (preflight, plan, execute).
 export type { DirtyWorktree, NavAction, PrInfo, SplitInfo };
 
+import {
+  checkWorktreeSafety,
+  findWorktreeCollisions,
+  type InProgressOperation,
+  listInProgressOperations,
+  type WorktreeCollision,
+} from "../lib/worktrees.ts";
 import { runGitCommand } from "../lib/stack.ts";
 
 export async function isShallowRepository(dir: string): Promise<boolean> {
@@ -136,4 +143,48 @@ export async function isShallowRepository(dir: string): Promise<boolean> {
   );
   if (code !== 0) return false;
   return stdout === "true";
+}
+
+export type LandBlocker =
+  | { kind: "shallow-repo" }
+  | { kind: "dirty-worktree"; worktree: DirtyWorktree }
+  | { kind: "in-progress-op"; op: InProgressOperation }
+  | { kind: "worktree-collision"; collision: WorktreeCollision };
+
+export interface LandPreflightReport {
+  isShallow: boolean;
+  blockers: LandBlocker[];
+}
+
+/**
+ * Run every preflight check relevant to a land operation. Returns a list
+ * of blockers that must be zero for the land to proceed. `branches` is
+ * the full set of branches that will be touched (rebased, pushed,
+ * deleted, etc.).
+ */
+export async function runLandPreflight(
+  dir: string,
+  branches: string[],
+): Promise<LandPreflightReport> {
+  const blockers: LandBlocker[] = [];
+
+  const isShallow = await isShallowRepository(dir);
+  if (isShallow) blockers.push({ kind: "shallow-repo" });
+
+  const inProgress = await listInProgressOperations(dir);
+  for (const op of inProgress) {
+    blockers.push({ kind: "in-progress-op", op });
+  }
+
+  const collisions = await findWorktreeCollisions(dir, branches);
+  for (const c of collisions) {
+    blockers.push({ kind: "worktree-collision", collision: c });
+  }
+
+  const dirty = await checkWorktreeSafety(dir, branches);
+  for (const d of dirty) {
+    blockers.push({ kind: "dirty-worktree", worktree: d });
+  }
+
+  return { isShallow, blockers };
 }
