@@ -15,13 +15,17 @@ import type { GridLayout } from "../types.ts";
  *   0: shared base-branch label (e.g. "main")   ← only if any stack visible
  *   1: initial trunk row                         ← only if any stack visible
  *   2: stack A header
- *   3: stack A cell 0 name
- *   4: stack A cell 0 info
- *   5: stack A cell 0 → 1 rail               ← only between cells
- *   6: stack A cell 1 name
+ *   3: gap row                                   ← only when merged cells exist
+ *   4: merged cell 0 name                        ← only when merged cells exist
+ *   5: merged cell 0 info
+ *   6: gap row                                   ← only when both merged and live cells
+ *   7: live cell 0 name
+ *   8: live cell 0 info
+ *   9: live cell 0 → 1 rail                      ← only between live cells
+ *  10: live cell 1 name
  *   ...
- *   N: stack A cell last info                ← no trailing rail
- *   N+1: gap row                              ← only between stacks
+ *   N: live cell last info                       ← no trailing rail
+ *   N+1: gap row                                 ← only between stacks
  *   N+2: stack B header
  *   ...
  * ```
@@ -89,20 +93,38 @@ export function measureLayout(
   }
   for (let s = 0; s < visibleStacks.length; s++) {
     const stack = visibleStacks[s];
-    const cells = [...(grid.byStack.get(stack) ?? [])]
+    const allCells = [...(grid.byStack.get(stack) ?? [])]
       .sort((a, b) => a.row - b.row);
+    const mergedCells = allCells.filter((c) => c.merged);
+    const liveCells = allCells.filter((c) => !c.merged);
     const thisHeaderY = y;
     y += 1; // stack header
-    for (let i = 0; i < cells.length; i++) {
-      if (cells[i].branch === cursorBranch) {
+
+    if (mergedCells.length > 0) {
+      y += 1; // gap row after header
+      for (const cell of mergedCells) {
+        if (cell.branch === cursorBranch) {
+          cursorY = y;
+          headerY = thisHeaderY;
+        }
+        y += 2; // name + info (no rail between merged cells)
+      }
+      if (liveCells.length > 0) {
+        y += 1; // gap row before live section
+      }
+    }
+
+    for (let i = 0; i < liveCells.length; i++) {
+      if (liveCells[i].branch === cursorBranch) {
         cursorY = y;
         headerY = thisHeaderY;
       }
       y += 2; // name + info
-      if (i < cells.length - 1) {
+      if (i < liveCells.length - 1) {
         y += 1; // inter-cell rail
       }
     }
+
     if (s < visibleStacks.length - 1) {
       y += 1; // gap row between stacks
     }
