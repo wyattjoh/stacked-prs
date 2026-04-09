@@ -52,24 +52,24 @@ export function HeaderBox(props: HeaderBoxProps): React.ReactElement {
       overflowX="hidden"
     >
       <Box flexDirection="row" flexShrink={0}>
-        <Text dimColor>{`stacked-prs   `}</Text>
+        <Text dimColor={!props.focused}>{`stacked-prs   `}</Text>
         <Text color={active.color}>{`● `}</Text>
         <Text bold color={props.focused ? props.primaryColor : undefined}>
           {active.label}
         </Text>
-        <Text dimColor>{`  ${position}`}</Text>
+        <Text dimColor={!props.focused}>{`  ${position}`}</Text>
       </Box>
       {props.loadingCount > 0
         ? (
           <Box flexShrink={0}>
-            <Text dimColor>
+            <Text dimColor={!props.focused}>
               ↻ loading {props.loadingCount}/{props.totalLoadCount}
             </Text>
           </Box>
         )
         : null}
       <Box flexShrink={0}>
-        <Text dimColor>← → views</Text>
+        <Text dimColor={!props.focused}>← → views</Text>
       </Box>
     </Box>
   );
