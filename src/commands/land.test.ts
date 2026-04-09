@@ -4,7 +4,9 @@ import type { LandCase } from "./land.ts";
 import {
   captureSnapshot,
   classifyLandCase,
+  executeLand,
   isShallowRepository,
+  type LandProgressEvent,
   planLand,
   previewLandCleanup,
   type PrInfo,
@@ -18,7 +20,12 @@ import {
   runGit,
   type TestRepo,
 } from "../lib/testdata/helpers.ts";
-import { getStackTree, setBaseBranch, setStackNode } from "../lib/stack.ts";
+import {
+  getStackTree,
+  runGitCommand,
+  setBaseBranch,
+  setStackNode,
+} from "../lib/stack.ts";
 
 async function initStack(
   repo: TestRepo,
@@ -307,6 +314,63 @@ describe("previewLandCleanup", () => {
       const tree = await getStackTree(repo.dir, "s");
       const preview = previewLandCleanup(tree, "feat/a");
       expect(preview.splits.length).toBe(2);
+    } finally {
+      await repo.cleanup();
+    }
+  });
+});
+
+describe("executeLand case B (all-merged)", () => {
+  it("deletes every branch and clears stack config", async () => {
+    const repo = await createTestRepo();
+    try {
+      await addBranch(repo.dir, "feat/a", "main");
+      await addBranch(repo.dir, "feat/b", "feat/a");
+      await initStack(repo, "s", [["feat/a", "main"], ["feat/b", "feat/a"]]);
+      const prStates: PrStateByBranch = new Map([
+        ["feat/a", "MERGED"],
+        ["feat/b", "MERGED"],
+      ]);
+      const plan = await planLand(repo.dir, "s", prStates, new Map());
+
+      const events: LandProgressEvent[] = [];
+      const result = await executeLand(repo.dir, plan, {
+        onProgress: (e) => events.push(e),
+        freshPrStates: () => Promise.resolve(prStates),
+      });
+
+      // Both branches are gone.
+      const aProbe = await runGitCommand(
+        repo.dir,
+        "rev-parse",
+        "--verify",
+        "refs/heads/feat/a",
+      );
+      expect(aProbe.code !== 0).toBe(true);
+      const bProbe = await runGitCommand(
+        repo.dir,
+        "rev-parse",
+        "--verify",
+        "refs/heads/feat/b",
+      );
+      expect(bProbe.code !== 0).toBe(true);
+
+      // Stack config is gone.
+      const baseProbe = await runGitCommand(
+        repo.dir,
+        "config",
+        "stack.s.base-branch",
+      );
+      expect(baseProbe.code !== 0).toBe(true);
+
+      // Delete events fired leaves-first.
+      const deletes = events
+        .filter((e) => e.step.kind === "delete" && e.status === "ok")
+        .map((e) => (e.step as { kind: "delete"; branch: string }).branch);
+      expect(deletes).toEqual(["feat/b", "feat/a"]);
+
+      expect(result.plan.case).toBe("all-merged");
+      expect(result.split).toEqual([]);
     } finally {
       await repo.cleanup();
     }

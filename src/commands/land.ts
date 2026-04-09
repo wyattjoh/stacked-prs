@@ -137,6 +137,7 @@ import {
   findNode,
   getAllNodes,
   getStackTree,
+  removeStackBranch,
   runGitCommand,
   type StackTree,
 } from "../lib/stack.ts";
@@ -486,4 +487,143 @@ export async function planLand(
     originalHeadRef,
     splitPreview: preview.splits,
   };
+}
+
+function emit(
+  hooks: LandHooks,
+  step: LandStep,
+  status: LandProgressEvent["status"],
+  message?: string,
+): void {
+  hooks.onProgress({ step, status, message });
+}
+
+function emptyRollback(): LandRollbackReport {
+  return {
+    localRestored: [],
+    localFailed: [],
+    remoteRestored: [],
+    remoteFailed: [],
+    prRestored: [],
+    prFailed: [],
+  };
+}
+
+function describeBlockers(blockers: LandBlocker[]): string {
+  const parts: string[] = [];
+  for (const b of blockers) {
+    switch (b.kind) {
+      case "shallow-repo":
+        parts.push(
+          "repository is a shallow clone; run `git fetch --unshallow` first",
+        );
+        break;
+      case "dirty-worktree":
+        parts.push(
+          `dirty worktree at ${b.worktree.path} (${b.worktree.branch})`,
+        );
+        break;
+      case "in-progress-op":
+        parts.push(
+          `${b.op.operation} in progress at ${b.op.worktreePath}`,
+        );
+        break;
+      case "worktree-collision":
+        parts.push(
+          `${b.collision.branch} is checked out in ${b.collision.worktreePath}`,
+        );
+        break;
+    }
+  }
+  return `Preflight blocked: ${parts.join("; ")}`;
+}
+
+async function unsetConfig(dir: string, key: string): Promise<void> {
+  await runGitCommand(dir, "config", "--unset", key);
+}
+
+async function executeCaseBCleanup(
+  dir: string,
+  plan: LandPlan,
+  hooks: LandHooks,
+): Promise<LandResult> {
+  // Leaves-first: reverse the DFS order stored in branchesToDelete.
+  const order = [...plan.branchesToDelete].reverse();
+  for (const branch of order) {
+    emit(hooks, { kind: "delete", branch }, "running");
+    const { code, stderr } = await runGitCommand(dir, "branch", "-D", branch);
+    if (code !== 0) {
+      emit(hooks, { kind: "delete", branch }, "failed", stderr);
+      throw new LandError(
+        `Failed to delete ${branch}: ${stderr}`,
+        plan,
+        emptyRollback(),
+        { kind: "delete", branch },
+      );
+    }
+    await removeStackBranch(dir, branch);
+    emit(hooks, { kind: "delete", branch }, "ok");
+  }
+
+  await unsetConfig(dir, `stack.${plan.stackName}.merge-strategy`);
+  await unsetConfig(dir, `stack.${plan.stackName}.base-branch`);
+  await unsetConfig(dir, `stack.${plan.stackName}.resume-state`);
+
+  emit(hooks, { kind: "restore-head" }, "running");
+  const ref = plan.originalHeadRef;
+  if (ref.startsWith("refs/")) {
+    const branchName = ref.replace(/^refs\/heads\//, "");
+    const { code, stderr } = await runGitCommand(dir, "checkout", branchName);
+    if (code !== 0) {
+      emit(hooks, { kind: "restore-head" }, "failed", stderr);
+    } else {
+      emit(hooks, { kind: "restore-head" }, "ok");
+    }
+  } else {
+    const { code, stderr } = await runGitCommand(
+      dir,
+      "checkout",
+      "--detach",
+      ref,
+    );
+    if (code !== 0) {
+      emit(hooks, { kind: "restore-head" }, "failed", stderr);
+    } else {
+      emit(hooks, { kind: "restore-head" }, "ok");
+    }
+  }
+
+  return { plan, autoMergedBranches: [], split: [] };
+}
+
+export async function executeLand(
+  dir: string,
+  plan: LandPlan,
+  hooks: LandHooks,
+): Promise<LandResult> {
+  emit(hooks, { kind: "preflight" }, "running");
+  const allBranches = plan.snapshot.map((s) => s.branch);
+  const preflight = await runLandPreflight(dir, allBranches);
+  if (preflight.blockers.length > 0) {
+    emit(
+      hooks,
+      { kind: "preflight" },
+      "failed",
+      `${preflight.blockers.length} blocker(s)`,
+    );
+    throw new LandError(
+      describeBlockers(preflight.blockers),
+      plan,
+      emptyRollback(),
+      { kind: "preflight" },
+    );
+  }
+  emit(hooks, { kind: "preflight" }, "ok");
+
+  if (plan.case === "all-merged") {
+    return await executeCaseBCleanup(dir, plan, hooks);
+  }
+
+  // Case A (root-merged) implementation arrives in Tasks 15-23.
+  throw new Error("executeLand: root-merged case not yet implemented");
 }
