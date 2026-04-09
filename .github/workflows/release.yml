@@ -36,4 +36,5 @@ jobs:
           plugin-name: stacked-prs
           version: ${{ needs.release-please.outputs.version }}
           ref: ${{ needs.release-please.outputs.tag_name }}
+          sha: ${{ github.sha }}
           token: ${{ secrets.MARKETPLACE_PAT }}
