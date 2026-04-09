@@ -48,10 +48,14 @@ export async function loadLocal(dir: string): Promise<LoadLocalResult> {
   for (const tree of trees) {
     for (const node of getAllNodes(tree)) {
       allBranches.push(node.branch);
-      syncByBranch.set(
-        node.branch,
-        await computeSync(dir, node.branch, node.parent),
-      );
+      if (node.merged) {
+        syncByBranch.set(node.branch, "landed");
+      } else {
+        syncByBranch.set(
+          node.branch,
+          await computeSync(dir, node.branch, node.parent),
+        );
+      }
     }
   }
 

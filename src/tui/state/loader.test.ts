@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, it as test } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { addBranch, createTestRepo } from "../../lib/testdata/helpers.ts";
 import type { TestRepo } from "../../lib/testdata/helpers.ts";
-import { setBaseBranch, setStackNode } from "../../lib/stack.ts";
+import { runGitCommand, setBaseBranch, setStackNode } from "../../lib/stack.ts";
 import { setMockDir, writeFixture } from "../../lib/gh.ts";
 import { loadLocal, loadPrsProgressive } from "./loader.ts";
 
@@ -32,6 +32,27 @@ describe("loadLocal", () => {
     expect(result.trees[0].stackName).toBe("alpha");
     expect(result.syncByBranch.get("feat/a")).toBeDefined();
     expect(result.allBranches).toContain("feat/a");
+  });
+});
+
+describe("loadLocal with merged nodes", () => {
+  test("sets 'landed' sync status for stack-merged branches", async () => {
+    const repo = await createTestRepo();
+    try {
+      await addBranch(repo.dir, "feature/a", "main");
+      await addBranch(repo.dir, "feature/b", "main");
+      await setStackNode(repo.dir, "feature/a", "my-stack", "main");
+      await setStackNode(repo.dir, "feature/b", "my-stack", "main");
+      await setBaseBranch(repo.dir, "my-stack", "main");
+      // Mark feature/a as historically merged; branch ref still exists in config
+      await runGitCommand(repo.dir, "config", "branch.feature/a.stack-merged", "true");
+
+      const result = await loadLocal(repo.dir);
+      expect(result.syncByBranch.get("feature/a")).toBe("landed");
+      expect(result.syncByBranch.get("feature/b")).toBe("up-to-date");
+    } finally {
+      await repo.cleanup();
+    }
   });
 });
 
