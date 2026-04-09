@@ -249,8 +249,9 @@ await new Command()
     "--downstack-from <branch:string>",
     "Rebase only ancestors of this branch",
   )
-  .option("--only <branch:string>", "Rebase only this single branch segment")
+  .option("--only <branch:string>", "Rebase only this single branch")
   .option("--resume", "Resume after resolving conflicts")
+  .option("--dry-run", "Report what would happen without touching git")
   .option("--json", "Output as JSON")
   .action(async (options) => {
     const stackName = await resolveStackName(dir, options.stackName);
@@ -258,6 +259,8 @@ await new Command()
       upstackFrom: options.upstackFrom,
       downstackFrom: options.downstackFrom,
       only: options.only,
+      resume: options.resume,
+      dryRun: options.dryRun,
     });
 
     if (options.json) {
@@ -265,14 +268,17 @@ await new Command()
     } else {
       const tree = await getStackTree(dir, stackName);
       const statusIcons = new Map<string, string>();
-      for (const seg of result.segments) {
-        const icon = seg.exitCode === 0 ? "✓" : "✗";
-        statusIcons.set(seg.tip, icon);
-        for (const b of seg.branches) statusIcons.set(b, icon);
-      }
-      for (const s of result.skipped) {
-        statusIcons.set(s.tip, "⊘");
-        for (const b of s.branches) statusIcons.set(b, "⊘");
+      for (const r of result.rebases) {
+        const icon = r.status === "rebased"
+          ? "✓"
+          : r.status === "skipped-clean"
+          ? "·"
+          : r.status === "planned"
+          ? "→"
+          : r.status === "conflict"
+          ? "✗"
+          : "⊘";
+        statusIcons.set(r.branch, icon);
       }
       console.log(renderTree(tree, { statusIcons }));
 
