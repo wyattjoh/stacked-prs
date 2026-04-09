@@ -50,6 +50,22 @@ function infoLine(cell: PrCellState | undefined): string {
   return `#${pr.number} ${glyphFor(pr)} ${stateLabel(pr)}`;
 }
 
+/**
+ * Color for the PR info line based on PR state.
+ * Returns `undefined` when the row should fall back to a muted/dim style
+ * (no PR, loading, error).
+ */
+function infoColor(cell: PrCellState | undefined): string | undefined {
+  if (!cell || cell.status !== "loaded") return undefined;
+  const pr = cell.pr;
+  if (!pr) return undefined;
+  if (pr.isDraft) return "yellow";
+  const s = pr.state.toUpperCase();
+  if (s === "MERGED") return "magenta";
+  if (s === "OPEN") return "green";
+  return undefined;
+}
+
 function topPrefix(cell: GridCell): string {
   if (cell.depth === 0) return "";
   const parts: string[] = [];
@@ -116,7 +132,9 @@ export function StackBand(props: StackBandProps): React.ReactElement {
       {sorted.map((cell, i) => {
         const top = topPrefix(cell);
         const bottom = bottomPrefix(cell);
-        const info = infoLine(props.prData.get(cell.branch));
+        const cellState = props.prData.get(cell.branch);
+        const info = infoLine(cellState);
+        const prColor = infoColor(cellState);
         const focused = props.focusedBranch === cell.branch;
         const nameStyle = focused ? { inverse: true } : {};
         const railStr = i < sorted.length - 1 ? railPrefix(cell) : "";
@@ -130,7 +148,13 @@ export function StackBand(props: StackBandProps): React.ReactElement {
             <Box flexDirection="row" flexShrink={0}>
               <TrunkSegments segs={props.contentPrefix} />
               {bottom.length > 0 && <Text color={props.color}>{bottom}</Text>}
-              <Text dimColor {...nameStyle}>{info}</Text>
+              <Text
+                color={prColor}
+                dimColor={prColor === undefined}
+                {...nameStyle}
+              >
+                {info}
+              </Text>
             </Box>
             {i < sorted.length - 1 && (
               <Box flexDirection="row" flexShrink={0}>
