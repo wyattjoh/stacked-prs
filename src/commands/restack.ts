@@ -339,3 +339,155 @@ export function topologicalOrder(tree: StackTree): StackNode[] {
   for (const root of tree.roots) walk(root);
   return order;
 }
+
+export interface RestackOptionsV2 {
+  upstackFrom?: string;
+  downstackFrom?: string;
+  only?: string;
+}
+
+async function revParse(dir: string, ref: string): Promise<string> {
+  const { code, stdout, stderr } = await runGitCommand(dir, "rev-parse", ref);
+  if (code !== 0) {
+    throw new Error(`git rev-parse ${ref} failed: ${stderr}`);
+  }
+  return stdout.trim();
+}
+
+/**
+ * Filter the tree into the set of nodes that are in scope for this restack.
+ * Currently this duplicates the semantics of the old `filterSegments` but
+ * operates on nodes directly. Moved to a standalone helper so dry-run and
+ * execute share the same filter.
+ */
+function filterNodes(
+  tree: StackTree,
+  opts: RestackOptionsV2,
+): StackNode[] {
+  const all = topologicalOrder(tree);
+  if (!opts.upstackFrom && !opts.downstackFrom && !opts.only) {
+    return all;
+  }
+
+  if (opts.only) {
+    return all.filter((n) => n.branch === opts.only);
+  }
+
+  if (opts.upstackFrom) {
+    const target = findNode(tree, opts.upstackFrom);
+    if (!target) return [];
+    const included = new Set<string>();
+    const collect = (node: StackNode): void => {
+      included.add(node.branch);
+      for (const child of node.children) collect(child);
+    };
+    collect(target);
+    return all.filter((n) => included.has(n.branch));
+  }
+
+  if (opts.downstackFrom) {
+    // Nodes on the path from a root to the target, inclusive.
+    const path = new Set<string>();
+    const findPath = (node: StackNode, trail: string[]): boolean => {
+      const nextTrail = [...trail, node.branch];
+      if (node.branch === opts.downstackFrom) {
+        for (const b of nextTrail) path.add(b);
+        return true;
+      }
+      for (const child of node.children) {
+        if (findPath(child, nextTrail)) return true;
+      }
+      return false;
+    };
+    for (const root of tree.roots) findPath(root, []);
+    return all.filter((n) => path.has(n.branch));
+  }
+
+  return all;
+}
+
+/**
+ * Resolve the rebase target for a node. Root nodes (parent === base branch)
+ * target `origin/<base>`; non-root nodes target the parent branch name.
+ */
+function resolveTarget(node: StackNode, tree: StackTree): string {
+  if (node.parent === tree.baseBranch) {
+    return `origin/${tree.baseBranch}`;
+  }
+  return node.parent;
+}
+
+/**
+ * Compute the full rebase plan without mutating the repo.
+ */
+export async function planRestack(
+  dir: string,
+  stackName: string,
+  opts: RestackOptionsV2,
+): Promise<RestackResultV2> {
+  const tree = await getStackTree(dir, stackName);
+  const nodes = filterNodes(tree, opts);
+
+  // Snapshot every in-scope node's parent SHA before any mutation. The
+  // boundary ref is the node's tree parent (another stack branch, or the base
+  // branch for a root node). Using the branch name rather than `origin/<base>`
+  // captures commits that were on the parent at plan time regardless of
+  // whether origin has advanced further.
+  const oldParentSha = new Map<string, string>();
+  for (const node of nodes) {
+    const sha = await revParse(dir, node.parent);
+    oldParentSha.set(node.branch, sha);
+  }
+
+  // Walk nodes in topological order so we can cascade "planned" status from
+  // a parent to its descendants: if a branch will be rebased, every branch
+  // that stacks on top of it must also be rebased even if it's locally clean
+  // relative to its current parent ref.
+  const plannedBranches = new Set<string>();
+  const rebases: RebasePlan[] = [];
+  for (const node of nodes) {
+    const target = resolveTarget(node, tree);
+    const branchSha = await revParse(dir, node.branch);
+
+    // For the ancestor check we need the target ref to actually resolve.
+    // Root nodes use `origin/<base>`, which may not exist in tests or repos
+    // without an origin remote. Fall back to the local parent ref in that
+    // case so the dry-run stays read-only and doesn't require a remote.
+    let targetRef = target;
+    const targetResolve = await runGitCommand(dir, "rev-parse", targetRef);
+    if (targetResolve.code !== 0) {
+      targetRef = node.parent;
+    }
+    const targetSha = await revParse(dir, targetRef);
+
+    // Locally clean if target is already an ancestor of the branch.
+    const isAncestorResult = await runGitCommand(
+      dir,
+      "merge-base",
+      "--is-ancestor",
+      targetSha,
+      branchSha,
+    );
+    const locallyClean = isAncestorResult.code === 0;
+
+    // Cascade: if this node's tree parent is planned, this node must also be
+    // planned even if it's locally clean, because the parent will move.
+    const parentPlanned = plannedBranches.has(node.parent);
+    const status: RebaseStatus = locallyClean && !parentPlanned
+      ? "skipped-clean"
+      : "planned";
+
+    if (status === "planned") {
+      plannedBranches.add(node.branch);
+    }
+
+    rebases.push({
+      branch: node.branch,
+      oldParentSha: oldParentSha.get(node.branch)!,
+      newTarget: target,
+      status,
+    });
+  }
+
+  return { ok: true, rebases };
+}

@@ -13,7 +13,12 @@ import {
   type StackNode,
   type StackTree,
 } from "../lib/stack.ts";
-import { decomposeSegments, restack, topologicalOrder } from "./restack.ts";
+import {
+  decomposeSegments,
+  planRestack,
+  restack,
+  topologicalOrder,
+} from "./restack.ts";
 
 // ---------------------------------------------------------------------------
 // Helpers to build minimal StackTree objects for pure-logic unit tests
@@ -378,5 +383,77 @@ describe("topologicalOrder", () => {
     const order = topologicalOrder(tree).map((n) => n.branch);
 
     expect(order).toEqual(["x", "y", "y1"]);
+  });
+});
+
+describe("planRestack (dry-run)", () => {
+  let repo: TestRepo;
+
+  beforeEach(async () => {
+    repo = await createTestRepo();
+  });
+
+  afterEach(async () => {
+    await repo.cleanup();
+  });
+
+  test("linear chain already in sync returns all skipped-clean", async () => {
+    // main -> a -> b
+    await addBranch(repo.dir, "a", "main");
+    await addBranch(repo.dir, "b", "a");
+    await setBaseBranch(repo.dir, "test", "main");
+    await setStackNode(repo.dir, "a", "test", "main");
+    await setStackNode(repo.dir, "b", "test", "a");
+
+    const plan = await planRestack(repo.dir, "test", {});
+
+    expect(plan.rebases).toHaveLength(2);
+    expect(plan.rebases.every((r) => r.status === "skipped-clean")).toBe(true);
+    expect(plan.ok).toBe(true);
+  });
+
+  test("base moved: both branches planned, snapshot uses original parent", async () => {
+    // main -> a -> b, then add a commit directly to main
+    await addBranch(repo.dir, "a", "main");
+    await addBranch(repo.dir, "b", "a");
+    await setBaseBranch(repo.dir, "test", "main");
+    await setStackNode(repo.dir, "a", "test", "main");
+    await setStackNode(repo.dir, "b", "test", "a");
+
+    const originalA = await runGit(repo.dir, "rev-parse", "a");
+
+    await runGit(repo.dir, "checkout", "main");
+    await commitFile(repo.dir, "main-extra.txt", "extra\n");
+
+    const plan = await planRestack(repo.dir, "test", {});
+
+    expect(plan.rebases).toHaveLength(2);
+    const a = plan.rebases.find((r) => r.branch === "a")!;
+    const b = plan.rebases.find((r) => r.branch === "b")!;
+    expect(a.status).toBe("planned");
+    expect(b.status).toBe("planned");
+    // b's old parent sha should match a's current (pre-rebase) SHA, since
+    // b's tree parent is a and we snapshot the parent ref at plan time.
+    expect(b.oldParentSha).toBe(originalA);
+  });
+
+  test("dry-run makes no mutation", async () => {
+    await addBranch(repo.dir, "a", "main");
+    await setBaseBranch(repo.dir, "test", "main");
+    await setStackNode(repo.dir, "a", "test", "main");
+
+    await runGit(repo.dir, "checkout", "main");
+    await commitFile(repo.dir, "main-extra.txt", "extra\n");
+
+    const aBefore = await runGit(repo.dir, "rev-parse", "a");
+    const mainBefore = await runGit(repo.dir, "rev-parse", "main");
+
+    await planRestack(repo.dir, "test", {});
+
+    const aAfter = await runGit(repo.dir, "rev-parse", "a");
+    const mainAfter = await runGit(repo.dir, "rev-parse", "main");
+
+    expect(aAfter).toBe(aBefore);
+    expect(mainAfter).toBe(mainBefore);
   });
 });
