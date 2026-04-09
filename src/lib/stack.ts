@@ -46,7 +46,7 @@ export async function runGitCommand(
 }
 
 /** Run `git config` with given args, return trimmed stdout or undefined on failure. */
-async function gitConfig(
+export async function gitConfig(
   dir: string,
   ...args: string[]
 ): Promise<string | undefined> {
@@ -68,7 +68,7 @@ async function gitConfigSet(
 }
 
 /** Run `git config --get-regexp <pattern>`, return parsed lines as [key, value] pairs. */
-async function gitConfigGetRegexp(
+export async function gitConfigGetRegexp(
   dir: string,
   pattern: string,
 ): Promise<Array<[string, string]>> {

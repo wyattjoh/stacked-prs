@@ -359,6 +359,23 @@ multiple roots.
 14. Execute nav plan via `nav.ts`
 15. `git branch -d <merged-branch>`
 
+### `clean`
+
+Detect and remove stale stack/branch config entries (orphaned branches, missing
+parents, empty stacks, stale resume-state).
+
+**Flags:** `--stack-name=<name>`, `--confirm`, `--json`
+
+1. Run `cli.ts clean [--stack-name=<name>] --json` (read-only, no gate needed)
+   to get the structured report.
+2. **No-op check:** if `findings` is empty, report "No stale config found" and
+   stop.
+3. **Present plan:** show each finding with its kind, subject (branch or stack),
+   details, and the config keys that would be removed.
+4. **Wait for confirmation.**
+5. Run `cli.ts clean [--stack-name=<name>] --confirm` to apply.
+6. Report the removed keys.
+
 ### `help`
 
 Display available commands with ASCII diagrams.
@@ -486,6 +503,7 @@ command.
 - `deno run ... cli.ts nav --dry-run`
 - `deno run ... cli.ts verify-refs`
 - `deno run ... cli.ts restack --dry-run` (with or without `--json`)
+- `deno run ... cli.ts clean --json` (report-only; `--confirm` mutates)
 
 **If the plan changes mid-execution** (e.g., rebase conflicts), pause and
 re-present the remaining operations before continuing.
@@ -582,6 +600,19 @@ deno run --allow-run=git,gh --allow-env --allow-read ${CLAUDE_PLUGIN_ROOT}/src/c
 Computes the full submit plan for a stack: which PRs need creating, which need
 base updates, and what nav comment changes are needed. Iterates nodes in DFS
 order. Returns JSON with per-branch actions and an `isNoOp` flag.
+
+### `clean`
+
+```bash
+deno run --allow-run=git,gh --allow-env --allow-read ${CLAUDE_PLUGIN_ROOT}/src/cli.ts clean \
+  [--stack-name=<name>] [--confirm] [--json]
+```
+
+Detects four classes of stale git config: orphaned branch entries (config
+references a deleted ref), stale stack-parent (parent ref does not exist), empty
+stacks (stack metadata with no member branches), and stale resume-state (resume
+marker but no rebase in progress). Default: print report and prompt to apply.
+Pass `--confirm` for non-interactive use. Pass `--json` for structured output.
 
 ### Config operations
 

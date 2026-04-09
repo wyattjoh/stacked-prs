@@ -8,6 +8,7 @@ import { buildNavPlan, executeNavAction } from "./commands/nav.ts";
 import { verifyRefs } from "./commands/verify-refs.ts";
 import { discoverChain } from "./commands/import-discover.ts";
 import { computeSubmitPlan } from "./commands/submit-plan.ts";
+import { applyClean, detectStaleConfig } from "./commands/clean.ts";
 
 /** Resolve stack name from current branch's git config, with --stack-name override. */
 async function resolveStackName(
@@ -367,5 +368,83 @@ await new Command()
     const { owner, repo } = await resolveRepo(options.owner, options.repo);
     const plan = await computeSubmitPlan(dir, stackName, owner, repo);
     console.log(JSON.stringify(plan, null, 2));
+  })
+  // --- clean ---
+  .command("clean", "Detect and remove stale stack/branch config entries")
+  .option("--stack-name <name:string>", "Limit to a single stack")
+  .option(
+    "--confirm",
+    "Apply cleanups without prompting (for non-interactive use)",
+  )
+  .option("--json", "Output as JSON")
+  .action(async (options) => {
+    const report = await detectStaleConfig(dir, {
+      stackName: options.stackName,
+    });
+
+    if (options.json && !options.confirm) {
+      // Dry-run JSON: just the report.
+      console.log(JSON.stringify(report, null, 2));
+      return;
+    }
+
+    if (report.findings.length === 0) {
+      if (options.json) {
+        console.log(
+          JSON.stringify(
+            { ...report, applied: { removed: [], applied: [] } },
+            null,
+            2,
+          ),
+        );
+      } else {
+        console.log(
+          `No stale config found (scanned ${report.stacksScanned} stack(s), ${report.branchesScanned} branch entry/entries).`,
+        );
+      }
+      return;
+    }
+
+    if (!options.json) {
+      console.log(
+        `Found ${report.findings.length} stale config entry/entries:\n`,
+      );
+      for (const f of report.findings) {
+        const subject = f.branch ?? f.stackName ?? "?";
+        console.log(`  [${f.kind}] ${subject}`);
+        console.log(`    ${f.details}`);
+        console.log(`    keys: ${f.configKeys.join(", ")}`);
+        console.log("");
+      }
+    }
+
+    if (!options.confirm) {
+      if (!Deno.stdin.isTerminal()) {
+        console.error(
+          "Cannot prompt in non-interactive mode. Pass --confirm to apply, or --json to inspect.",
+        );
+        Deno.exit(1);
+      }
+      const answer = prompt(
+        `Apply ${report.findings.length} cleanup(s)? [y/N]`,
+      );
+      if (answer?.trim().toLowerCase() !== "y") {
+        console.log("Aborted. No changes made.");
+        return;
+      }
+    }
+
+    const applyResult = await applyClean(dir, report.findings);
+
+    if (options.json) {
+      console.log(
+        JSON.stringify({ ...report, applied: applyResult }, null, 2),
+      );
+    } else {
+      console.log(`Removed ${applyResult.removed.length} config key(s):`);
+      for (const key of applyResult.removed) {
+        console.log(`  ${key}`);
+      }
+    }
   })
   .parse(Deno.args);

@@ -31,6 +31,7 @@ src/
 │   ├── worktrees.ts            # Pre-flight worktree safety reader (git worktree list + status)
 │   └── testdata/helpers.ts     # Test utilities (createTestRepo, addBranch, commitFile)
 ├── commands/
+│   ├── clean.ts                # Stale config detection and removal
 │   ├── config.ts               # Metadata mutations (library, not a CLI subcommand)
 │   ├── status.ts               # Stack state + PR info
 │   ├── restack.ts              # Per-branch topological rebase
@@ -84,8 +85,9 @@ deno task install
 ```
 
 Subcommands: `status` (add `-i`/`--interactive` to launch the TUI), `restack`,
-`nav`, `verify-refs`, `import-discover`, `submit-plan`. `commands/config.ts` is
-a library; import its functions, do not try to invoke it via `cli.ts`.
+`nav`, `verify-refs`, `import-discover`, `submit-plan`, `clean`.
+`commands/config.ts` is a library; import its functions, do not try to invoke it
+via `cli.ts`.
 
 ## Architecture
 
@@ -124,6 +126,7 @@ can be continued across process invocations.
 | --------------------------------- | ------------------------------------------ | ------------------------------------------------ |
 | `src/lib/stack.ts`                | Library only, not a CLI                    | Imported by all other scripts                    |
 | `src/lib/gh.ts`                   | Library only, not a CLI                    | Imported by scripts needing GitHub data          |
+| `src/commands/clean.ts`           | Stale config detection and removal         | `cli.ts clean [--confirm] [--json]`              |
 | `src/commands/config.ts`          | Library functions for metadata mutations   | Imported by other commands                       |
 | `src/commands/status.ts`          | Read stack state + PR info                 | `cli.ts status [--json]`                         |
 | `src/commands/restack.ts`         | Per-branch topological rebase              | `cli.ts restack [--dry-run] [--json] [--resume]` |
