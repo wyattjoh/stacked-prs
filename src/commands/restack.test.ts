@@ -734,3 +734,159 @@ describe("executeRestack (resume)", () => {
     expect(threw).toBe(true);
   });
 });
+
+describe("executeRestack (filters)", () => {
+  let repo: TestRepo;
+
+  beforeEach(async () => {
+    repo = await createTestRepo();
+  });
+
+  afterEach(async () => {
+    await repo.cleanup();
+  });
+
+  test("--upstack-from rebases the target subtree, leaves ancestors alone", async () => {
+    // main -> a -> b -> c. Advance main so all three become stale, then scope
+    // the restack to `b`'s upstack (b and c). `a` must stay untouched.
+    await addBranch(repo.dir, "a", "main");
+    await addBranch(repo.dir, "b", "a");
+    await addBranch(repo.dir, "c", "b");
+    await setBaseBranch(repo.dir, "test", "main");
+    await setStackNode(repo.dir, "a", "test", "main");
+    await setStackNode(repo.dir, "b", "test", "a");
+    await setStackNode(repo.dir, "c", "test", "b");
+
+    await setupFakeOrigin(repo.dir);
+    await runGit(repo.dir, "checkout", "main");
+    await commitFile(repo.dir, "main-extra.txt", "extra\n");
+    await runGit(repo.dir, "push", "origin", "main");
+    await runGit(repo.dir, "reset", "--hard", "HEAD~1");
+
+    const aBefore = await runGit(repo.dir, "rev-parse", "a");
+
+    const result = await executeRestack(repo.dir, "test", { upstackFrom: "b" });
+
+    expect(result.ok).toBe(true);
+    expect(result.rebases.map((r) => r.branch)).toEqual(["b", "c"]);
+
+    const aAfter = await runGit(repo.dir, "rev-parse", "a");
+    expect(aAfter).toBe(aBefore);
+  });
+
+  test("--upstack-from on a forked tree includes all descendants", async () => {
+    // main -> auth -> auth-a
+    //              -> auth-b
+    // Scope to `auth`; both auth-a and auth-b must be in scope, auth too.
+    await addBranch(repo.dir, "auth", "main");
+    await addBranch(repo.dir, "auth-a", "auth");
+    await addBranch(repo.dir, "auth-b", "auth");
+    await setBaseBranch(repo.dir, "test", "main");
+    await setStackNode(repo.dir, "auth", "test", "main");
+    await setStackNode(repo.dir, "auth-a", "test", "auth");
+    await setStackNode(repo.dir, "auth-b", "test", "auth");
+
+    await setupFakeOrigin(repo.dir);
+    await runGit(repo.dir, "checkout", "main");
+    await commitFile(repo.dir, "main-extra.txt", "extra\n");
+    await runGit(repo.dir, "push", "origin", "main");
+    await runGit(repo.dir, "reset", "--hard", "HEAD~1");
+
+    const result = await executeRestack(repo.dir, "test", {
+      upstackFrom: "auth",
+    });
+
+    expect(result.ok).toBe(true);
+    const branches = result.rebases.map((r) => r.branch).sort();
+    expect(branches).toEqual(["auth", "auth-a", "auth-b"]);
+  });
+
+  test("--downstack-from rebases the path from root to the target", async () => {
+    // main -> a -> b -> c. Scope to `b`'s downstack (a and b). `c` must stay
+    // untouched.
+    await addBranch(repo.dir, "a", "main");
+    await addBranch(repo.dir, "b", "a");
+    await addBranch(repo.dir, "c", "b");
+    await setBaseBranch(repo.dir, "test", "main");
+    await setStackNode(repo.dir, "a", "test", "main");
+    await setStackNode(repo.dir, "b", "test", "a");
+    await setStackNode(repo.dir, "c", "test", "b");
+
+    await setupFakeOrigin(repo.dir);
+    await runGit(repo.dir, "checkout", "main");
+    await commitFile(repo.dir, "main-extra.txt", "extra\n");
+    await runGit(repo.dir, "push", "origin", "main");
+    await runGit(repo.dir, "reset", "--hard", "HEAD~1");
+
+    const cBefore = await runGit(repo.dir, "rev-parse", "c");
+
+    const result = await executeRestack(repo.dir, "test", {
+      downstackFrom: "b",
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.rebases.map((r) => r.branch)).toEqual(["a", "b"]);
+
+    const cAfter = await runGit(repo.dir, "rev-parse", "c");
+    expect(cAfter).toBe(cBefore);
+  });
+
+  test("--only rebases just the named branch", async () => {
+    // main -> a -> b -> c. Scope to `a`. Neither `b` nor `c` may move.
+    await addBranch(repo.dir, "a", "main");
+    await addBranch(repo.dir, "b", "a");
+    await addBranch(repo.dir, "c", "b");
+    await setBaseBranch(repo.dir, "test", "main");
+    await setStackNode(repo.dir, "a", "test", "main");
+    await setStackNode(repo.dir, "b", "test", "a");
+    await setStackNode(repo.dir, "c", "test", "b");
+
+    await setupFakeOrigin(repo.dir);
+    await runGit(repo.dir, "checkout", "main");
+    await commitFile(repo.dir, "main-extra.txt", "extra\n");
+    await runGit(repo.dir, "push", "origin", "main");
+    await runGit(repo.dir, "reset", "--hard", "HEAD~1");
+
+    const bBefore = await runGit(repo.dir, "rev-parse", "b");
+    const cBefore = await runGit(repo.dir, "rev-parse", "c");
+
+    const result = await executeRestack(repo.dir, "test", { only: "a" });
+
+    expect(result.ok).toBe(true);
+    expect(result.rebases.map((r) => r.branch)).toEqual(["a"]);
+
+    const bAfter = await runGit(repo.dir, "rev-parse", "b");
+    const cAfter = await runGit(repo.dir, "rev-parse", "c");
+    expect(bAfter).toBe(bBefore);
+    expect(cAfter).toBe(cBefore);
+  });
+
+  test("--upstack-from with a non-existent branch produces no rebases", async () => {
+    await addBranch(repo.dir, "a", "main");
+    await addBranch(repo.dir, "b", "a");
+    await setBaseBranch(repo.dir, "test", "main");
+    await setStackNode(repo.dir, "a", "test", "main");
+    await setStackNode(repo.dir, "b", "test", "a");
+
+    await setupFakeOrigin(repo.dir);
+    await runGit(repo.dir, "checkout", "main");
+    await commitFile(repo.dir, "main-extra.txt", "extra\n");
+    await runGit(repo.dir, "push", "origin", "main");
+    await runGit(repo.dir, "reset", "--hard", "HEAD~1");
+
+    const aBefore = await runGit(repo.dir, "rev-parse", "a");
+    const bBefore = await runGit(repo.dir, "rev-parse", "b");
+
+    const result = await executeRestack(repo.dir, "test", {
+      upstackFrom: "does-not-exist",
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.rebases).toHaveLength(0);
+
+    const aAfter = await runGit(repo.dir, "rev-parse", "a");
+    const bAfter = await runGit(repo.dir, "rev-parse", "b");
+    expect(aAfter).toBe(aBefore);
+    expect(bAfter).toBe(bBefore);
+  });
+});
