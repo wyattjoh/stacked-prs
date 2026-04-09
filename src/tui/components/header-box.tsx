@@ -14,9 +14,10 @@ export interface HeaderBoxProps {
 
 /**
  * Three-line boxed header rendered above the stack map. Shows only the
- * currently active view (not the full tab list). Border color signals focus
- * and uses the active stack's color when the header is focused and a stack
- * tab is active; muted gray otherwise.
+ * currently active view (not the full tab list). Border color matches the
+ * body wrapper: primary (white on dark, black on light) when focused, muted
+ * gray otherwise. The active stack's identity color shows up on the `●` dot
+ * and in the stack label's color accent instead of on the border.
  *
  * Renders in exactly 3 rows: top border + content line + bottom border.
  * `app.tsx` reserves 3 rows of chrome for it.
@@ -36,10 +37,9 @@ export function HeaderBox(props: HeaderBoxProps): React.ReactElement {
       color: props.colorByStack.get(props.activeTab.stack) ?? "gray",
     };
 
-  // Border: active stack color when focused on a stack tab; gray otherwise.
-  const borderColor = props.focused && active.kind === "stack"
-    ? active.color
-    : "gray";
+  // Border: primary focus color when focused (matches the body wrapper),
+  // gray otherwise. The active stack color lives on the `●` dot instead.
+  const borderColor = props.focused ? props.primaryColor : "gray";
 
   return (
     <Box
