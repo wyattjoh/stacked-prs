@@ -7,6 +7,7 @@ export interface TabBarProps {
   activeTab: TabId;
   loadingCount: number;
   totalLoadCount: number;
+  focused?: boolean;
 }
 
 function isActive(active: TabId, tab: TabId): boolean {
@@ -18,16 +19,31 @@ function isActive(active: TabId, tab: TabId): boolean {
 export function TabBar(props: TabBarProps): React.ReactElement {
   const tabs: TabId[] = ["all", ...props.stacks.map((s) => ({ stack: s }))];
 
+  // The tab bar must render as exactly one row: `app.tsx` reserves a fixed
+  // single line of chrome for it when computing the stack-map viewport
+  // height, and the cursor-follow scroll effect breaks if the tab bar wraps.
+  // `overflowX="hidden"` + `flexShrink={0}` on every child keeps long tab
+  // labels on one line and lets the right edge get clipped instead of wrapped.
   return (
-    <Box flexDirection="row" justifyContent="space-between">
-      <Box flexDirection="row">
-        <Text>stacked-prs</Text>
+    <Box
+      flexDirection="row"
+      justifyContent="space-between"
+      overflowX="hidden"
+      height={1}
+      flexShrink={0}
+    >
+      <Box flexDirection="row" flexShrink={0}>
+        <Box flexShrink={0}>
+          <Text bold={props.focused} wrap="truncate-end">
+            {props.focused ? "▶ stacked-prs" : "  stacked-prs"}
+          </Text>
+        </Box>
         {tabs.map((tab, i) => {
           const label = tab === "all" ? "[All]" : tab.stack;
           const active = isActive(props.activeTab, tab);
           return (
-            <Box key={i}>
-              <Text inverse={active}>
+            <Box key={i} flexShrink={0}>
+              <Text inverse={active} wrap="truncate-end">
                 {" "}
                 {label}
               </Text>
@@ -36,9 +52,11 @@ export function TabBar(props: TabBarProps): React.ReactElement {
         })}
       </Box>
       {props.loadingCount > 0 && (
-        <Text dimColor>
-          loading PRs {props.loadingCount}/{props.totalLoadCount}
-        </Text>
+        <Box flexShrink={0}>
+          <Text dimColor wrap="truncate-end">
+            loading PRs {props.loadingCount}/{props.totalLoadCount}
+          </Text>
+        </Box>
       )}
     </Box>
   );

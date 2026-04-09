@@ -22,6 +22,9 @@ export function initialState(): State {
     theme: "dark",
     terminalTooNarrow: false,
     currentBranch: null,
+    focusedSection: "body",
+    detailScroll: { scrollX: 0, scrollY: 0 },
+    notice: null,
   };
 }
 
@@ -100,7 +103,11 @@ export function reducer(state: State, action: Action): State {
       return { ...state, commits };
     }
     case "CURSOR_SET":
-      return { ...state, cursor: action.cursor };
+      return {
+        ...state,
+        cursor: action.cursor,
+        detailScroll: { scrollX: 0, scrollY: 0 },
+      };
     case "TAB_SWITCH": {
       const cursorByTab = new Map(state.cursorByTab);
       if (state.cursor) {
@@ -131,6 +138,17 @@ export function reducer(state: State, action: Action): State {
       return { ...state, showHelp: !state.showHelp };
     case "TERMINAL_SIZE":
       return { ...state, terminalTooNarrow: action.tooNarrow };
+    case "FOCUS_SET":
+      return { ...state, focusedSection: action.section };
+    case "DETAIL_SCROLL":
+      return { ...state, detailScroll: action.viewport };
+    case "NOTICE_SHOW": {
+      const id = (state.notice?.id ?? 0) + 1;
+      return { ...state, notice: { id, message: action.message } };
+    }
+    case "NOTICE_CLEAR":
+      if (!state.notice || state.notice.id !== action.id) return state;
+      return { ...state, notice: null };
     case "ERROR_LOG":
       return {
         ...state,

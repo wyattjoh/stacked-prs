@@ -2,13 +2,16 @@ import React from "react";
 import { Box, Text } from "ink";
 import type { CommitsCellState, PrCellState, SyncStatus } from "../types.ts";
 
-const MAX_COMMITS = 6;
+const VISIBLE_COMMITS = 5;
 
 export interface DetailPaneProps {
   branch: string | null;
   prCell: PrCellState | undefined;
   syncStatus: SyncStatus | undefined;
   commitsCell: CommitsCellState | undefined;
+  focused?: boolean;
+  scrollX?: number;
+  scrollY?: number;
 }
 
 function headerLine(
@@ -32,15 +35,24 @@ function headerLine(
 }
 
 export function DetailPane(props: DetailPaneProps): React.ReactElement {
+  const borderColor = props.focused ? "cyan" : undefined;
+
   if (!props.branch) {
     return (
-      <Box borderStyle="single" flexDirection="column" height={3}>
+      <Box
+        borderStyle="single"
+        borderColor={borderColor}
+        flexDirection="column"
+        height={3}
+      >
         <Text dimColor>no branch selected</Text>
       </Box>
     );
   }
 
   const header = headerLine(props.branch, props.prCell, props.syncStatus);
+  const scrollX = Math.max(0, props.scrollX ?? 0);
+  const scrollY = Math.max(0, props.scrollY ?? 0);
 
   let body: React.ReactNode;
   if (!props.commitsCell || props.commitsCell.status === "loading") {
@@ -49,24 +61,34 @@ export function DetailPane(props: DetailPaneProps): React.ReactElement {
     body = <Text dimColor>error loading commits</Text>;
   } else {
     const commits = props.commitsCell.commits;
-    const shown = commits.slice(0, MAX_COMMITS);
-    const extra = commits.length - shown.length;
+    const start = Math.min(scrollY, Math.max(0, commits.length - 1));
+    const shown = commits.slice(start, start + VISIBLE_COMMITS);
+    const above = start;
+    const below = Math.max(0, commits.length - (start + shown.length));
     body = (
       <Box flexDirection="column">
-        {shown.map((c, i) => (
-          <Box key={i}>
-            <Text>
-              {c.sha} {c.subject}
-            </Text>
-          </Box>
-        ))}
-        {extra > 0 && <Text dimColor>... {extra} more</Text>}
+        {above > 0 && <Text dimColor>↑ {above} more</Text>}
+        {shown.map((c, i) => {
+          const line = `${c.sha} ${c.subject}`;
+          const clipped = scrollX > 0 ? line.slice(scrollX) : line;
+          return (
+            <Box key={i}>
+              <Text>{clipped}</Text>
+            </Box>
+          );
+        })}
+        {below > 0 && <Text dimColor>↓ {below} more</Text>}
       </Box>
     );
   }
 
   return (
-    <Box borderStyle="single" flexDirection="column" height={8}>
+    <Box
+      borderStyle="single"
+      borderColor={borderColor}
+      flexDirection="column"
+      height={8}
+    >
       <Text>{header}</Text>
       {body}
     </Box>

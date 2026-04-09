@@ -11,6 +11,11 @@ import {
   readColorOverrides,
 } from "../lib/colors.ts";
 import {
+  branchNameContentX,
+  computeScrollX,
+  computeScrollY,
+} from "./lib/scroll.ts";
+import {
   moveDown,
   moveLeft,
   moveRight,
@@ -31,6 +36,22 @@ export interface AppProps {
   dir: string;
   theme?: "light" | "dark";
 }
+
+/**
+ * Fixed chrome reserved around the stack-map viewport: tab bar (1) + detail
+ * pane (8, hard-coded in `DetailPane`) + status bar (1). The optional
+ * gh-unavailable warning adds one more line, applied on top of this base.
+ */
+const CHROME_HEIGHT_BASE = 1 + 8 + 1;
+
+/**
+ * Minimum stack-map viewport height. Each branch row is 2 lines (name +
+ * info), so 2 is the smallest value that can fit the cursor's row. The
+ * cursor-follow scroll logic falls back to cursor-only visibility when the
+ * stack is taller than the viewport, so this is all we need to guarantee
+ * the selected branch stays on screen.
+ */
+const MIN_STACK_MAP_HEIGHT = 2;
 
 function parentOf(state: State, branch: string): string | null {
   for (const tree of state.trees) {
@@ -139,11 +160,19 @@ export function App(props: AppProps): React.ReactElement {
   // and update the too-narrow guard on the same resize event.
   useEffect(() => {
     const minWidth = 40;
+    // Minimum rows required to fit the fixed chrome (tab bar + detail pane +
+    // status bar = 10) plus at least one 2-line branch row in the stack-map
+    // viewport. Below this, the cursor-follow scroll logic can't guarantee
+    // the selected branch stays visible, so we bail out with a message.
+    const minHeight = CHROME_HEIGHT_BASE + MIN_STACK_MAP_HEIGHT;
     const check = () => {
       const cols = stdout?.columns ?? 80;
       const rows = stdout?.rows ?? 24;
       setTermSize({ cols, rows });
-      dispatch({ type: "TERMINAL_SIZE", tooNarrow: cols < minWidth });
+      dispatch({
+        type: "TERMINAL_SIZE",
+        tooNarrow: cols < minWidth || rows < minHeight,
+      });
     };
     check();
     stdout?.on("resize", check);
@@ -159,92 +188,86 @@ export function App(props: AppProps): React.ReactElement {
     : state.trees.filter((t: StackTree) =>
       t.stackName === (state.activeTab as { stack: string }).stack
     );
+  // Ordered stack names + a stable string key so effects can depend on the
+  // visible-stack set without re-running on every unrelated state change.
+  const visibleStackNames = visibleTrees.map((t) => t.stackName);
+  const visibleStacksKey = visibleStackNames.join("\x00");
 
   // Height reserved for the StackMap, computed from the terminal size minus
-  // the fixed chrome around it: tab bar (1), optional gh-warning (1),
-  // detail pane (8, fixed in DetailPane), status bar (1).
+  // the fixed chrome around it. Keep this in sync with `CHROME_HEIGHT_BASE`
+  // and the one-line guarantees in `TabBar` + the status bar `<Box>` below.
+  // If either of those wraps, this math drifts and the cursor-follow scroll
+  // effect can put the selected branch outside the visible region.
   const stackMapHeight = Math.max(
-    3,
-    termSize.rows - 1 - (state.ghUnavailable ? 1 : 0) - 8 - 1,
+    MIN_STACK_MAP_HEIGHT,
+    termSize.rows - CHROME_HEIGHT_BASE - (state.ghUnavailable ? 1 : 0),
   );
 
-  // Keep the cursor's approximate x position inside the visible viewport.
-  // In the ladder layout, a row's x extent is `depth*3` for the prefix plus
-  // the branch name. That's a coarse proxy but enough to drive horizontal
-  // scroll when a deeply-nested branch falls off the right edge.
+  // Auto-dismiss transient notices after a short delay. Re-runs whenever a
+  // new notice is raised (tracked by `id`) so back-to-back notices extend
+  // the visible window instead of cutting each other off.
+  useEffect(() => {
+    const current = state.notice;
+    if (!current) return;
+    const timer = setTimeout(() => {
+      dispatch({ type: "NOTICE_CLEAR", id: current.id });
+    }, 2500);
+    return () => clearTimeout(timer);
+  }, [state.notice?.id]);
+
+  // Keep the cursor's branch name fully visible horizontally. The content
+  // x of a branch name is `stackCount * 3` (contentPrefix filler) plus
+  // `depth * 3` (ladder rails + corner) — see `branchNameContentX` for the
+  // single source of truth. Using just `depth * 3` here, as we did before,
+  // clipped the cursor's trailing characters whenever the content row was
+  // wider than the terminal. `computeScrollX` encapsulates the minimal-
+  // movement policy so it's unit-testable in isolation.
   useEffect(() => {
     if (!state.cursor) return;
     const cell = state.grid.byBranch.get(state.cursor.branch);
     if (!cell) return;
-    const x = cell.depth * 3;
-    const right = x + cell.branch.length;
-    const viewportW = termSize.cols;
-    setScrollX((prev: number) => {
-      if (x < prev) return Math.max(0, x);
-      if (right > prev + viewportW) return Math.max(0, right - viewportW);
-      return prev;
-    });
-  }, [state.cursor?.branch, termSize.cols, state.grid]);
+    const stackCount = visibleTrees.length;
+    const cursorX = branchNameContentX(stackCount, cell.depth);
+    setScrollX((prev: number) =>
+      computeScrollX({
+        cursorX,
+        cursorWidth: cell.branch.length,
+        viewportWidth: termSize.cols,
+        prev,
+      })
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    state.cursor?.branch,
+    termSize.cols,
+    state.grid,
+    visibleStacksKey,
+  ]);
 
-  // Keep the cursor's vertical position inside the StackMap viewport. Each
-  // branch occupies 2 lines (name + info) plus 1 rail line if it isn't the
-  // last branch of its stack. The shared `main` label and initial trunk
-  // row add 2 lines at the top; each stack adds 1 header row before its
-  // branches; a gap row sits between adjacent stacks. This must match
-  // StackBand/StackMap rendering exactly, otherwise the scroll offset
-  // drifts.
-  //
-  // Scroll rules:
-  // - Scrolling up snaps to `max(0, headerY - 2)` so the stack header and
-  //   two rows of context above it stay visible. For the first stack that
-  //   means the shared `main` label is visible too.
-  // - Scrolling down moves minimally to keep the cursor's 2-line row in
-  //   view. For very long stacks the header may scroll off the top once
-  //   the cursor moves past `stackMapHeight` rows into the stack.
-  // - If the context target would hide the cursor (stack longer than the
-  //   viewport), fall back to cursor-only visibility.
+  // Keep the cursor's vertical position inside the StackMap viewport. The
+  // actual math lives in `lib/scroll.ts` so it can be unit-tested against
+  // synthetic grids; this effect just wires it to the live state and the
+  // resize handler. The dep list covers every input `computeScrollY` reads
+  // so a cursor move, resize, tab switch, or grid reload all re-scroll.
   useEffect(() => {
-    if (!state.cursor) return;
-    const cursorBranch = state.cursor.branch;
-    let y = 0;
-    let cursorY = -1;
-    let headerY = -1;
-    if (visibleTrees.length > 0) y += 2; // main + initial trunk
-    for (let s = 0; s < visibleTrees.length; s++) {
-      const tree = visibleTrees[s];
-      const cells = [...(state.grid.byStack.get(tree.stackName) ?? [])]
-        .sort((a, b) => a.row - b.row);
-      const thisHeaderY = y;
-      y += 1; // stack header
-      for (let i = 0; i < cells.length; i++) {
-        if (cells[i].branch === cursorBranch) {
-          cursorY = y;
-          headerY = thisHeaderY;
-        }
-        y += 2; // branch name + info
-        if (i < cells.length - 1) y += 1; // inter-row rail
-      }
-      if (s < visibleTrees.length - 1) y += 1; // gap row between stacks
-    }
-    if (cursorY < 0) return;
-    const cursorBottom = cursorY + 2; // cursor row is 2 lines tall
-    setScrollY((prev: number) => {
-      // Scroll up: include the stack header plus two rows of context above
-      // (which is the shared `main` label for the first stack).
-      if (cursorY < prev) {
-        const target = Math.max(0, headerY - 2);
-        if (cursorBottom - target > stackMapHeight) {
-          return Math.max(0, cursorBottom - stackMapHeight);
-        }
-        return target;
-      }
-      // Scroll down: keep cursor visible with minimal movement.
-      if (cursorBottom > prev + stackMapHeight) {
-        return Math.max(0, cursorBottom - stackMapHeight);
-      }
-      return prev;
-    });
-  }, [state.cursor?.branch, stackMapHeight, state.grid, state.activeTab]);
+    const cursorBranch = state.cursor?.branch;
+    if (!cursorBranch) return;
+    setScrollY((prev: number) =>
+      computeScrollY({
+        visibleStacks: visibleStackNames,
+        grid: state.grid,
+        cursorBranch,
+        viewportHeight: stackMapHeight,
+        prev,
+      })
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    state.cursor?.branch,
+    stackMapHeight,
+    state.grid,
+    visibleStacksKey,
+  ]);
 
   useInput((input, key) => {
     if (state.showHelp && input !== "?") {
@@ -264,20 +287,123 @@ export function App(props: AppProps): React.ReactElement {
       return;
     }
 
+    // Tab cycles focus between header / body / detail. Shift-tab reverses.
+    if (key.tab) {
+      const order: Array<"header" | "body" | "detail"> = [
+        "header",
+        "body",
+        "detail",
+      ];
+      const idx = order.indexOf(state.focusedSection);
+      const nextIdx = key.shift
+        ? (idx - 1 + order.length) % order.length
+        : (idx + 1) % order.length;
+      dispatch({ type: "FOCUS_SET", section: order[nextIdx] });
+      return;
+    }
+
+    // Global actions (work from any focused section).
+    if (input === "r") {
+      doInitialLoad().catch(() => {});
+      return;
+    }
+    if (input === "p") {
+      if (!state.cursor) return;
+      const branch = state.cursor.branch;
+      const prCell = state.prData.get(branch);
+      if (prCell?.status === "loaded" && prCell.pr) {
+        gh("pr", "view", "--web", String(prCell.pr.number)).catch(() => {});
+        return;
+      }
+      const message = prCell?.status === "loading"
+        ? `PR info still loading for ${branch}`
+        : prCell?.status === "error"
+        ? `PR lookup failed for ${branch}`
+        : `No PR to open for ${branch}`;
+      dispatch({ type: "NOTICE_SHOW", message });
+      return;
+    }
+    if (input === "b") {
+      if (!state.cursor) return;
+      const branch = state.cursor.branch;
+      copyToClipboard(branch).then((ok) => {
+        dispatch({
+          type: "NOTICE_SHOW",
+          message: ok
+            ? `Copied ${branch} to clipboard`
+            : `Failed to copy ${branch} to clipboard`,
+        });
+      }).catch(() => {
+        dispatch({
+          type: "NOTICE_SHOW",
+          message: `Failed to copy ${branch} to clipboard`,
+        });
+      });
+      return;
+    }
+
+    // Section-specific arrow handling.
+    if (state.focusedSection === "header") {
+      if (key.leftArrow || key.rightArrow) {
+        const tabs: TabId[] = [
+          "all",
+          ...state.trees.map((t: StackTree): TabId => ({
+            stack: t.stackName,
+          })),
+        ];
+        if (tabs.length === 0) return;
+        const currentIdx = tabs.findIndex((t) =>
+          t === "all"
+            ? state.activeTab === "all"
+            : state.activeTab !== "all" && state.activeTab.stack === t.stack
+        );
+        const nextIdx = key.leftArrow
+          ? (currentIdx - 1 + tabs.length) % tabs.length
+          : (currentIdx + 1) % tabs.length;
+        dispatch({ type: "TAB_SWITCH", tab: tabs[nextIdx] });
+      }
+      return;
+    }
+
+    if (state.focusedSection === "detail") {
+      const { scrollX: dx, scrollY: dy } = state.detailScroll;
+      if (key.upArrow) {
+        dispatch({
+          type: "DETAIL_SCROLL",
+          viewport: { scrollX: dx, scrollY: Math.max(0, dy - 1) },
+        });
+      } else if (key.downArrow) {
+        dispatch({
+          type: "DETAIL_SCROLL",
+          viewport: { scrollX: dx, scrollY: dy + 1 },
+        });
+      } else if (key.leftArrow) {
+        dispatch({
+          type: "DETAIL_SCROLL",
+          viewport: { scrollX: Math.max(0, dx - 1), scrollY: dy },
+        });
+      } else if (key.rightArrow) {
+        dispatch({
+          type: "DETAIL_SCROLL",
+          viewport: { scrollX: dx + 1, scrollY: dy },
+        });
+      }
+      return;
+    }
+
+    // Body section: navigate branches in the stack tree.
     if (!state.cursor) return;
     const grid = state.grid;
     const cursor = state.cursor;
 
-    if (key.leftArrow || input === "h") {
+    if (key.leftArrow) {
       dispatch({ type: "CURSOR_SET", cursor: moveLeft(grid, cursor) });
-    } else if (key.rightArrow || input === "l") {
+    } else if (key.rightArrow) {
       dispatch({ type: "CURSOR_SET", cursor: moveRight(grid, cursor) });
-    } else if (key.upArrow || input === "k") {
+    } else if (key.upArrow) {
       dispatch({ type: "CURSOR_SET", cursor: moveUp(grid, cursor) });
-    } else if (key.downArrow || input === "j") {
+    } else if (key.downArrow) {
       dispatch({ type: "CURSOR_SET", cursor: moveDown(grid, cursor) });
-    } else if (input === "r" || input === "R") {
-      doInitialLoad().catch(() => {});
     } else if (input === "g") {
       const c = grid.byBranch.get(cursor.branch);
       if (c) {
@@ -290,7 +416,7 @@ export function App(props: AppProps): React.ReactElement {
         const target = moveToStackEnd(grid, c.stackName);
         if (target) dispatch({ type: "CURSOR_SET", cursor: target });
       }
-    } else if (input === "[" || key.pageUp) {
+    } else if (key.pageUp) {
       const stackNames = [...grid.byStack.keys()];
       const c = grid.byBranch.get(cursor.branch);
       if (c) {
@@ -300,7 +426,7 @@ export function App(props: AppProps): React.ReactElement {
           if (target) dispatch({ type: "CURSOR_SET", cursor: target });
         }
       }
-    } else if (input === "]" || key.pageDown) {
+    } else if (key.pageDown) {
       const stackNames = [...grid.byStack.keys()];
       const c = grid.byBranch.get(cursor.branch);
       if (c) {
@@ -310,48 +436,16 @@ export function App(props: AppProps): React.ReactElement {
           if (target) dispatch({ type: "CURSOR_SET", cursor: target });
         }
       }
-    } else if (key.tab) {
-      const tabs: TabId[] = [
-        "all",
-        ...state.trees.map((t: StackTree): TabId => ({ stack: t.stackName })),
-      ];
-      const currentIdx = tabs.findIndex((t) =>
-        t === "all"
-          ? state.activeTab === "all"
-          : state.activeTab !== "all" && state.activeTab.stack === t.stack
-      );
-      const nextIdx = key.shift
-        ? (currentIdx - 1 + tabs.length) % tabs.length
-        : (currentIdx + 1) % tabs.length;
-      dispatch({ type: "TAB_SWITCH", tab: tabs[nextIdx] });
-    } else if (/^[1-9]$/.test(input)) {
-      const idx = Number.parseInt(input, 10) - 1;
-      const tabs: TabId[] = [
-        "all",
-        ...state.trees.map((t: StackTree): TabId => ({ stack: t.stackName })),
-      ];
-      if (idx < tabs.length) {
-        dispatch({ type: "TAB_SWITCH", tab: tabs[idx] });
-      }
-    } else if (input === "o") {
-      const prCell = state.prData.get(cursor.branch);
-      if (prCell?.status === "loaded" && prCell.pr) {
-        gh("pr", "view", "--web", String(prCell.pr.number)).catch(() => {});
-      }
-    } else if (input === "y") {
-      copyToClipboard(cursor.branch).catch(() => {});
-    } else if (input === "Y") {
-      const prCell = state.prData.get(cursor.branch);
-      if (prCell?.status === "loaded" && prCell.pr) {
-        copyToClipboard(prCell.pr.url).catch(() => {});
-      }
     }
   });
 
   if (state.terminalTooNarrow) {
+    const minHeight = CHROME_HEIGHT_BASE + MIN_STACK_MAP_HEIGHT;
     return (
       <Box flexDirection="column" padding={1}>
-        <Text>terminal too narrow (need at least 40 cols)</Text>
+        <Text>
+          terminal too small (need at least 40 cols, {minHeight} rows)
+        </Text>
       </Box>
     );
   }
@@ -381,6 +475,7 @@ export function App(props: AppProps): React.ReactElement {
         activeTab={state.activeTab}
         loadingCount={state.loadingCount}
         totalLoadCount={state.totalLoadCount}
+        focused={state.focusedSection === "header"}
       />
       {state.ghUnavailable && (
         <Text dimColor>gh unavailable - showing topology only</Text>
@@ -411,10 +506,30 @@ export function App(props: AppProps): React.ReactElement {
               commitsCell={focusedBranch
                 ? state.commits.get(focusedBranch)
                 : undefined}
+              focused={state.focusedSection === "detail"}
+              scrollX={state.detailScroll.scrollX}
+              scrollY={state.detailScroll.scrollY}
             />
           </>
         )}
-      <Text dimColor>{buildStatusBar(termSize.cols)}</Text>
+      {
+        /* Status bar is pinned to exactly one line. `stackMapHeight` reserves
+          a single row for it, so any wrap here would desync the viewport
+          math from what is actually on screen. */
+      }
+      <Box height={1} flexShrink={0} overflowX="hidden">
+        {state.notice
+          ? (
+            <Text color="yellow" wrap="truncate-end">
+              {state.notice.message}
+            </Text>
+          )
+          : (
+            <Text dimColor wrap="truncate-end">
+              {buildStatusBar(termSize.cols)}
+            </Text>
+          )}
+      </Box>
     </Box>
   );
 }

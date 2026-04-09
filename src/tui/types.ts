@@ -72,6 +72,9 @@ export interface Cursor {
 /** "all" or a specific stack name. */
 export type TabId = "all" | { stack: string };
 
+/** Which UI section currently receives keyboard input. */
+export type FocusedSection = "header" | "body" | "detail";
+
 export interface Viewport {
   scrollX: number;
   scrollY: number;
@@ -96,6 +99,9 @@ export interface State {
   theme: ThemeName;
   terminalTooNarrow: boolean;
   currentBranch: string | null;
+  focusedSection: FocusedSection;
+  detailScroll: Viewport;
+  notice: { id: number; message: string } | null;
 }
 
 export type Action =
@@ -121,6 +127,10 @@ export type Action =
   | { type: "REFRESH_RESET"; branches: string[] }
   | { type: "HELP_TOGGLE" }
   | { type: "TERMINAL_SIZE"; tooNarrow: boolean }
+  | { type: "FOCUS_SET"; section: FocusedSection }
+  | { type: "DETAIL_SCROLL"; viewport: Viewport }
+  | { type: "NOTICE_SHOW"; message: string }
+  | { type: "NOTICE_CLEAR"; id: number }
   | { type: "ERROR_LOG"; message: string };
 
 /** Encode a TabId as a string key for Maps. */

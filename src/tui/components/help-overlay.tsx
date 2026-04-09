@@ -14,16 +14,13 @@ export interface KeyBinding {
 export const STATUS_BAR_ITEMS: KeyBinding[] = [
   { keys: "?", action: "help" },
   { keys: "q", action: "quit" },
-  { keys: "o", action: "open" },
-  { keys: "y", action: "yank" },
-  { keys: "Y", action: "yank url" },
+  { keys: "tab", action: "focus section" },
+  { keys: "←↑↓→", action: "navigate" },
+  { keys: "p", action: "open PR" },
+  { keys: "b", action: "copy branch" },
   { keys: "r", action: "refresh" },
-  { keys: "R", action: "refresh all" },
   { keys: "g/G", action: "top/bot" },
-  { keys: "[/]", action: "prev/next stack" },
-  { keys: "tab", action: "next tab" },
-  { keys: "1-9", action: "tab N" },
-  { keys: "hjkl", action: "move" },
+  { keys: "PgUp/PgDn", action: "prev/next stack" },
 ];
 
 /**
@@ -49,17 +46,13 @@ export function buildStatusBar(width: number): string {
 }
 
 export const KEY_BINDINGS: KeyBinding[] = [
-  { keys: "↑ ↓ ← →", action: "move cursor" },
-  { keys: "h j k l", action: "vim aliases for movement" },
-  { keys: "tab / shift-tab", action: "next / previous tab" },
-  { keys: "1-9", action: "jump to tab N" },
-  { keys: "r", action: "refresh current tab" },
-  { keys: "R", action: "refresh all tabs" },
-  { keys: "g / G", action: "first / last branch in stack" },
-  { keys: "[ / ] or pgup/pgdn", action: "previous / next stack" },
-  { keys: "o", action: "open focused PR in browser" },
-  { keys: "y", action: "copy branch name to clipboard" },
-  { keys: "Y", action: "copy PR URL to clipboard" },
+  { keys: "tab / shift-tab", action: "cycle focus header / body / detail" },
+  { keys: "↑ ↓ ← →", action: "navigate within focused section" },
+  { keys: "g / G", action: "first / last branch in stack (body)" },
+  { keys: "pgup / pgdn", action: "previous / next stack (body)" },
+  { keys: "p", action: "open focused PR in browser" },
+  { keys: "b", action: "copy branch name to clipboard" },
+  { keys: "r", action: "refresh all" },
   { keys: "?", action: "toggle this help" },
   { keys: "q / esc / ctrl-c", action: "quit" },
 ];
