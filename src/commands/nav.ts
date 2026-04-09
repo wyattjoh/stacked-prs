@@ -42,9 +42,14 @@ export function generateNavMarkdown(
     }
 
     const indent = "  ".repeat(depth);
-    const line = prNum === currentPrNumber
-      ? `${indent}- **#${prNum} 👈 this PR**`
-      : `${indent}- #${prNum}`;
+    let line: string;
+    if (node.merged) {
+      line = `${indent}- ~~#${prNum}~~`;
+    } else if (prNum === currentPrNumber) {
+      line = `${indent}- **#${prNum} 👈 this PR**`;
+    } else {
+      line = `${indent}- #${prNum}`;
+    }
     lines.push(line);
 
     for (const child of node.children) {
@@ -52,7 +57,10 @@ export function generateNavMarkdown(
     }
   };
 
-  for (const root of tree.roots) {
+  // Render merged roots before live roots
+  const mergedRoots = tree.roots.filter((n) => n.merged);
+  const liveRoots = tree.roots.filter((n) => !n.merged);
+  for (const root of [...mergedRoots, ...liveRoots]) {
     renderNode(root, 0);
   }
 

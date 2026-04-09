@@ -3,7 +3,7 @@ import { expect } from "@std/expect";
 import { addBranch, createTestRepo } from "../lib/testdata/helpers.ts";
 import type { TestRepo } from "../lib/testdata/helpers.ts";
 import { setBaseBranch, setStackNode } from "../lib/stack.ts";
-import type { StackTree } from "../lib/stack.ts";
+import type { StackNode, StackTree } from "../lib/stack.ts";
 import { setMockDir, writeFixture } from "../lib/gh.ts";
 import { buildNavPlan, generateNavMarkdown } from "./nav.ts";
 
@@ -178,6 +178,42 @@ describe("generateNavMarkdown", () => {
     const result = generateNavMarkdown(tree, prMap, 101);
 
     expect(result).toContain("**Stack: auth-rework**");
+  });
+
+  test("renders merged nodes with strikethrough and places them before live roots", () => {
+    const nodeA: StackNode = {
+      branch: "feature/a",
+      stackName: "my-stack",
+      parent: "main",
+      children: [],
+      merged: true,
+    };
+    const nodeB: StackNode = {
+      branch: "feature/b",
+      stackName: "my-stack",
+      parent: "main",
+      children: [],
+    };
+    const tree: StackTree = {
+      stackName: "my-stack",
+      baseBranch: "main",
+      mergeStrategy: undefined,
+      roots: [nodeA, nodeB],
+    };
+
+    const prMap = new Map<string, number>([
+      ["feature/a", 122],
+      ["feature/b", 143],
+    ]);
+
+    const result = generateNavMarkdown(tree, prMap, 143);
+
+    // Merged PR renders with strikethrough
+    expect(result).toContain("~~#122~~");
+    // Live PR renders normally
+    expect(result).toContain("**#143 👈 this PR**");
+    // Merged comes before live in the output
+    expect(result.indexOf("~~#122~~")).toBeLessThan(result.indexOf("**#143"));
   });
 });
 
