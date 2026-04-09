@@ -1,6 +1,12 @@
 import type { StackTree } from "../lib/stack.ts";
 import type { SyncStatus } from "../commands/status.ts";
 import type { ThemeName } from "../lib/colors.ts";
+import type {
+  LandPlan,
+  LandProgressEvent,
+  LandResult,
+  LandRollbackReport,
+} from "../commands/land.ts";
 
 export type { SyncStatus, ThemeName };
 
@@ -111,7 +117,22 @@ export interface State {
   focusedSection: FocusedSection;
   detailScroll: Viewport;
   notice: { id: number; message: string } | null;
+  land: LandPhase;
 }
+
+export type LandPhase =
+  | { phase: "idle" }
+  | { phase: "planning"; stackName: string }
+  | { phase: "confirming"; plan: LandPlan }
+  | { phase: "executing"; plan: LandPlan; events: LandProgressEvent[] }
+  | {
+    phase: "error";
+    plan: LandPlan | null;
+    events: LandProgressEvent[];
+    message: string;
+    rollback: LandRollbackReport | null;
+  }
+  | { phase: "done"; result: LandResult };
 
 export type Action =
   | {
@@ -141,7 +162,22 @@ export type Action =
   | { type: "DETAIL_SCROLL"; viewport: Viewport }
   | { type: "NOTICE_SHOW"; message: string }
   | { type: "NOTICE_CLEAR"; id: number }
-  | { type: "ERROR_LOG"; message: string };
+  | { type: "ERROR_LOG"; message: string }
+  | { type: "LAND_START"; stackName: string }
+  | { type: "LAND_PLAN_LOADED"; plan: LandPlan }
+  | { type: "LAND_PLAN_ERROR"; message: string }
+  | { type: "LAND_CONFIRM" }
+  | { type: "LAND_CANCEL" }
+  | { type: "LAND_PROGRESS"; event: LandProgressEvent }
+  | {
+    type: "LAND_ERROR";
+    plan: LandPlan | null;
+    events: LandProgressEvent[];
+    message: string;
+    rollback: LandRollbackReport | null;
+  }
+  | { type: "LAND_DONE"; result: LandResult }
+  | { type: "LAND_DISMISS" };
 
 /** Encode a TabId as a string key for Maps. */
 export function tabKey(tab: TabId): string {

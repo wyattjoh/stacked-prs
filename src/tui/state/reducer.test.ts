@@ -3,7 +3,23 @@ import { expect } from "@std/expect";
 import { initialState, reducer } from "./reducer.ts";
 import type { Action, State, SyncStatus } from "../types.ts";
 import type { StackTree } from "../../lib/stack.ts";
+import type { LandPlan } from "../../commands/land.ts";
 import { buildGrid } from "../lib/layout.ts";
+
+const fakeLandPlan = (): LandPlan => ({
+  stackName: "s",
+  baseBranch: "main",
+  case: "root-merged",
+  mergedBranches: ["feat/a"],
+  rebaseSteps: [],
+  pushSteps: [],
+  prUpdates: [],
+  navUpdates: [],
+  branchesToDelete: ["feat/a"],
+  snapshot: [],
+  originalHeadRef: "refs/heads/main",
+  splitPreview: [],
+});
 
 const emptyGrid = buildGrid([], new Map());
 
@@ -157,5 +173,64 @@ describe("reducer", () => {
       commits: [{ sha: "abc", subject: "x" }],
     });
     expect(s.commits.get("a1")?.status).toBe("loaded");
+  });
+
+  test("land slice starts in idle", () => {
+    expect(initialState().land.phase).toBe("idle");
+  });
+
+  test("LAND_START transitions to planning", () => {
+    const s = reducer(initialState(), { type: "LAND_START", stackName: "s" });
+    expect(s.land.phase).toBe("planning");
+    if (s.land.phase === "planning") {
+      expect(s.land.stackName).toBe("s");
+    }
+  });
+
+  test("LAND_PLAN_LOADED transitions to confirming", () => {
+    let s = reducer(initialState(), { type: "LAND_START", stackName: "s" });
+    s = reducer(s, { type: "LAND_PLAN_LOADED", plan: fakeLandPlan() });
+    expect(s.land.phase).toBe("confirming");
+  });
+
+  test("LAND_CANCEL from confirming returns to idle", () => {
+    let s = reducer(initialState(), { type: "LAND_START", stackName: "s" });
+    s = reducer(s, { type: "LAND_PLAN_LOADED", plan: fakeLandPlan() });
+    s = reducer(s, { type: "LAND_CANCEL" });
+    expect(s.land.phase).toBe("idle");
+  });
+
+  test("LAND_CONFIRM from confirming transitions to executing", () => {
+    let s = reducer(initialState(), { type: "LAND_START", stackName: "s" });
+    s = reducer(s, { type: "LAND_PLAN_LOADED", plan: fakeLandPlan() });
+    s = reducer(s, { type: "LAND_CONFIRM" });
+    expect(s.land.phase).toBe("executing");
+  });
+
+  test("LAND_PROGRESS appends to events while executing", () => {
+    let s = reducer(initialState(), { type: "LAND_START", stackName: "s" });
+    s = reducer(s, { type: "LAND_PLAN_LOADED", plan: fakeLandPlan() });
+    s = reducer(s, { type: "LAND_CONFIRM" });
+    s = reducer(s, {
+      type: "LAND_PROGRESS",
+      event: { step: { kind: "fetch" }, status: "ok" },
+    });
+    if (s.land.phase !== "executing") {
+      throw new Error("expected executing");
+    }
+    expect(s.land.events.length).toBe(1);
+  });
+
+  test("LAND_PLAN_ERROR transitions to error phase", () => {
+    let s = reducer(initialState(), { type: "LAND_START", stackName: "s" });
+    s = reducer(s, { type: "LAND_PLAN_ERROR", message: "unsupported" });
+    expect(s.land.phase).toBe("error");
+  });
+
+  test("LAND_DISMISS from error returns to idle", () => {
+    let s = reducer(initialState(), { type: "LAND_START", stackName: "s" });
+    s = reducer(s, { type: "LAND_PLAN_ERROR", message: "unsupported" });
+    s = reducer(s, { type: "LAND_DISMISS" });
+    expect(s.land.phase).toBe("idle");
   });
 });

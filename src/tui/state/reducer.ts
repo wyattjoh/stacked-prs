@@ -26,6 +26,7 @@ export function initialState(): State {
     focusedSection: "body",
     detailScroll: { scrollX: 0, scrollY: 0 },
     notice: null,
+    land: { phase: "idle" },
   };
 }
 
@@ -174,5 +175,61 @@ export function reducer(state: State, action: Action): State {
         ...state,
         errorRing: pushError(state.errorRing, action.message),
       };
+    case "LAND_START":
+      return {
+        ...state,
+        land: { phase: "planning", stackName: action.stackName },
+      };
+    case "LAND_PLAN_LOADED":
+      return { ...state, land: { phase: "confirming", plan: action.plan } };
+    case "LAND_PLAN_ERROR":
+      return {
+        ...state,
+        land: {
+          phase: "error",
+          plan: null,
+          events: [],
+          message: action.message,
+          rollback: null,
+        },
+      };
+    case "LAND_CONFIRM": {
+      if (state.land.phase !== "confirming") return state;
+      return {
+        ...state,
+        land: {
+          phase: "executing",
+          plan: state.land.plan,
+          events: [],
+        },
+      };
+    }
+    case "LAND_CANCEL":
+      return { ...state, land: { phase: "idle" } };
+    case "LAND_PROGRESS": {
+      if (state.land.phase !== "executing") return state;
+      return {
+        ...state,
+        land: {
+          ...state.land,
+          events: [...state.land.events, action.event],
+        },
+      };
+    }
+    case "LAND_ERROR":
+      return {
+        ...state,
+        land: {
+          phase: "error",
+          plan: action.plan,
+          events: action.events,
+          message: action.message,
+          rollback: action.rollback,
+        },
+      };
+    case "LAND_DONE":
+      return { ...state, land: { phase: "done", result: action.result } };
+    case "LAND_DISMISS":
+      return { ...state, land: { phase: "idle" } };
   }
 }
