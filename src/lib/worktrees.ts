@@ -248,11 +248,13 @@ export interface WorktreeCollision {
 }
 
 /**
- * Return branches from `branches` that are checked out in a linked
- * (non-primary) worktree. The primary worktree is the first entry
- * returned by `git worktree list --porcelain`; collisions are defined
- * against the other worktrees because the land sequence operates in the
- * primary.
+ * Return branches from `branches` that are checked out in a worktree other
+ * than the one `dir` lives in. Git refuses to check out a branch that is
+ * active in any other worktree, so those are hard collisions for land/restack.
+ *
+ * The operating worktree (the one that contains `dir`) is excluded because
+ * that is where the sequence will run its git operations; branches already
+ * checked out there do not block anything.
  */
 export async function findWorktreeCollisions(
   dir: string,
@@ -273,12 +275,21 @@ export async function findWorktreeCollisions(
   const worktrees = parseWorktreeList(stdout);
   if (worktrees.length === 0) return [];
 
-  const primary = worktrees[0].path;
+  // Resolve the worktree root that contains `dir` so we skip it: git allows
+  // checking out any branch in the operating worktree sequentially, but will
+  // refuse if the branch is active in a *different* worktree.
+  const { code: topCode, stdout: topStdout } = await runGitCommand(
+    dir,
+    "rev-parse",
+    "--show-toplevel",
+  );
+  const operatingPath = topCode === 0 ? topStdout.trim() : worktrees[0].path; // fall back to primary if resolution fails
+
   const scope = new Set(branches);
   const collisions: WorktreeCollision[] = [];
 
   for (const wt of worktrees) {
-    if (wt.path === primary) continue;
+    if (wt.path === operatingPath) continue;
     if (wt.branch === null) continue;
     if (!scope.has(wt.branch)) continue;
     const dirty = await isWorktreeDirty(wt.path);
