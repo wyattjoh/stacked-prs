@@ -192,6 +192,17 @@ export function LandModal(
           {phase.rollback && (
             <Box flexDirection="column" marginTop={1}>
               <Text bold>Rollback</Text>
+              {phase.rollback.commands.length > 0 && (
+                <Box flexDirection="column" marginTop={1}>
+                  <Text bold>Commands</Text>
+                  {phase.rollback.commands.map((cmd, i) => (
+                    <Box key={i}>
+                      <Text dimColor>$</Text>
+                      <Text>{cmd}</Text>
+                    </Box>
+                  ))}
+                </Box>
+              )}
               {phase.rollback.localRestored.length > 0 && (
                 <Text>
                   local restored: {phase.rollback.localRestored.join(", ")}

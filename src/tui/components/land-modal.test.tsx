@@ -110,6 +110,10 @@ describe("LandModal", () => {
       ],
       message: "Push of feat/b failed: lease",
       rollback: {
+        commands: [
+          "git update-ref refs/heads/feat/b abc123",
+          "git push --force-with-lease=refs/heads/feat/b:def456 origin abc123:refs/heads/feat/b",
+        ],
         localRestored: ["feat/b"],
         localFailed: [],
         remoteRestored: [],
@@ -123,6 +127,8 @@ describe("LandModal", () => {
       const frame = lastFrame() ?? "";
       expect(frame).toContain("Land failed");
       expect(frame).toContain("Rollback");
+      expect(frame).toContain("Commands");
+      expect(frame).toContain("git update-ref refs/heads/feat/b abc123");
       expect(frame).toContain("feat/b");
       expect(frame).toContain("lease mismatch");
     } finally {

@@ -74,6 +74,8 @@ export interface LandProgressEvent {
 }
 
 export interface LandRollbackReport {
+  /** Each command attempted during rollback, in execution order. */
+  commands: string[];
   localRestored: string[];
   localFailed: Array<{ branch: string; reason: string }>;
   remoteRestored: string[];
@@ -602,6 +604,7 @@ function emit(
 
 function emptyRollback(): LandRollbackReport {
   return {
+    commands: [],
     localRestored: [],
     localFailed: [],
     remoteRestored: [],
@@ -746,6 +749,9 @@ async function rollbackLocalRebases(
   for (const branch of state.rebased) {
     const snap = snapByBranch.get(branch);
     if (!snap) continue;
+    state.rollback.commands.push(
+      `git update-ref refs/heads/${branch} ${snap.tipSha}`,
+    );
     const { code, stderr } = await runGitCommand(
       dir,
       "update-ref",
@@ -859,6 +865,9 @@ async function rollbackRemotePushes(
       continue;
     }
 
+    state.rollback.commands.push(
+      `git push --force-with-lease=refs/heads/${branch}:${postSha} origin ${snap.tipSha}:refs/heads/${branch}`,
+    );
     const { code, stderr } = await runGitCommand(
       dir,
       "push",
