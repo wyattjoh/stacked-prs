@@ -89,6 +89,7 @@ export function App(props: AppProps): React.ReactElement {
   );
   const [scrollX, setScrollX] = useState(0);
   const [scrollY, setScrollY] = useState(0);
+  const [landScrollY, setLandScrollY] = useState(0);
 
   // Primary focus color, theme-derived. Used as the "selected" border color
   // on the body wrapper and detail pane, and as a fallback by HeaderBox.
@@ -391,6 +392,11 @@ export function App(props: AppProps): React.ReactElement {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state.land.phase]);
 
+  // Reset modal scroll when the land modal closes.
+  useEffect(() => {
+    if (state.land.phase === "idle") setLandScrollY(0);
+  }, [state.land.phase]);
+
   // Keep the cursor's branch name fully visible horizontally. The content
   // x of a branch name is `stackCount * 3` (contentPrefix filler) plus
   // `depth * 3` (ladder rails + corner) — see `branchNameContentX` for the
@@ -488,6 +494,15 @@ export function App(props: AppProps): React.ReactElement {
         key.escape
       ) {
         dispatch({ type: "LAND_DISMISS" });
+        return;
+      }
+      // ↑/↓ (and k/j) scroll the modal content in any non-idle phase.
+      if (key.upArrow || input === "k") {
+        setLandScrollY((s: number) => Math.max(0, s - 1));
+        return;
+      }
+      if (key.downArrow || input === "j") {
+        setLandScrollY((s: number) => s + 1);
         return;
       }
       return;
@@ -750,7 +765,7 @@ export function App(props: AppProps): React.ReactElement {
       {state.land.phase !== "idle"
         ? (
           <Box flexGrow={1} width={termSize.cols} overflowY="hidden">
-            <LandModal phase={state.land} />
+            <LandModal phase={state.land} scrollY={landScrollY} />
           </Box>
         )
         : state.showHelp
