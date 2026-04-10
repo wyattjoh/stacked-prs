@@ -225,53 +225,61 @@ export function LandModal(
                 ))}
               </Box>
             )}
-            {phase.rollback && (
-              <Box flexDirection="column" marginTop={1}>
-                <Text bold>Rollback</Text>
-                {phase.rollback.commands.length > 0 && (
-                  <Box flexDirection="column" marginTop={1}>
-                    <Text bold>Commands</Text>
-                    {phase.rollback.commands.map((cmd, i) => (
-                      <Box key={i}>
-                        <Text dimColor>$</Text>
-                        <Text>{cmd}</Text>
-                      </Box>
-                    ))}
-                  </Box>
-                )}
-                {phase.rollback.localRestored.length > 0 && (
-                  <Text>
-                    local restored: {phase.rollback.localRestored.join(", ")}
-                  </Text>
-                )}
-                {phase.rollback.localFailed.length > 0 && (
-                  <Text color="red">
-                    local FAILED: {phase.rollback.localFailed
-                      .map((f) => `${f.branch} (${f.reason})`)
-                      .join("; ")}
-                  </Text>
-                )}
-                {phase.rollback.remoteRestored.length > 0 && (
-                  <Text>
-                    remote restored: {phase.rollback.remoteRestored.join(", ")}
-                  </Text>
-                )}
-                {phase.rollback.remoteFailed.length > 0 && (
-                  <Text color="red">
-                    remote FAILED: {phase.rollback.remoteFailed
-                      .map((f) => `${f.branch} (${f.reason})`)
-                      .join("; ")}
-                  </Text>
-                )}
-                {phase.rollback.prFailed.length > 0 && (
-                  <Text color="red">
-                    pr FAILED: {phase.rollback.prFailed
-                      .map((f) => `#${f.prNumber} (${f.reason})`)
-                      .join("; ")}
-                  </Text>
-                )}
-              </Box>
-            )}
+            {phase.rollback &&
+              (phase.rollback.commands.length > 0 ||
+                phase.rollback.localRestored.length > 0 ||
+                phase.rollback.localFailed.length > 0 ||
+                phase.rollback.remoteRestored.length > 0 ||
+                phase.rollback.remoteFailed.length > 0 ||
+                phase.rollback.prFailed.length > 0) &&
+              (
+                <Box flexDirection="column" marginTop={1}>
+                  <Text bold>Rollback</Text>
+                  {phase.rollback.commands.length > 0 && (
+                    <Box flexDirection="column" marginTop={1}>
+                      <Text bold>Commands</Text>
+                      {phase.rollback.commands.map((cmd, i) => (
+                        <Box key={i}>
+                          <Text dimColor>$</Text>
+                          <Text>{cmd}</Text>
+                        </Box>
+                      ))}
+                    </Box>
+                  )}
+                  {phase.rollback.localRestored.length > 0 && (
+                    <Text>
+                      local restored: {phase.rollback.localRestored.join(", ")}
+                    </Text>
+                  )}
+                  {phase.rollback.localFailed.length > 0 && (
+                    <Text color="red">
+                      local FAILED: {phase.rollback.localFailed
+                        .map((f) => `${f.branch} (${f.reason})`)
+                        .join("; ")}
+                    </Text>
+                  )}
+                  {phase.rollback.remoteRestored.length > 0 && (
+                    <Text>
+                      remote restored:{" "}
+                      {phase.rollback.remoteRestored.join(", ")}
+                    </Text>
+                  )}
+                  {phase.rollback.remoteFailed.length > 0 && (
+                    <Text color="red">
+                      remote FAILED: {phase.rollback.remoteFailed
+                        .map((f) => `${f.branch} (${f.reason})`)
+                        .join("; ")}
+                    </Text>
+                  )}
+                  {phase.rollback.prFailed.length > 0 && (
+                    <Text color="red">
+                      pr FAILED: {phase.rollback.prFailed
+                        .map((f) => `#${f.prNumber} (${f.reason})`)
+                        .join("; ")}
+                    </Text>
+                  )}
+                </Box>
+              )}
             <Box marginTop={1}>
               <Text dimColor>[esc] dismiss [↑/↓] scroll</Text>
             </Box>
