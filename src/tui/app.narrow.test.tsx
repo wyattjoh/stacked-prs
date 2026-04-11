@@ -122,9 +122,14 @@ async function withNarrowTestRepo(
   const repo = await createTestRepo();
   const mockDir = await Deno.makeTempDir();
   setMockDir(mockDir);
+  // Ink checks process.env.CI and skips writing dynamic output when true,
+  // producing empty frames. Clear it for the duration of the test.
+  const savedCI = Deno.env.get("CI");
+  Deno.env.delete("CI");
   try {
     await fn(repo, mockDir);
   } finally {
+    if (savedCI !== undefined) Deno.env.set("CI", savedCI);
     setMockDir(undefined);
     await repo.cleanup();
     await Deno.remove(mockDir, { recursive: true });
