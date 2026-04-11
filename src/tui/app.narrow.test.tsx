@@ -122,14 +122,9 @@ async function withNarrowTestRepo(
   const repo = await createTestRepo();
   const mockDir = await Deno.makeTempDir();
   setMockDir(mockDir);
-  // Ink checks process.env.CI and skips writing dynamic output when true,
-  // producing empty frames. Clear it for the duration of the test.
-  const savedCI = Deno.env.get("CI");
-  Deno.env.delete("CI");
   try {
     await fn(repo, mockDir);
   } finally {
-    if (savedCI !== undefined) Deno.env.set("CI", savedCI);
     setMockDir(undefined);
     await repo.cleanup();
     await Deno.remove(mockDir, { recursive: true });
@@ -141,6 +136,13 @@ async function withNarrowTestRepo(
 // leaks even after `instance.unmount()`, so these tests opt out of op /
 // resource sanitization. The assertions here are about rendered output,
 // not process-lifecycle cleanup.
+//
+// Each render call passes `debug: true`. In CI environments, Ink's `isInCi`
+// flag (computed once at import time from process.env.CI) suppresses all
+// dynamic stdout writes and skips the resize listener. `debug: true` bypasses
+// that path and writes every frame unconditionally, which is what the frame
+// capture in `latestFrame()` relies on. App registers its own resize listener
+// via `useEffect` so resize events still trigger re-renders correctly.
 
 Deno.test({
   name:
@@ -159,6 +161,7 @@ Deno.test({
         stdout: stdout as never,
         stdin: stdin as never,
         exitOnCtrlC: false,
+        debug: true,
       });
       try {
         await new Promise((r) => setTimeout(r, 400));
@@ -248,6 +251,7 @@ Deno.test({
         stdout: stdout as never,
         stdin: stdin as never,
         exitOnCtrlC: false,
+        debug: true,
       });
       try {
         await new Promise((r) => setTimeout(r, 500));
@@ -297,6 +301,7 @@ Deno.test({
         stdout: stdout as never,
         stdin: stdin as never,
         exitOnCtrlC: false,
+        debug: true,
       });
       try {
         await new Promise((r) => setTimeout(r, 400));
@@ -349,6 +354,7 @@ Deno.test({
         stdout: stdout as never,
         stdin: stdin as never,
         exitOnCtrlC: false,
+        debug: true,
       });
       try {
         await new Promise((r) => setTimeout(r, 500));
@@ -398,6 +404,7 @@ Deno.test({
         stdout: stdout as never,
         stdin: stdin as never,
         exitOnCtrlC: false,
+        debug: true,
       });
       try {
         await new Promise((r) => setTimeout(r, 500));
@@ -438,6 +445,7 @@ Deno.test({
         stdout: stdout as never,
         stdin: stdin as never,
         exitOnCtrlC: false,
+        debug: true,
       });
       try {
         await new Promise((r) => setTimeout(r, 400));
