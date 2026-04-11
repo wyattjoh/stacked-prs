@@ -170,8 +170,10 @@ import { gh } from "../lib/gh.ts";
 import {
   findNode,
   getAllNodes,
+  getConflictFiles,
   getStackTree,
   removeStackBranch,
+  revParse,
   runGitCommand,
   type StackTree,
 } from "../lib/stack.ts";
@@ -294,14 +296,6 @@ export function classifyLandCase(
   }
 
   return "root-merged";
-}
-
-async function revParse(dir: string, ref: string): Promise<string> {
-  const { code, stdout, stderr } = await runGitCommand(dir, "rev-parse", ref);
-  if (code !== 0) {
-    throw new Error(`git rev-parse ${ref} failed: ${stderr}`);
-  }
-  return stdout;
 }
 
 export async function captureSnapshot(
@@ -1310,16 +1304,6 @@ async function clearLandResumeState(
   );
 }
 
-async function getConflictFilesForCli(dir: string): Promise<string[]> {
-  const { stdout } = await runGitCommand(
-    dir,
-    "diff",
-    "--name-only",
-    "--diff-filter=U",
-  );
-  return stdout ? stdout.split("\n").filter(Boolean) : [];
-}
-
 export async function executeLandFromCli(
   dir: string,
   stackName: string,
@@ -1354,7 +1338,7 @@ export async function executeLandFromCli(
     if (existingState.conflictedBranch) {
       const continueResult = await runGitCommand(dir, "rebase", "--continue");
       if (continueResult.code !== 0) {
-        const conflictFiles = await getConflictFilesForCli(dir);
+        const conflictFiles = await getConflictFiles(dir);
         if (conflictFiles.length > 0) {
           return {
             ok: false,
@@ -1456,7 +1440,7 @@ export async function executeLandFromCli(
     );
 
     if (rebase.code !== 0) {
-      const conflictFiles = await getConflictFilesForCli(dir);
+      const conflictFiles = await getConflictFiles(dir);
       completed.conflictedBranch = step.branch;
       await writeLandResumeState(dir, stackName, completed);
       return {

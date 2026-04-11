@@ -1,4 +1,9 @@
-import { gitConfig, gitConfigGetRegexp, runGitCommand } from "../lib/stack.ts";
+import {
+  gitConfig,
+  gitConfigGetRegexp,
+  rebaseInProgress,
+  runGitCommand,
+} from "../lib/stack.ts";
 
 export type CleanFindingKind =
   | "missing-branch"
@@ -62,18 +67,6 @@ function parseStackEntries(
     result.push({ stackName: match[1], baseBranch: value });
   }
   return result;
-}
-
-/** True iff a git rebase is currently in progress in `dir`. */
-async function rebaseInProgress(dir: string): Promise<boolean> {
-  const { code } = await runGitCommand(
-    dir,
-    "rev-parse",
-    "--verify",
-    "--quiet",
-    "REBASE_HEAD",
-  );
-  return code === 0;
 }
 
 /** True iff `refs/heads/<branch>` exists in `dir`. */

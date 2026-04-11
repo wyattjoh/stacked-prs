@@ -67,6 +67,41 @@ async function gitConfigSet(
   }
 }
 
+/**
+ * Run `git rev-parse <ref>` and return the trimmed SHA. Throws on failure.
+ * Shared by restack and land to avoid duplicate implementations.
+ */
+export async function revParse(dir: string, ref: string): Promise<string> {
+  const { code, stdout, stderr } = await runGitCommand(dir, "rev-parse", ref);
+  if (code !== 0) {
+    throw new Error(`git rev-parse ${ref} failed: ${stderr}`);
+  }
+  return stdout;
+}
+
+/** Return the list of unmerged (conflict) file paths in `dir`. */
+export async function getConflictFiles(dir: string): Promise<string[]> {
+  const { stdout } = await runGitCommand(
+    dir,
+    "diff",
+    "--name-only",
+    "--diff-filter=U",
+  );
+  return stdout ? stdout.split("\n").filter(Boolean) : [];
+}
+
+/** True iff a git rebase is currently in progress in `dir`. */
+export async function rebaseInProgress(dir: string): Promise<boolean> {
+  const { code } = await runGitCommand(
+    dir,
+    "rev-parse",
+    "--verify",
+    "--quiet",
+    "REBASE_HEAD",
+  );
+  return code === 0;
+}
+
 /** Run `git config --get-regexp <pattern>`, return parsed lines as [key, value] pairs. */
 export async function gitConfigGetRegexp(
   dir: string,

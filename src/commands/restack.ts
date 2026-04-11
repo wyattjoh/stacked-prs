@@ -1,21 +1,14 @@
 import {
   findNode,
+  getConflictFiles,
   getStackTree,
+  rebaseInProgress,
+  revParse,
   runGitCommand,
   type StackNode,
   type StackTree,
 } from "../lib/stack.ts";
 import { checkWorktreeSafety } from "../lib/worktrees.ts";
-
-async function getConflictFiles(dir: string): Promise<string[]> {
-  const { stdout } = await runGitCommand(
-    dir,
-    "diff",
-    "--name-only",
-    "--diff-filter=U",
-  );
-  return stdout ? stdout.split("\n").filter(Boolean) : [];
-}
 
 // =========================================================================
 // Per-branch rebase implementation (spec: 2026-04-08-restack-correctness)
@@ -129,14 +122,6 @@ async function clearResumeState(
     "--unset",
     `stack.${stackName}.resume-state`,
   );
-}
-
-async function revParse(dir: string, ref: string): Promise<string> {
-  const { code, stdout, stderr } = await runGitCommand(dir, "rev-parse", ref);
-  if (code !== 0) {
-    throw new Error(`git rev-parse ${ref} failed: ${stderr}`);
-  }
-  return stdout.trim();
 }
 
 /**
@@ -365,18 +350,6 @@ async function rebaseBranch(
     stderr: rebase.stderr || rebase.stdout,
     conflictFiles: conflictFiles.length > 0 ? conflictFiles : undefined,
   };
-}
-
-/** True iff a git rebase is currently in progress in `dir`. */
-async function rebaseInProgress(dir: string): Promise<boolean> {
-  const { code } = await runGitCommand(
-    dir,
-    "rev-parse",
-    "--verify",
-    "--quiet",
-    "REBASE_HEAD",
-  );
-  return code === 0;
 }
 
 /**

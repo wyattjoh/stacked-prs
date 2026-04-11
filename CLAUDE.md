@@ -125,20 +125,20 @@ can be continued across process invocations.
 
 ### Script roles
 
-| File                              | Role                                       | Invoked as                                       |
-| --------------------------------- | ------------------------------------------ | ------------------------------------------------ |
-| `src/lib/stack.ts`                | Library only, not a CLI                    | Imported by all other scripts                    |
-| `src/lib/gh.ts`                   | Library only, not a CLI                    | Imported by scripts needing GitHub data          |
-| `src/commands/clean.ts`           | Stale config detection and removal         | `cli.ts clean [--confirm] [--json]`              |
-| `src/commands/config.ts`          | Library functions for metadata mutations   | Imported by other commands                       |
-| `src/commands/status.ts`          | Read stack state + PR info                 | `cli.ts status [--json]`                         |
-| `src/commands/restack.ts`         | Per-branch topological rebase              | `cli.ts restack [--dry-run] [--json] [--resume]` |
-| `src/commands/nav.ts`             | Navigation comments                        | `cli.ts nav [--dry-run]`                         |
-| `src/commands/verify-refs.ts`     | Post-rebase verification                   | `cli.ts verify-refs`                             |
-| `src/commands/import-discover.ts` | Branch tree detection                      | `cli.ts import-discover`                         |
-| `src/commands/submit-plan.ts`     | Submit planning                            | `cli.ts submit-plan`                             |
+| File                              | Role                                                             | Invoked as                                                              |
+| --------------------------------- | ---------------------------------------------------------------- | ----------------------------------------------------------------------- |
+| `src/lib/stack.ts`                | Library only, not a CLI                                          | Imported by all other scripts                                           |
+| `src/lib/gh.ts`                   | Library only, not a CLI                                          | Imported by scripts needing GitHub data                                 |
+| `src/commands/clean.ts`           | Stale config detection and removal                               | `cli.ts clean [--confirm] [--json]`                                     |
+| `src/commands/config.ts`          | Library functions for metadata mutations                         | Imported by other commands                                              |
+| `src/commands/status.ts`          | Read stack state + PR info                                       | `cli.ts status [--json]`                                                |
+| `src/commands/restack.ts`         | Per-branch topological rebase                                    | `cli.ts restack [--dry-run] [--json] [--resume]`                        |
+| `src/commands/nav.ts`             | Navigation comments                                              | `cli.ts nav [--dry-run]`                                                |
+| `src/commands/verify-refs.ts`     | Post-rebase verification                                         | `cli.ts verify-refs`                                                    |
+| `src/commands/import-discover.ts` | Branch tree detection                                            | `cli.ts import-discover`                                                |
+| `src/commands/submit-plan.ts`     | Submit planning                                                  | `cli.ts submit-plan`                                                    |
 | `src/commands/land.ts`            | Land planning and execution (pure planLand + impure executeLand) | `cli.ts land [--dry-run] [--json] [--resume]`; also imported by the TUI |
-| `src/tui/app.tsx`                 | Root Ink component, owns reducer + effects | Launched by `cli.ts status -i`                   |
+| `src/tui/app.tsx`                 | Root Ink component, owns reducer + effects                       | Launched by `cli.ts status -i`                                          |
 
 ### Git config schema
 
@@ -226,7 +226,8 @@ Keyboard navigation:
 - `p`: open focused PR in browser.
 - `b`: copy branch name to clipboard.
 - `L`: land stack; `r`: refresh all.
-- In the land modal: `↑`/`↓` (or `k`/`j`) scroll content; `y`/`n` confirm/cancel.
+- In the land modal: `↑`/`↓` (or `k`/`j`) scroll content; `y`/`n`
+  confirm/cancel.
 
 The status bar at the bottom is built dynamically from `STATUS_BAR_ITEMS` in
 `help-overlay.tsx`: `buildStatusBar(termSize.cols)` greedily includes shortcuts
