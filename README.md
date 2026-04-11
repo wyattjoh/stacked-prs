@@ -7,6 +7,27 @@ Deno helper scripts on your behalf.
 
 ## Installation
 
+### Homebrew (standalone CLI)
+
+Install the `stacked-prs` binary for direct terminal use (no Deno required):
+
+```
+brew tap wyattjoh/stable
+brew install stacked-prs
+```
+
+After install, `stacked-prs` is in your PATH. Run the interactive TUI with:
+
+```
+stacked-prs status -i
+```
+
+> The Homebrew binary gives you direct CLI access. For the AI-orchestrated
+> workflow (Claude plans and confirms every write operation), use the Claude
+> Code plugin path below.
+
+### Claude Code plugin
+
 This is a Claude Code plugin distributed through the
 [wyattjoh/claude-code-marketplace](https://github.com/wyattjoh/claude-code-marketplace).
 From inside Claude Code, add the marketplace and then install the plugin:
