@@ -37,6 +37,7 @@ import {
   LandError,
   planLand,
   type PrStateByBranch,
+  prStateFrom,
   UnsupportedLandShape,
 } from "../commands/land.ts";
 import type { PrInfo } from "./types.ts";
@@ -234,11 +235,7 @@ export function App(props: AppProps): React.ReactElement {
     const map: PrStateByBranch = new Map();
     for (const [branch, cell] of state.prData) {
       if (cell.status !== "loaded") continue;
-      if (cell.pr === null) map.set(branch, "NONE");
-      else if (cell.pr.state === "MERGED") map.set(branch, "MERGED");
-      else if (cell.pr.state === "CLOSED") map.set(branch, "CLOSED");
-      else if (cell.pr.isDraft) map.set(branch, "DRAFT");
-      else map.set(branch, "OPEN");
+      map.set(branch, prStateFrom(cell.pr));
     }
     return map;
   })();
@@ -340,12 +337,7 @@ export function App(props: AppProps): React.ReactElement {
                   isDraft: boolean;
                   createdAt?: string;
                 }>;
-                const best = selectBestPr(rows);
-                if (!best) fresh.set(b, "NONE");
-                else if (best.state === "MERGED") fresh.set(b, "MERGED");
-                else if (best.state === "CLOSED") fresh.set(b, "CLOSED");
-                else if (best.isDraft) fresh.set(b, "DRAFT");
-                else fresh.set(b, "OPEN");
+                fresh.set(b, prStateFrom(selectBestPr(rows)));
               } catch {
                 fresh.set(b, "NONE");
               }

@@ -1,5 +1,5 @@
 import type { StackTree } from "../lib/stack.ts";
-import type { SyncStatus } from "../commands/status.ts";
+import type { PrInfo, SyncStatus } from "../commands/status.ts";
 import type { ThemeName } from "../lib/colors.ts";
 import type {
   LandPlan,
@@ -8,7 +8,7 @@ import type {
   LandRollbackReport,
 } from "../commands/land.ts";
 
-export type { SyncStatus, ThemeName };
+export type { PrInfo, SyncStatus, ThemeName };
 
 /** PR state surfaced by the TUI node glyphs. */
 export type PrState = "open" | "draft" | "merged" | "closed" | "none";
@@ -20,16 +20,6 @@ export type ConnectorStyle = "solid" | "dashed" | "double";
 export interface WorktreeInfo {
   displayPath: string;
   dirty: boolean;
-}
-
-/** Raw PR info returned by `gh pr list`. */
-export interface PrInfo {
-  number: number;
-  url: string;
-  state: string;
-  isDraft: boolean;
-  /** ISO timestamp; present when the query asks for `createdAt`. */
-  createdAt?: string;
 }
 
 /** Per-branch PR load state. */

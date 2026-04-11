@@ -1,7 +1,7 @@
 import type { DirtyWorktree } from "../lib/worktrees.ts";
 import type { SplitInfo } from "./config.ts";
 import type { NavAction } from "./nav.ts";
-import type { PrInfo } from "../tui/types.ts";
+import type { PrInfo } from "./status.ts";
 
 export type LandCase = "root-merged" | "all-merged";
 
@@ -125,6 +125,17 @@ export type PrStateByBranch = Map<
   string,
   "OPEN" | "DRAFT" | "MERGED" | "CLOSED" | "NONE"
 >;
+
+/** Map a raw PR (or null) to its PrStateByBranch value. */
+export function prStateFrom(
+  pr: { state: string; isDraft: boolean } | null,
+): "OPEN" | "DRAFT" | "MERGED" | "CLOSED" | "NONE" {
+  if (pr === null) return "NONE";
+  if (pr.state === "MERGED") return "MERGED";
+  if (pr.state === "CLOSED") return "CLOSED";
+  if (pr.isDraft) return "DRAFT";
+  return "OPEN";
+}
 
 export interface LandHooks {
   onProgress: (event: LandProgressEvent) => void;
