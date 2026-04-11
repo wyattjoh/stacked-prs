@@ -32,6 +32,90 @@ scripts, and gh CLI.
 5. `/stacked-prs sync` after rebasing or pulling main
 6. `/stacked-prs land` after the bottom PR merges
 
+## Building Review-Ready Stacks
+
+Stacked PRs are reviewed and merged one branch at a time, from the bottom up.
+When each PR lands, GitHub runs CI against `main` at that moment. Every branch
+must therefore be independently correct: it must compile, pass all tests, and
+satisfy any linting/coverage gates on its own, without code that only exists in
+an upstack branch.
+
+### The independent-branch rule
+
+Before creating or submitting any branch, confirm it meets both conditions:
+
+1. **Independently buildable.** The code at the tip of this branch would pass CI
+   if rebased onto `main` right now, without any upstack branches included.
+2. **Scope-complete.** The branch contains every change required for its stated
+   purpose. Never leave a feature in a broken or partial state with "will be
+   fixed in the next PR" as the plan.
+
+The stack enforces this naturally: as PRs land from the bottom up, each PR's CI
+run does not include any upstack code. A branch that only works because of code
+in an upstack sibling will block the stack.
+
+### How to draw branch boundaries
+
+Good split points:
+
+- **Preparatory refactors below, new behavior above.** Rename, extract, or
+  reorganize in a lower branch so the upper branch's diff is clean and focused.
+- **Types or interfaces below, implementations above.** Defining types in a
+  lower branch and building against them in a higher branch is a clean, testable
+  separation.
+- **Tests belong with the code they test.** Never split a feature and its tests
+  across branches. A branch that adds code but omits its tests may fail a
+  coverage gate when it lands.
+- **Feature flags as a boundary tool.** When a feature cannot be split cleanly,
+  introduce a flag in a lower branch (gating the new behavior off), implement
+  the feature in middle branches, and remove the flag in the top branch. Every
+  branch is green because the new code is always behind the flag until the final
+  PR flips it on.
+
+Anti-patterns to avoid:
+
+- Leaving failing behavior in a lower branch that a higher branch will "fix
+  later". That lower PR will fail CI when it lands.
+- Splitting setup and teardown of a single concept across non-adjacent branches.
+- Writing a branch that only passes tests because of uncommitted work in the
+  working tree.
+
+### Verifying CI health before submitting
+
+Before running `/stacked-prs submit`, verify each branch is clean at its own
+tip. The reliable method is a temporary worktree per branch:
+
+```bash
+# Verify branch A on its own:
+git worktree add /tmp/check-A <branch-A>
+cd /tmp/check-A && <your CI command>
+git worktree remove /tmp/check-A
+
+# Verify branch B (includes A's commits implicitly since B is stacked on A):
+git worktree add /tmp/check-B <branch-B>
+cd /tmp/check-B && <your CI command>
+git worktree remove /tmp/check-B
+```
+
+If any branch fails, fix it before submitting. A stack with a broken lower
+branch blocks every upstack PR from landing.
+
+**When helping a user author branches**, proactively flag when proposed changes
+would leave a branch in a state that cannot pass CI independently, and suggest
+how to restructure the split.
+
+### Commit hygiene within a branch
+
+Reviewers read commits one at a time. Within a branch:
+
+- Keep each commit focused on one logical change.
+- Write commit messages that explain _why_, not just _what_.
+- Squash exploratory, fixup, or WIP commits with `git rebase -i` before
+  submitting.
+
+Stacks limit diff size at the PR level; commits tell the story of _how_ each PR
+makes its change.
+
 ## Sub-commands
 
 If no argument is provided, assess the current context (branch, dirty state,
@@ -84,12 +168,17 @@ Create a new child branch off the current branch.
 
 1. Verify current branch is in a stack
 2. Ask for new branch name
-3. **Present plan** (branch creation, config writes) and **confirm**
-4. `git checkout -b <new-branch>` from current branch
-5. Write git config:
+3. **Before confirming**, apply the independent-branch rule from "Building
+   Review-Ready Stacks": confirm the new branch's intended scope is
+   self-contained and would not leave the current (parent) branch in a
+   CI-failing state. If the user's plan would violate the rule, flag it and
+   suggest a better split.
+4. **Present plan** (branch creation, config writes) and **confirm**
+5. `git checkout -b <new-branch>` from current branch
+6. Write git config:
    - `git config branch.<new-branch>.stack-name <stack-name>`
    - `git config branch.<new-branch>.stack-parent <current-branch>`
-6. If staged changes exist, offer to commit them
+7. If staged changes exist, offer to commit them
 
 ### `insert`
 
@@ -285,6 +374,12 @@ reorganization before reviewing the diff.
 ### `submit`
 
 Create or update PRs for all branches, add/update stack navigation comments.
+
+**Before running submit**, remind the user to verify each branch is CI-clean at
+its own tip (see "Verifying CI health before submitting" in the "Building
+Review-Ready Stacks" section). If the user has not yet verified, ask whether
+they want to do so before proceeding. A stack with a broken lower branch will
+block every upstack PR from landing once it reaches GitHub CI.
 
 **Draft policy:** A PR's draft state is a function of its position in the stack.
 PRs whose parent is the stack's base branch (e.g. `main`) are submitted as ready
