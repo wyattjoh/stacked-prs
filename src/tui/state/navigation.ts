@@ -75,13 +75,6 @@ export function moveToStack(
   return { branch: first.branch };
 }
 
-export function moveToStackStart(
-  grid: GridLayout,
-  stackName: string,
-): Cursor | null {
-  return moveToStack(grid, stackName, null);
-}
-
 export function moveToStackEnd(
   grid: GridLayout,
   stackName: string,

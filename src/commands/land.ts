@@ -731,9 +731,10 @@ interface ExecState {
   prClosed: Set<number>;
   configCleanupDone: boolean;
   autoMerged: Set<string>;
+  snapByBranch: Map<string, BranchSnapshot>;
 }
 
-function initExecState(): ExecState {
+function initExecState(plan: LandPlan): ExecState {
   return {
     rollback: emptyRollback(),
     rebased: new Set(),
@@ -742,17 +743,16 @@ function initExecState(): ExecState {
     prClosed: new Set(),
     configCleanupDone: false,
     autoMerged: new Set(),
+    snapByBranch: new Map(plan.snapshot.map((s) => [s.branch, s])),
   };
 }
 
 async function rollbackLocalRebases(
   dir: string,
-  plan: LandPlan,
   state: ExecState,
 ): Promise<void> {
-  const snapByBranch = new Map(plan.snapshot.map((s) => [s.branch, s]));
   for (const branch of state.rebased) {
-    const snap = snapByBranch.get(branch);
+    const snap = state.snapByBranch.get(branch);
     if (!snap) continue;
     state.rollback.commands.push(
       `git update-ref refs/heads/${branch} ${snap.tipSha}`,
@@ -788,7 +788,7 @@ async function executeCaseARebases(
         "failed",
         checkout.stderr,
       );
-      await rollbackLocalRebases(dir, plan, state);
+      await rollbackLocalRebases(dir, state);
       throw new LandError(
         `Failed to checkout ${step.branch}: ${checkout.stderr}`,
         plan,
@@ -815,7 +815,7 @@ async function executeCaseARebases(
         "failed",
         rebase.stderr,
       );
-      await rollbackLocalRebases(dir, plan, state);
+      await rollbackLocalRebases(dir, state);
       throw new LandError(
         `Rebase of ${step.branch} failed: ${rebase.stderr}`,
         plan,
@@ -849,12 +849,10 @@ async function executeCaseARebases(
 
 async function rollbackRemotePushes(
   dir: string,
-  plan: LandPlan,
   state: ExecState,
 ): Promise<void> {
-  const snapByBranch = new Map(plan.snapshot.map((s) => [s.branch, s]));
   for (const branch of state.pushed) {
-    const snap = snapByBranch.get(branch);
+    const snap = state.snapByBranch.get(branch);
     if (!snap) continue;
 
     const { code: headCode, stdout: postSha } = await runGitCommand(
@@ -918,8 +916,8 @@ async function executeCaseAPushes(
     );
     if (code !== 0) {
       emit(hooks, { kind: "push", branch: step.branch }, "failed", stderr);
-      await rollbackRemotePushes(dir, plan, state);
-      await rollbackLocalRebases(dir, plan, state);
+      await rollbackRemotePushes(dir, state);
+      await rollbackLocalRebases(dir, state);
       throw new LandError(
         `Push of ${step.branch} failed: ${stderr}`,
         plan,
@@ -981,8 +979,8 @@ async function executeCaseAPrUpdates(
         (err as Error).message,
       );
       await rollbackPrUpdates(dir, plan, state);
-      await rollbackRemotePushes(dir, plan, state);
-      await rollbackLocalRebases(dir, plan, state);
+      await rollbackRemotePushes(dir, state);
+      await rollbackLocalRebases(dir, state);
       throw new LandError(
         `PR update for ${update.branch} failed: ${(err as Error).message}`,
         plan,
@@ -998,7 +996,7 @@ async function executeCaseA(
   plan: LandPlan,
   hooks: LandHooks,
 ): Promise<LandResult> {
-  const state = initExecState();
+  const state = initExecState(plan);
 
   emit(hooks, { kind: "fetch" }, "running");
   try {
@@ -1062,8 +1060,8 @@ async function executeCaseA(
       (err as Error).message,
     );
     await rollbackPrUpdates(dir, plan, state);
-    await rollbackRemotePushes(dir, plan, state);
-    await rollbackLocalRebases(dir, plan, state);
+    await rollbackRemotePushes(dir, state);
+    await rollbackLocalRebases(dir, state);
     throw new LandError(
       (err as Error).message,
       plan,
@@ -1171,8 +1169,8 @@ async function executeCaseAPrCloses(
         (err as Error).message,
       );
       await rollbackPrUpdates(dir, plan, state);
-      await rollbackRemotePushes(dir, plan, state);
-      await rollbackLocalRebases(dir, plan, state);
+      await rollbackRemotePushes(dir, state);
+      await rollbackLocalRebases(dir, state);
       throw new LandError(
         `PR close for ${update.branch} failed: ${(err as Error).message}`,
         plan,

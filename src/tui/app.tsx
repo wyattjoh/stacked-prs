@@ -21,7 +21,6 @@ import {
   moveRight,
   moveToStack,
   moveToStackEnd,
-  moveToStackStart,
   moveUp,
 } from "./state/navigation.ts";
 import { copyToClipboard } from "./lib/clipboard.ts";
@@ -651,7 +650,7 @@ export function App(props: AppProps): React.ReactElement {
       if (key.downArrow || key.rightArrow) {
         const firstStack = visibleTrees[0];
         if (firstStack) {
-          const target = moveToStackStart(grid, firstStack.stackName);
+          const target = moveToStack(grid, firstStack.stackName, null);
           if (target) dispatch({ type: "CURSOR_SET", cursor: target });
         }
       }
@@ -679,7 +678,7 @@ export function App(props: AppProps): React.ReactElement {
     } else if (input === "g") {
       const c = grid.byBranch.get(cursor.branch);
       if (c) {
-        const target = moveToStackStart(grid, c.stackName);
+        const target = moveToStack(grid, c.stackName, null);
         if (target) dispatch({ type: "CURSOR_SET", cursor: target });
       }
     } else if (input === "G") {

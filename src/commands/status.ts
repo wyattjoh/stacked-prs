@@ -140,9 +140,7 @@ export async function getStackStatus(
       const syncStatus: SyncStatus = node.merged
         ? "landed"
         : await getSyncStatus(dir, node.parent, node.branch);
-      const [pr] = await Promise.all([
-        queryPr(node.branch, owner, repo),
-      ]);
+      const pr = await queryPr(node.branch, owner, repo);
 
       const { depth, isLastChild } = depthMap.get(node.branch) ?? {
         depth: 0,
