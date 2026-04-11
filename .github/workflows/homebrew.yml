@@ -5,12 +5,17 @@ on:
     tags:
       - "stacked-prs-v*"
 
+concurrency:
+  group: homebrew-release-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   build:
     runs-on: ubuntu-latest
     permissions:
       contents: read
     strategy:
+      fail-fast: false
       matrix:
         include:
           - target: aarch64-apple-darwin
