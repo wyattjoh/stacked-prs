@@ -38,6 +38,7 @@ export async function createTestRepo(): Promise<TestRepo> {
   await runGit(dir, "init", "--initial-branch=main");
   await runGit(dir, "config", "user.email", "test@example.com");
   await runGit(dir, "config", "user.name", "Test User");
+  await runGit(dir, "config", "core.editor", "true");
   await commitFile(dir, "README.md", "# Test Repo\n");
 
   return {
