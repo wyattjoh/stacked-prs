@@ -29,6 +29,8 @@ src/
 │   ├── stack.ts                # Core library: types, git config read/write, tree traversal
 │   ├── gh.ts                   # GitHub CLI wrapper with test fixture support (GH_MOCK_DIR)
 │   ├── worktrees.ts            # Pre-flight worktree safety reader (git worktree list + status)
+│   ├── colors.ts               # Per-stack color assignment (shared by TUI and clean output)
+│   ├── ansi.ts                 # ANSI escape code helpers
 │   └── testdata/helpers.ts     # Test utilities (createTestRepo, addBranch, commitFile)
 ├── commands/
 │   ├── clean.ts                # Stale config detection and removal
@@ -38,7 +40,8 @@ src/
 │   ├── nav.ts                  # PR navigation comment management
 │   ├── verify-refs.ts          # Post-rebase branch ancestry verification
 │   ├── import-discover.ts      # Chain detection: walks git graph to find branch trees
-│   └── submit-plan.ts          # Computes full submit plan
+│   ├── submit-plan.ts          # Computes full submit plan
+│   └── land.ts                 # Land planning and execution (pure planLand + impure executeLand)
 └── tui/                        # Ink-based interactive view (status -i)
     ├── app.tsx
     ├── components/
@@ -85,7 +88,7 @@ deno task install
 ```
 
 Subcommands: `status` (add `-i`/`--interactive` to launch the TUI), `restack`,
-`nav`, `verify-refs`, `import-discover`, `submit-plan`, `clean`.
+`nav`, `verify-refs`, `import-discover`, `submit-plan`, `land`, `clean`.
 `commands/config.ts` is a library; import its functions, do not try to invoke it
 via `cli.ts`.
 
@@ -134,7 +137,7 @@ can be continued across process invocations.
 | `src/commands/verify-refs.ts`     | Post-rebase verification                   | `cli.ts verify-refs`                             |
 | `src/commands/import-discover.ts` | Branch tree detection                      | `cli.ts import-discover`                         |
 | `src/commands/submit-plan.ts`     | Submit planning                            | `cli.ts submit-plan`                             |
-| `src/commands/land.ts`            | Land library (pure plan + impure execute)  | Imported by the TUI; not a CLI subcommand        |
+| `src/commands/land.ts`            | Land planning and execution (pure planLand + impure executeLand) | `cli.ts land [--dry-run] [--json] [--resume]`; also imported by the TUI |
 | `src/tui/app.tsx`                 | Root Ink component, owns reducer + effects | Launched by `cli.ts status -i`                   |
 
 ### Git config schema
@@ -158,8 +161,8 @@ branch rebase, and cleared on successful completion. If it exists,
 
 The TUI is an Ink + React app launched by `cli.ts status -i`. It reads the same
 data sources as non-interactive `status` (`getAllStackTrees`, `git merge-base`,
-`gh pr list`), and does not write anything. The code is split along a strict
-purity boundary so most of it is testable without Ink:
+`gh pr list`), and owns one write path: the `L` key (land). The code is split
+along a strict purity boundary so most of it is testable without Ink:
 
 - Pure (`lib/layout.ts`, `state/reducer.ts`, `state/navigation.ts`) — unit
   tested with synthetic inputs, no Ink, no git. Per-stack color assignment lives
@@ -212,15 +215,18 @@ the top).
 
 Keyboard navigation:
 
-- `↑`/`↓`/`k`/`j`: walk branches in row order (crosses stack boundaries).
-- `←`/`→`/`h`/`l`: parent / first child in the tree.
+- `↑`/`↓`: walk branches in row order (crosses stack boundaries).
+- `←`/`→`: parent / first child in the tree.
 - `g`/`G`: first / last branch in the current stack.
-- `[`/`]` or `pgup`/`pgdn`: previous / next stack.
-- `tab` / `shift-tab`: cycle tabs.
+- `pgup`/`pgdn`: previous / next stack.
+- `tab` / `shift-tab`: cycle focus (header / body / detail pane).
 - `1`-`9`: jump to tab N.
 - `?`: toggle help overlay (rendered inline inside the main Box rather than as a
   separate root, so Ink's log-update tracking stays correct after close).
-- `o`/`y`/`Y`: open PR / yank branch name / yank PR URL.
+- `p`: open focused PR in browser.
+- `b`: copy branch name to clipboard.
+- `L`: land stack; `r`: refresh all.
+- In the land modal: `↑`/`↓` (or `k`/`j`) scroll content; `y`/`n` confirm/cancel.
 
 The status bar at the bottom is built dynamically from `STATUS_BAR_ITEMS` in
 `help-overlay.tsx`: `buildStatusBar(termSize.cols)` greedily includes shortcuts

@@ -230,19 +230,21 @@ with per-stack colors, PR state glyphs, sync-status connectors, and a live
 commit detail pane. Mostly read-only: the only write operation is the `L`
 binding, which lands a stack whose root PR has been merged.
 
-Common keys:
+Key bindings:
 
-- Arrow keys / `hjkl`: navigate the map
-- `tab` / `shift-tab`: switch tabs
-- `r`: refresh current tab
-- `o`: open focused PR in browser
-- `y` / `Y`: copy branch name / PR URL
+- `↑`/`↓`/`←`/`→`: navigate branches (up/down in row order, left to parent, right to first child)
+- `tab` / `shift-tab`: cycle focus between header, stack map, and detail pane
+- `g` / `G`: first / last branch in the current stack
+- `pgup` / `pgdn`: previous / next stack
+- `r`: refresh all
+- `p`: open focused PR in browser
+- `b`: copy branch name to clipboard
 - `L`: land the focused stack (root merged, or every branch merged). Opens a
   modal with the full plan (rebases, pushes, PR retargets, deletions), waits for
   `y` to confirm, streams progress, and rolls back local branches + attempts
-  remote restore on failure.
+  remote restore on failure. Use `↑`/`↓` to scroll the modal.
 - `?`: toggle full key help
-- `q`: quit
+- `q` / `esc` / `ctrl-c`: quit
 
 ### `/stacked-prs land`
 
@@ -302,14 +304,15 @@ deno run --allow-run=git,gh --allow-env --allow-read \
   src/cli.ts <subcommand> [flags]
 ```
 
-| Subcommand                | Purpose                                                           |
-| ------------------------- | ----------------------------------------------------------------- |
-| `cli.ts status [--json]`  | Tree output (or JSON) with PR info and sync status                |
-| `cli.ts restack [--json]` | Segment-based tree rebase; handles conflicts across segments      |
-| `cli.ts nav [--dry-run]`  | Builds and executes navigation comment plans                      |
-| `cli.ts verify-refs`      | Checks branch ancestry after rebase, outputs repair commands      |
-| `cli.ts import-discover`  | Discovers branch trees between a branch and main                  |
-| `cli.ts submit-plan`      | Computes the full submit plan (PRs to create/update, nav changes) |
+| Subcommand                                    | Purpose                                                               |
+| --------------------------------------------- | --------------------------------------------------------------------- |
+| `cli.ts status [--json]`                      | Tree output (or JSON) with PR info and sync status                    |
+| `cli.ts restack [--json]`                     | Segment-based tree rebase; handles conflicts across segments          |
+| `cli.ts nav [--dry-run]`                      | Builds and executes navigation comment plans                          |
+| `cli.ts verify-refs`                          | Checks branch ancestry after rebase, outputs repair commands          |
+| `cli.ts import-discover`                      | Discovers branch trees between a branch and main                      |
+| `cli.ts submit-plan`                          | Computes the full submit plan (PRs to create/update, nav changes)     |
+| `cli.ts land [--dry-run] [--json] [--resume]` | Land a merged PR; plan only with `--dry-run`, resume after conflicts  |
 
 `--stack-name` auto-detects from the current branch's git config when omitted.
 `--owner` and `--repo` auto-detect from `gh repo view` when omitted.
