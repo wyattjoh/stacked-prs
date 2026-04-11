@@ -1,5 +1,38 @@
 # Changelog
 
+## [1.2.0](https://github.com/wyattjoh/stacked-prs/compare/stacked-prs-v1.1.0...stacked-prs-v1.2.0) (2026-04-11)
+
+
+### Features
+
+* add compile:macos and compile:linux tasks for binary distribution ([da7b7cd](https://github.com/wyattjoh/stacked-prs/commit/da7b7cd214dd45dc1bdf93490921c588623792d4))
+* add tag-triggered Homebrew binary release workflow ([91f398f](https://github.com/wyattjoh/stacked-prs/commit/91f398fc407b11b743cc68e66f9608bc80be3b8a))
+* **cli:** add land subcommand with --dry-run, --json, --resume flags ([b1fefb5](https://github.com/wyattjoh/stacked-prs/commit/b1fefb56944cb035657b3115f661210f229b35a8))
+* **config:** defer branch config removal on land; set stack-merged flag instead ([819c985](https://github.com/wyattjoh/stacked-prs/commit/819c985e1f0a46e1590012273c7debcfa348c38a))
+* **land:** add LandResumeState and executeLandFromCli with conflict pause/resume ([a58967f](https://github.com/wyattjoh/stacked-prs/commit/a58967f8c9e5901eb89fe9db513f8401b7b1169a))
+* **land:** filter historical merged nodes from classifyLandCase and planLand ([631ca77](https://github.com/wyattjoh/stacked-prs/commit/631ca7785e42e7e47b31f4984f3ec3ab3c413e8f))
+* **nav:** render stack-merged branches as strikethrough in nav comments ([e293375](https://github.com/wyattjoh/stacked-prs/commit/e29337519ed82dc6a982784661ed301a34980b59))
+* **restack:** skip stack-merged nodes in topologicalOrder ([6db5ed5](https://github.com/wyattjoh/stacked-prs/commit/6db5ed583fcab393d8a14241e8b6735374102beb))
+* **stack:** add merged field to StackNode; read stack-merged from git config ([d250bf8](https://github.com/wyattjoh/stacked-prs/commit/d250bf82c5a034a967fdbbb4367f4cece1f14e1f))
+* **status:** return 'landed' sync status for stack-merged branches ([370d19d](https://github.com/wyattjoh/stacked-prs/commit/370d19daa16f25f27acdb7efe1ad1fa0ca13bdfe))
+* **tui/land-modal:** add ↑/↓ scroll to land modal ([b8d12ee](https://github.com/wyattjoh/stacked-prs/commit/b8d12ee4b1c60320ea180d1cb6987934621ffe01))
+* **tui/land-modal:** show rollback commands executed on failure ([6698aae](https://github.com/wyattjoh/stacked-prs/commit/6698aae721a3a5f014dd5558252d3bbb51bab48f))
+* **tui/layout:** add merged field to GridCell; walk merged roots before live roots ([520722d](https://github.com/wyattjoh/stacked-prs/commit/520722d92575ac02d96591c99d1d602d911cfd02))
+* **tui/loader:** skip sync computation for stack-merged nodes; set 'landed' ([45e4eb4](https://github.com/wyattjoh/stacked-prs/commit/45e4eb4b843957820447ffd4f60ebe3924483280))
+* **tui/scroll:** account for merged cell gap rows in measureLayout ([fda1c00](https://github.com/wyattjoh/stacked-prs/commit/fda1c0017222578a293cd72ef2fedae23e7a85ad))
+* **tui/stack-band:** render merged cells dimmed with gap rows; no connector ([939c0ba](https://github.com/wyattjoh/stacked-prs/commit/939c0ba0e20d3a7b27c5a9c2c6a719d960f5f5ab))
+
+
+### Bug Fixes
+
+* **homebrew:** add concurrency guard and fail-fast: false to release workflow ([2c03354](https://github.com/wyattjoh/stacked-prs/commit/2c033544aad57ac63b07d9c2c0047969d9f25910))
+* **tests:** bypass Ink CI suppression and set no-op editor in test repos ([6531629](https://github.com/wyattjoh/stacked-prs/commit/6531629493afd392758fd64939511b66ebfb9a06))
+* **tests:** resolve CI environment failures ([daf4bd2](https://github.com/wyattjoh/stacked-prs/commit/daf4bd2370bff7ebe0e2aa5757d86a7664a9d730))
+* **tests:** use debug:true in narrow nav tests to bypass Ink CI suppression ([552f6ea](https://github.com/wyattjoh/stacked-prs/commit/552f6ea2036eaa8ef7bd257fddadacce90bd6f4a))
+* **tui/land-modal:** hide rollback section when nothing was rolled back ([90d6daa](https://github.com/wyattjoh/stacked-prs/commit/90d6daa6ec6c72c17723b91cb3762dbbb4f59000))
+* **tui/stack-band:** use separate code path for non-merged stacks to avoid Ink height regression ([5dffc02](https://github.com/wyattjoh/stacked-prs/commit/5dffc02be3b3e662000df7af999dedac84665f01))
+* **worktrees:** skip the operating worktree instead of always skipping the primary ([b008127](https://github.com/wyattjoh/stacked-prs/commit/b008127197bf1174f38179f354ce91448d429822))
+
 ## [1.1.0](https://github.com/wyattjoh/stacked-prs/compare/stacked-prs-v1.0.0...stacked-prs-v1.1.0) (2026-04-09)
 
 
