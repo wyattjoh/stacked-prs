@@ -1,0 +1,113 @@
+name: Homebrew Release
+
+on:
+  push:
+    tags:
+      - "stacked-prs-v*"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    strategy:
+      matrix:
+        include:
+          - target: aarch64-apple-darwin
+            clipboard: pbcopy
+          - target: x86_64-apple-darwin
+            clipboard: pbcopy
+          - target: aarch64-unknown-linux-gnu
+            clipboard: xclip,wl-copy
+          - target: x86_64-unknown-linux-gnu
+            clipboard: xclip,wl-copy
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Deno
+        uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+
+      - name: Compile binary
+        run: |
+          deno compile \
+            --config deno.json \
+            --allow-run=git,gh,${{ matrix.clipboard }} \
+            --allow-env \
+            --allow-read \
+            --target ${{ matrix.target }} \
+            -o stacked-prs \
+            src/cli.ts
+
+      - name: Create archive
+        run: tar czf stacked-prs-${{ matrix.target }}.tar.gz stacked-prs
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: stacked-prs-${{ matrix.target }}
+          path: stacked-prs-${{ matrix.target }}.tar.gz
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          merge-multiple: true
+          path: artifacts
+
+      - name: Verify release exists
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="${{ github.ref_name }}"
+          gh release view "$TAG" --repo ${{ github.repository }} \
+            || { echo "ERROR: GitHub Release for ${TAG} not found. release-please may not have run yet."; exit 1; }
+
+      - name: Upload binaries to GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="${{ github.ref_name }}"
+          gh release upload "$TAG" artifacts/*.tar.gz \
+            --repo ${{ github.repository }} \
+            --clobber
+
+      - name: Compute SHA256 checksums
+        id: checksums
+        run: |
+          cd artifacts
+          JSON="{"
+          FIRST=true
+          for f in stacked-prs-*.tar.gz; do
+            target="${f#stacked-prs-}"
+            target="${target%.tar.gz}"
+            sha=$(sha256sum "$f" | cut -d' ' -f1)
+            if [ "$FIRST" = true ]; then
+              FIRST=false
+            else
+              JSON="${JSON},"
+            fi
+            JSON="${JSON}\"${target}\":\"${sha}\""
+          done
+          JSON="${JSON}}"
+          echo "json=${JSON}" >> $GITHUB_OUTPUT
+          echo "Checksums: ${JSON}"
+
+      - name: Update Homebrew formula
+        uses: wyattjoh/homebrew-bump-revision@v1
+        with:
+          tap: wyattjoh/homebrew-stable
+          formula: stacked-prs
+          mode: checksums
+          tag: ${{ github.ref_name }}
+          binary-name: stacked-prs
+          checksums: ${{ steps.checksums.outputs.json }}
+          source-repository: ${{ github.repository }}
+          github-token: ${{ secrets.HOMEBREW_PAT }}
