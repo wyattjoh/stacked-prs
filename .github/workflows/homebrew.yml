@@ -1,12 +1,11 @@
 name: Homebrew Release
 
 on:
-  push:
-    tags:
-      - "stacked-prs-v*"
+  release:
+    types: [published]
 
 concurrency:
-  group: homebrew-release-${{ github.ref }}
+  group: homebrew-release-${{ github.event.release.tag_name }}
   cancel-in-progress: false
 
 jobs:
@@ -67,19 +66,11 @@ jobs:
           merge-multiple: true
           path: artifacts
 
-      - name: Verify release exists
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          TAG="${{ github.ref_name }}"
-          gh release view "$TAG" --repo ${{ github.repository }} \
-            || { echo "ERROR: GitHub Release for ${TAG} not found. release-please may not have run yet."; exit 1; }
-
       - name: Upload binaries to GitHub Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          TAG="${{ github.ref_name }}"
+          TAG="${{ github.event.release.tag_name }}"
           gh release upload "$TAG" artifacts/*.tar.gz \
             --repo ${{ github.repository }} \
             --clobber
@@ -111,7 +102,7 @@ jobs:
           tap: wyattjoh/homebrew-stable
           formula: stacked-prs
           mode: checksums
-          tag: ${{ github.ref_name }}
+          tag: ${{ github.event.release.tag_name }}
           binary-name: stacked-prs
           checksums: ${{ steps.checksums.outputs.json }}
           source-repository: ${{ github.repository }}
