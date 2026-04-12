@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.2.3](https://github.com/wyattjoh/stacked-prs/compare/stacked-prs-v1.2.2...stacked-prs-v1.2.3) (2026-04-12)
+
+
+### Bug Fixes
+
+* **cli:** read version from plugin.json instead of hardcoded string ([9ffa894](https://github.com/wyattjoh/stacked-prs/commit/9ffa894b20c7e8862f2b4659eaee13e1aea42a9d))
+
 ## [1.2.2](https://github.com/wyattjoh/stacked-prs/compare/stacked-prs-v1.2.1...stacked-prs-v1.2.2) (2026-04-12)
 
 
