@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.2.4](https://github.com/wyattjoh/stacked-prs/compare/stacked-prs-v1.2.3...stacked-prs-v1.2.4) (2026-04-12)
+
+
+### Bug Fixes
+
+* address launch readiness issues from code review ([96faac5](https://github.com/wyattjoh/stacked-prs/commit/96faac55236037b01eb69cc3949eeec0dbd9bd33))
+
 ## [1.2.3](https://github.com/wyattjoh/stacked-prs/compare/stacked-prs-v1.2.2...stacked-prs-v1.2.3) (2026-04-12)
 
 
