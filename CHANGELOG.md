@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.3.0](https://github.com/wyattjoh/stacked-prs/compare/stacked-prs-v1.2.4...stacked-prs-v1.3.0) (2026-04-12)
+
+
+### Features
+
+* **tui:** show * indicator next to the current branch ([db73abc](https://github.com/wyattjoh/stacked-prs/commit/db73abc717364666b16744d0ac0cc7259d9f83e2))
+
 ## [1.2.4](https://github.com/wyattjoh/stacked-prs/compare/stacked-prs-v1.2.3...stacked-prs-v1.2.4) (2026-04-12)
 
 
