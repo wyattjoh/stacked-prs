@@ -14,6 +14,7 @@ export interface StackBandProps {
   color: string;
   cells: GridCell[];
   focusedBranch: string | null;
+  currentBranch: string | null;
   prData: Map<string, PrCellState>;
   /** Rendered before the stack header text (multi-color trunk segments). */
   headerPrefix: TrunkSegment[];
@@ -126,6 +127,7 @@ function renderCell(
   const cellState = props.prData.get(cell.branch);
   const info = infoLine(cellState);
   const prColor = infoColor(cellState);
+  const isCurrent = cell.branch === props.currentBranch;
   const nameStyle = focused ? { inverse: true } : {};
   const railStr = isLast ? "" : railPrefix(cell);
   return (
@@ -133,7 +135,9 @@ function renderCell(
       <Box flexDirection="row" flexShrink={0}>
         <TrunkSegments segs={props.contentPrefix} />
         {top.length > 0 && <Text color={props.color}>{top}</Text>}
-        <Text color={props.color} {...nameStyle}>{cell.branch}</Text>
+        <Text color={props.color} {...nameStyle}>
+          {isCurrent ? `${cell.branch} *` : cell.branch}
+        </Text>
       </Box>
       <Box flexDirection="row" flexShrink={0}>
         <TrunkSegments segs={props.contentPrefix} />

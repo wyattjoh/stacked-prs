@@ -62,6 +62,7 @@ describe("StackBand merged cell rendering", () => {
         color="cyan"
         cells={[mergedCell, liveCell]}
         focusedBranch={null}
+        currentBranch={null}
         prData={new Map()}
         headerPrefix={[]}
         contentPrefix={[]}
@@ -84,6 +85,7 @@ describe("StackBand", () => {
         color="cyan"
         cells={[cell("a1", 0, 0)]}
         focusedBranch={null}
+        currentBranch={null}
         prData={new Map()}
         headerPrefix={emptyPrefix}
         contentPrefix={emptyPrefix}
@@ -111,6 +113,7 @@ describe("StackBand", () => {
           cell("a3", 2, 2, { parent: "a2", ancestorRails: [false] }),
         ]}
         focusedBranch={null}
+        currentBranch={null}
         prData={new Map()}
         headerPrefix={emptyPrefix}
         contentPrefix={emptyPrefix}
@@ -145,6 +148,7 @@ describe("StackBand", () => {
           }),
         ]}
         focusedBranch={null}
+        currentBranch={null}
         prData={new Map()}
         headerPrefix={emptyPrefix}
         contentPrefix={emptyPrefix}
@@ -153,6 +157,29 @@ describe("StackBand", () => {
     const f = lastFrame() ?? "";
     expect(f).toContain("├─ a2");
     expect(f).toContain("└─ a3");
+    unmount();
+  });
+
+  test("shows * after the current branch name", () => {
+    const { lastFrame, unmount } = render(
+      <StackBand
+        stackName="alpha"
+        mergeStrategy={undefined}
+        color="cyan"
+        cells={[
+          cell("a1", 0, 0, { hasChildren: true, firstChild: "a2" }),
+          cell("a2", 1, 1, { parent: "a1", ancestorRails: [] }),
+        ]}
+        focusedBranch={null}
+        currentBranch="a2"
+        prData={new Map()}
+        headerPrefix={emptyPrefix}
+        contentPrefix={emptyPrefix}
+      />,
+    );
+    const f = lastFrame() ?? "";
+    expect(f).toContain("a2 *");
+    expect(f).not.toContain("a1 *");
     unmount();
   });
 });

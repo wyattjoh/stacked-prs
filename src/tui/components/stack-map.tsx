@@ -134,8 +134,16 @@ function initialTrunkSegments(
 }
 
 export function StackMap(props: StackMapProps): React.ReactElement {
-  const { trees, grid, colorByStack, activeTab, cursor, prData, syncByBranch } =
-    props.state;
+  const {
+    trees,
+    grid,
+    colorByStack,
+    activeTab,
+    cursor,
+    prData,
+    syncByBranch,
+    currentBranch,
+  } = props.state;
 
   if (trees.length === 0) {
     return (
@@ -228,6 +236,7 @@ export function StackMap(props: StackMapProps): React.ReactElement {
                 color={colors[S]}
                 cells={cells}
                 focusedBranch={cursor?.branch ?? null}
+                currentBranch={currentBranch}
                 prData={prData}
                 headerPrefix={headerPrefix}
                 contentPrefix={contentPrefix}
