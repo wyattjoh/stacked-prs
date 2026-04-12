@@ -1,5 +1,6 @@
 #!/usr/bin/env -S deno run --allow-run=git,gh --allow-env
 import { Command } from "@cliffy/command";
+import pluginMeta from "../.claude-plugin/plugin.json" with { type: "json" };
 import { getStackTree, renderTree, runGitCommand } from "./lib/stack.ts";
 import { gh } from "./lib/gh.ts";
 import { getStackStatus } from "./commands/status.ts";
@@ -69,7 +70,7 @@ const dir = Deno.cwd();
 
 await new Command()
   .name("stacked-prs")
-  .version("1.0.0")
+  .version(pluginMeta.version)
   .description("Manage stacked branches and pull requests")
   // --- status ---
   .command("status", "Show current stack state with PR and sync info")
