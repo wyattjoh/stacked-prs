@@ -105,7 +105,6 @@ export function App(props: AppProps): React.ReactElement {
     const theme = props.theme ?? detectTheme(Deno.env.get("COLORFGBG"));
     const local = await loadLocal(props.dir);
     const overrides = await readColorOverrides(
-      props.dir,
       local.trees.map((t) => t.stackName),
       runRunGit,
     );

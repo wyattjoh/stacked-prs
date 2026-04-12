@@ -92,7 +92,6 @@ export function assignColors(
 
 /** Read color overrides from git config: `stack.<name>.color = <color>`. */
 export async function readColorOverrides(
-  _dir: string,
   stackNames: string[],
   runGit: (
     ...args: string[]

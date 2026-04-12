@@ -220,7 +220,6 @@ Keyboard navigation:
 - `g`/`G`: first / last branch in the current stack.
 - `pgup`/`pgdn`: previous / next stack.
 - `tab` / `shift-tab`: cycle focus (header / body / detail pane).
-- `1`-`9`: jump to tab N.
 - `?`: toggle help overlay (rendered inline inside the main Box rather than as a
   separate root, so Ink's log-update tracking stays correct after close).
 - `p`: open focused PR in browser.

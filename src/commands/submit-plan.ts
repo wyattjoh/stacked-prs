@@ -5,7 +5,7 @@ import {
   runGitCommand,
 } from "../lib/stack.ts";
 import type { MergeStrategy } from "../lib/stack.ts";
-import { gh } from "../lib/gh.ts";
+import { gh, selectBestPr } from "../lib/gh.ts";
 import { buildNavPlan } from "./nav.ts";
 import type { NavAction } from "./nav.ts";
 
@@ -91,7 +91,7 @@ export async function computeSubmitPlan(
         "number,url,title,state,isDraft,baseRefName",
       );
       const prs = JSON.parse(result) as GhPrInfo[];
-      const pr = prs.length > 0 ? prs[0] : null;
+      const pr = selectBestPr(prs);
 
       let action: BranchSubmitPlan["action"];
       if (!pr) {

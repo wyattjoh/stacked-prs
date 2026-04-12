@@ -144,17 +144,6 @@ export function reducer(state: State, action: Action): State {
     }
     case "SCROLL":
       return { ...state, viewport: action.viewport };
-    case "REFRESH_RESET": {
-      const prData = new Map(state.prData);
-      for (const b of action.branches) {
-        prData.set(b, { status: "loading" });
-      }
-      return {
-        ...state,
-        prData,
-        loadingCount: action.branches.length,
-      };
-    }
     case "HELP_TOGGLE":
       return { ...state, showHelp: !state.showHelp };
     case "TERMINAL_SIZE":

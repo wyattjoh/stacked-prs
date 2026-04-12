@@ -147,7 +147,6 @@ export type Action =
   | { type: "CURSOR_SET"; cursor: Cursor }
   | { type: "TAB_SWITCH"; tab: TabId }
   | { type: "SCROLL"; viewport: Viewport }
-  | { type: "REFRESH_RESET"; branches: string[] }
   | { type: "HELP_TOGGLE" }
   | { type: "TERMINAL_SIZE"; tooNarrow: boolean }
   | { type: "FOCUS_SET"; section: FocusedSection }

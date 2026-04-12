@@ -7,7 +7,7 @@ description: >-
   stack", "stack PRs", "stacked branches", "push to stack", "dependent PRs",
   "chained branches", "rebase my stack", "sync stack", "submit stack",
   "land stack", "import stack", "split branch", "fold branch".
-argument-hint: "[init|create|insert|split|fold|move|sync|restack|submit|status|land|import|help]"
+argument-hint: "[init|create|insert|split|fold|move|sync|restack|submit|status|land|import|clean|help]"
 allowed-tools: >-
   Bash(git *), Bash(gh *), Bash(deno run *),
   Read, Grep, Glob, TodoWrite

@@ -2,7 +2,8 @@
 import { Command } from "@cliffy/command";
 import pluginMeta from "../.claude-plugin/plugin.json" with { type: "json" };
 import { getStackTree, renderTree, runGitCommand } from "./lib/stack.ts";
-import { gh } from "./lib/gh.ts";
+import { gh, selectBestPr } from "./lib/gh.ts";
+import { prStateFrom } from "./commands/land.ts";
 import { getStackStatus } from "./commands/status.ts";
 import { restack } from "./commands/restack.ts";
 import { buildNavPlan, executeNavAction } from "./commands/nav.ts";
@@ -427,7 +428,6 @@ await new Command()
       ).sort();
       const theme = detectTheme(Deno.env.get("COLORFGBG"));
       const overrides = await readColorOverrides(
-        dir,
         stackNames,
         async (...args: string[]) => {
           const r = await runGitCommand(dir, ...args);
@@ -539,14 +539,9 @@ await new Command()
           "number,url,state,isDraft,createdAt",
         );
         const prs = JSON.parse(result) as import("./tui/types.ts").PrInfo[];
-        const best = prs.length > 0 ? prs[0] : null;
+        const best = selectBestPr(prs);
         if (best) {
-          const state = best.state.toUpperCase() as
-            | "OPEN"
-            | "DRAFT"
-            | "MERGED"
-            | "CLOSED";
-          prStateByBranch.set(node.branch, state);
+          prStateByBranch.set(node.branch, prStateFrom(best));
           prInfoByBranch.set(node.branch, best);
         } else {
           prStateByBranch.set(node.branch, "NONE");

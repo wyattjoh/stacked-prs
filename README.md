@@ -1,9 +1,9 @@
 # stacked-prs
 
-A Claude Code plugin for managing stacked branches and pull requests. Instead of
-a standalone CLI, this plugin works _through_ Claude: you issue natural language
-requests or `/stacked-prs <subcommand>`, and Claude orchestrates git, gh, and
-Deno helper scripts on your behalf.
+A tool for managing stacked branches and pull requests. Available as a
+standalone CLI (via Homebrew) and as a Claude Code plugin that works _through_
+Claude: you issue natural language requests or `/stacked-prs <subcommand>`, and
+Claude orchestrates git, gh, and Deno helper scripts on your behalf.
 
 ## Installation
 
@@ -259,6 +259,12 @@ roots:
 4. Retargets the next PR's base to main and flips it out of draft
 5. Updates navigation comments
 6. Deletes the merged branch locally
+
+### `/stacked-prs clean`
+
+Detect and remove stale stack/branch config entries (orphaned branches, missing
+parents, empty stacks, stale resume-state). Presents findings and waits for
+confirmation before removing any config keys.
 
 ### `/stacked-prs help`
 

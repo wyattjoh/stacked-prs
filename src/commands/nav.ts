@@ -1,6 +1,6 @@
 import { getAllNodes, getStackTree } from "../lib/stack.ts";
 import type { StackNode, StackTree } from "../lib/stack.ts";
-import { gh } from "../lib/gh.ts";
+import { gh, selectBestPr } from "../lib/gh.ts";
 
 export interface NavAction {
   action: "create" | "update";
@@ -110,7 +110,7 @@ export async function buildNavPlan(
         "number,url,title,state,isDraft",
       );
       const prs = JSON.parse(result) as GhPr[];
-      return { node, pr: prs.length > 0 ? prs[0] : null };
+      return { node, pr: selectBestPr(prs) };
     }),
   );
 
