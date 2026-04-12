@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.2.1](https://github.com/wyattjoh/stacked-prs/compare/stacked-prs-v1.2.0...stacked-prs-v1.2.1) (2026-04-12)
+
+
+### Bug Fixes
+
+* **ci:** use release published trigger for homebrew and marketplace workflows ([eb343a7](https://github.com/wyattjoh/stacked-prs/commit/eb343a7e22310f21cad25ac73a7f98d39c2f9633))
+
 ## [1.2.0](https://github.com/wyattjoh/stacked-prs/compare/stacked-prs-v1.1.0...stacked-prs-v1.2.0) (2026-04-11)
 
 
