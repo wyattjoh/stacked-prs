@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.3.1](https://github.com/wyattjoh/stacked-prs/compare/stacked-prs-v1.3.0...stacked-prs-v1.3.1) (2026-04-13)
+
+
+### Bug Fixes
+
+* **land:** use resolveRepo() to correctly extract owner string ([fffeb53](https://github.com/wyattjoh/stacked-prs/commit/fffeb534ca039f557d400eebab0bd6cfad51f8f5))
+
 ## [1.3.0](https://github.com/wyattjoh/stacked-prs/compare/stacked-prs-v1.2.4...stacked-prs-v1.3.0) (2026-04-12)
 
 
