@@ -85,6 +85,10 @@ deno task tui
 # dir) so the TUI can be run from any other git repo. Uses absolute paths so
 # the installed wrapper always reads the live source and deno.json.
 deno task install
+
+# Compile a standalone binary (no Deno runtime needed at target)
+deno task compile:macos   # macOS (pbcopy clipboard support)
+deno task compile:linux   # Linux (xclip/wl-copy clipboard support)
 ```
 
 Subcommands: `status` (add `-i`/`--interactive` to launch the TUI), `restack`,
@@ -164,10 +168,10 @@ data sources as non-interactive `status` (`getAllStackTrees`, `git merge-base`,
 `gh pr list`), and owns one write path: the `L` key (land). The code is split
 along a strict purity boundary so most of it is testable without Ink:
 
-- Pure (`lib/layout.ts`, `state/reducer.ts`, `state/navigation.ts`) — unit
-  tested with synthetic inputs, no Ink, no git. Per-stack color assignment lives
-  in the shared `src/lib/colors.ts` (used by both the TUI and the `clean` CLI
-  output).
+- Pure (`lib/layout.ts`, `lib/scroll.ts`, `state/reducer.ts`,
+  `state/navigation.ts`) — unit tested with synthetic inputs, no Ink, no git.
+  Per-stack color assignment lives in the shared `src/lib/colors.ts` (used by
+  both the TUI and the `clean` CLI output).
 - Impure (`state/loader.ts`, `lib/clipboard.ts`, `components/*.tsx`, `app.tsx`)
   — loader uses the existing `gh.ts` fixture system, components are tested with
   `ink-testing-library`, and `app.tsx` gets an integration test that spins up a
