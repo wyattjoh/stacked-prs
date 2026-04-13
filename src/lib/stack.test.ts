@@ -882,6 +882,34 @@ describe("addLandedBranch", () => {
     }
   });
 
+  test("getStackTree deduplicates: live non-root branch also present as tombstone", async () => {
+    const repo = await createTestRepo();
+    try {
+      await addBranch(repo.dir, "feature/a", "main");
+      await addBranch(repo.dir, "feature/b", "feature/a");
+      await setStackNode(repo.dir, "feature/a", "my-stack", "main");
+      await setStackNode(repo.dir, "feature/b", "my-stack", "feature/a");
+      await setBaseBranch(repo.dir, "my-stack", "main");
+
+      // Tombstone a live non-root branch
+      await addLandedBranch(repo.dir, "my-stack", "feature/b");
+
+      const tree = await getStackTree(repo.dir, "my-stack");
+      const matching = getAllNodes(tree).filter((n) =>
+        n.branch === "feature/b"
+      );
+      expect(matching).toHaveLength(1);
+      // Appears as the live child of feature/a, not as a merged root
+      expect(matching[0].merged).toBeUndefined();
+      expect(matching[0].parent).toBe("feature/a");
+      // No tombstone root should appear for feature/b
+      const rootB = tree.roots.find((n) => n.branch === "feature/b");
+      expect(rootB).toBeUndefined();
+    } finally {
+      await repo.cleanup();
+    }
+  });
+
   test("getLandedBranches isolates per stack", async () => {
     const repo = await createTestRepo();
     try {

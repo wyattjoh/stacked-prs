@@ -414,6 +414,8 @@ export async function getStackTree(
 
   // Synthesize merged root nodes from stack-level tombstones.
   // Skip any tombstone that already appears in the live tree (dedup guard).
+  // Use matchingBranches (all stack-name holders), not just tree nodes, so
+  // partially-configured live branches still suppress tombstones.
   const liveBranches = new Set(matchingBranches);
   const landedBranches = await getLandedBranches(dir, resolvedStackName);
   const tombstoneRoots: StackNode[] = [];
@@ -427,6 +429,7 @@ export async function getStackTree(
       merged: true,
     });
   }
+  tombstoneRoots.sort((a, b) => a.branch.localeCompare(b.branch));
 
   return {
     stackName: resolvedStackName,
