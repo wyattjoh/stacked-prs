@@ -164,7 +164,6 @@ export async function removeStackBranch(
     `branch.${branch}.stack-name`,
     `branch.${branch}.stack-parent`,
     `branch.${branch}.stack-order`,
-    `branch.${branch}.stack-merged`,
   ];
 
   // Ignore exit codes: key may not exist (exit 5 from git config --unset).
