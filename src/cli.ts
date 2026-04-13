@@ -2,7 +2,7 @@
 import { Command } from "@cliffy/command";
 import pluginMeta from "../.claude-plugin/plugin.json" with { type: "json" };
 import { getStackTree, renderTree, runGitCommand } from "./lib/stack.ts";
-import { gh, selectBestPr } from "./lib/gh.ts";
+import { gh, resolveRepo, selectBestPr } from "./lib/gh.ts";
 import { prStateFrom } from "./commands/land.ts";
 import { getStackStatus } from "./commands/status.ts";
 import { restack } from "./commands/restack.ts";
@@ -48,23 +48,6 @@ async function resolveStackName(
   }
 
   return stackName;
-}
-
-/** Resolve owner/repo from gh CLI, with --owner/--repo override. */
-async function resolveRepo(
-  explicitOwner?: string,
-  explicitRepo?: string,
-): Promise<{ owner: string; repo: string }> {
-  if (explicitOwner && explicitRepo) {
-    return { owner: explicitOwner, repo: explicitRepo };
-  }
-
-  const result = await gh("repo", "view", "--json", "owner,name");
-  const parsed = JSON.parse(result) as {
-    owner: { login: string };
-    name: string;
-  };
-  return { owner: parsed.owner.login, repo: parsed.name };
 }
 
 const dir = Deno.cwd();

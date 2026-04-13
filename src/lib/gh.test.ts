@@ -3,6 +3,7 @@ import { expect } from "@std/expect";
 import {
   fixtureKey,
   gh,
+  resolveRepo,
   selectBestPr,
   setMockDir,
   writeFixture,
@@ -133,6 +134,42 @@ describe("gh mock mode", () => {
 
     const result = await gh("api", "repos/owner/repo/issues/101/comments");
     expect(JSON.parse(result)).toEqual(fixture);
+  });
+});
+
+describe("resolveRepo", () => {
+  let tmpDir: string;
+
+  beforeEach(async () => {
+    tmpDir = await Deno.makeTempDir();
+    setMockDir(tmpDir);
+  });
+
+  afterEach(async () => {
+    setMockDir(undefined);
+    await Deno.remove(tmpDir, { recursive: true });
+  });
+
+  test("returns explicit owner/repo when both provided", async () => {
+    const result = await resolveRepo("acme", "widgets");
+    expect(result).toEqual({ owner: "acme", repo: "widgets" });
+  });
+
+  test("extracts owner.login string from nested gh response", async () => {
+    // gh repo view --json owner,name returns { owner: { login: "..." }, name: "..." }
+    // A previous bug used the owner object directly in a template literal,
+    // producing "[object Object]" instead of the login string.
+    await writeFixture(
+      tmpDir,
+      ["repo", "view", "--json", "owner,name"],
+      { owner: { login: "acme-corp" }, name: "my-repo" },
+    );
+
+    const result = await resolveRepo();
+    expect(result).toEqual({ owner: "acme-corp", repo: "my-repo" });
+    // The critical assertion: owner must be a plain string, never "[object Object]"
+    expect(typeof result.owner).toBe("string");
+    expect(result.owner).not.toContain("[object");
   });
 });
 

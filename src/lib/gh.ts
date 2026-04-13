@@ -136,6 +136,31 @@ export function selectBestPr<
   return sorted[0];
 }
 
+/**
+ * Resolve the GitHub owner and repo name for the current repository.
+ *
+ * Accepts optional explicit overrides; when both are provided the gh CLI
+ * is never called. Otherwise shells out to `gh repo view --json owner,name`
+ * and extracts the scalar `owner.login` string. The nested object shape is
+ * a common source of bugs — callers that inline-parse the JSON and forget
+ * `.login` end up with "[object Object]" in template literals.
+ */
+export async function resolveRepo(
+  explicitOwner?: string,
+  explicitRepo?: string,
+): Promise<{ owner: string; repo: string }> {
+  if (explicitOwner && explicitRepo) {
+    return { owner: explicitOwner, repo: explicitRepo };
+  }
+
+  const result = await gh("repo", "view", "--json", "owner,name");
+  const parsed = JSON.parse(result) as {
+    owner: { login: string };
+    name: string;
+  };
+  return { owner: parsed.owner.login, repo: parsed.name };
+}
+
 /** Write a fixture file for tests. */
 export async function writeFixture(
   mockDir: string,
