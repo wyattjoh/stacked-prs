@@ -232,17 +232,24 @@ export async function addLandedBranch(
 ): Promise<void> {
   const existing = await getLandedBranches(dir, stackName);
   if (existing.includes(branch)) return;
-  await runGitCommand(
+  const { code, stderr } = await runGitCommand(
     dir,
     "config",
     "--add",
     `stack.${stackName}.landed-branches`,
     branch,
   );
+  if (code !== 0) {
+    throw new Error(
+      `git config --add stack.${stackName}.landed-branches ${branch} failed: ${stderr}`,
+    );
+  }
 }
 
 /**
- * @deprecated Use addLandedBranch instead. Retained for backwards-compat tests.
+ * @deprecated Use addLandedBranch. Branch-level stack-merged keys are
+ * destroyed by `git branch -D`; stack-level landed-branches survive deletion.
+ * See docs/superpowers/plans/2026-04-13-stack-level-tombstones.md.
  */
 export async function setStackMerged(
   dir: string,

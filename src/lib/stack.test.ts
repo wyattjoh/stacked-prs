@@ -8,6 +8,7 @@ import {
   getAllNodes,
   getAllStackTrees,
   getBaseBranch,
+  getLandedBranches,
   getLeaves,
   getMergeStrategy,
   getPathTo,
@@ -797,6 +798,51 @@ describe("addLandedBranch", () => {
         "stack.my-stack.landed-branches",
       );
       expect(stdout).toBe("feature/a");
+    } finally {
+      await repo.cleanup();
+    }
+  });
+
+  test("getLandedBranches returns empty array when no tombstones exist", async () => {
+    const repo = await createTestRepo();
+    try {
+      await setBaseBranch(repo.dir, "my-stack", "main");
+      const result = await getLandedBranches(repo.dir, "my-stack");
+      expect(result).toEqual([]);
+    } finally {
+      await repo.cleanup();
+    }
+  });
+
+  test("getLandedBranches returns all landed branches for a stack", async () => {
+    const repo = await createTestRepo();
+    try {
+      await setBaseBranch(repo.dir, "my-stack", "main");
+      await addLandedBranch(repo.dir, "my-stack", "feature/a");
+      await addLandedBranch(repo.dir, "my-stack", "feature/b");
+
+      const result = await getLandedBranches(repo.dir, "my-stack");
+      expect(result).toContain("feature/a");
+      expect(result).toContain("feature/b");
+      expect(result).toHaveLength(2);
+    } finally {
+      await repo.cleanup();
+    }
+  });
+
+  test("getLandedBranches isolates per stack", async () => {
+    const repo = await createTestRepo();
+    try {
+      await setBaseBranch(repo.dir, "stack-a", "main");
+      await setBaseBranch(repo.dir, "stack-b", "main");
+      await addLandedBranch(repo.dir, "stack-a", "feature/x");
+      await addLandedBranch(repo.dir, "stack-b", "feature/y");
+
+      const aResult = await getLandedBranches(repo.dir, "stack-a");
+      const bResult = await getLandedBranches(repo.dir, "stack-b");
+
+      expect(aResult).toEqual(["feature/x"]);
+      expect(bResult).toEqual(["feature/y"]);
     } finally {
       await repo.cleanup();
     }
