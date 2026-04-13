@@ -206,7 +206,44 @@ export async function setStackNode(
   await gitConfigSet(dir, `branch.${branch}.stack-parent`, parent);
 }
 
-/** Mark a branch as historically merged (stack-merged = "true"). */
+/** Read all landed branch names for a stack (multi-value key). */
+export async function getLandedBranches(
+  dir: string,
+  stackName: string,
+): Promise<string[]> {
+  const { code, stdout } = await runGitCommand(
+    dir,
+    "config",
+    "--get-all",
+    `stack.${stackName}.landed-branches`,
+  );
+  if (code !== 0 || !stdout) return [];
+  return stdout.split("\n").filter(Boolean);
+}
+
+/**
+ * Record a branch as landed in the stack-level config.
+ * Idempotent: skips the write if the branch is already recorded.
+ */
+export async function addLandedBranch(
+  dir: string,
+  stackName: string,
+  branch: string,
+): Promise<void> {
+  const existing = await getLandedBranches(dir, stackName);
+  if (existing.includes(branch)) return;
+  await runGitCommand(
+    dir,
+    "config",
+    "--add",
+    `stack.${stackName}.landed-branches`,
+    branch,
+  );
+}
+
+/**
+ * @deprecated Use addLandedBranch instead. Retained for backwards-compat tests.
+ */
 export async function setStackMerged(
   dir: string,
   branch: string,

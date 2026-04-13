@@ -3,6 +3,7 @@ import { expect } from "@std/expect";
 import { addBranch, createTestRepo, runGit } from "./testdata/helpers.ts";
 import type { TestRepo } from "./testdata/helpers.ts";
 import {
+  addLandedBranch,
   findNode,
   getAllNodes,
   getAllStackTrees,
@@ -736,6 +737,66 @@ describe("getStackTree merged field", () => {
       const tree = await getStackTree(repo.dir, "helper-stack");
       const nodeC = tree.roots.find((n) => n.branch === "feature/c");
       expect(nodeC?.merged).toBe(true);
+    } finally {
+      await repo.cleanup();
+    }
+  });
+});
+
+describe("addLandedBranch", () => {
+  test("writes branch name to stack-level config", async () => {
+    const repo = await createTestRepo();
+    try {
+      await setBaseBranch(repo.dir, "my-stack", "main");
+      await addLandedBranch(repo.dir, "my-stack", "feature/a");
+
+      const { stdout } = await runGitCommand(
+        repo.dir,
+        "config",
+        "--get-all",
+        "stack.my-stack.landed-branches",
+      );
+      expect(stdout).toBe("feature/a");
+    } finally {
+      await repo.cleanup();
+    }
+  });
+
+  test("supports multiple landed branches", async () => {
+    const repo = await createTestRepo();
+    try {
+      await setBaseBranch(repo.dir, "my-stack", "main");
+      await addLandedBranch(repo.dir, "my-stack", "feature/a");
+      await addLandedBranch(repo.dir, "my-stack", "feature/b");
+
+      const { stdout } = await runGitCommand(
+        repo.dir,
+        "config",
+        "--get-all",
+        "stack.my-stack.landed-branches",
+      );
+      const branches = stdout.split("\n");
+      expect(branches).toContain("feature/a");
+      expect(branches).toContain("feature/b");
+    } finally {
+      await repo.cleanup();
+    }
+  });
+
+  test("is idempotent: skips duplicate branch names", async () => {
+    const repo = await createTestRepo();
+    try {
+      await setBaseBranch(repo.dir, "my-stack", "main");
+      await addLandedBranch(repo.dir, "my-stack", "feature/a");
+      await addLandedBranch(repo.dir, "my-stack", "feature/a");
+
+      const { stdout } = await runGitCommand(
+        repo.dir,
+        "config",
+        "--get-all",
+        "stack.my-stack.landed-branches",
+      );
+      expect(stdout).toBe("feature/a");
     } finally {
       await repo.cleanup();
     }
