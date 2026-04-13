@@ -830,6 +830,58 @@ describe("addLandedBranch", () => {
     }
   });
 
+  test("getStackTree reconstructs merged root from stack-level tombstone", async () => {
+    const repo = await createTestRepo();
+    try {
+      await addBranch(repo.dir, "feature/a", "main");
+      await addBranch(repo.dir, "feature/b", "main");
+      await setStackNode(repo.dir, "feature/a", "my-stack", "main");
+      await setStackNode(repo.dir, "feature/b", "my-stack", "main");
+      await setBaseBranch(repo.dir, "my-stack", "main");
+
+      // Simulate land: add tombstone, then delete branch (wipes branch config)
+      await addLandedBranch(repo.dir, "my-stack", "feature/a");
+      await runGit(repo.dir, "checkout", "main");
+      await runGit(repo.dir, "branch", "-D", "feature/a");
+
+      const tree = await getStackTree(repo.dir, "my-stack");
+      const nodeA = tree.roots.find((n) => n.branch === "feature/a");
+      const nodeB = tree.roots.find((n) => n.branch === "feature/b");
+
+      expect(nodeA).toBeDefined();
+      expect(nodeA!.merged).toBe(true);
+      expect(nodeA!.parent).toBe("main");
+      expect(nodeA!.children).toEqual([]);
+
+      expect(nodeB).toBeDefined();
+      expect(nodeB!.merged).toBeUndefined();
+    } finally {
+      await repo.cleanup();
+    }
+  });
+
+  test("getStackTree deduplicates: live branch takes precedence over tombstone", async () => {
+    const repo = await createTestRepo();
+    try {
+      await addBranch(repo.dir, "feature/a", "main");
+      await setStackNode(repo.dir, "feature/a", "my-stack", "main");
+      await setBaseBranch(repo.dir, "my-stack", "main");
+
+      // Add tombstone for a branch that still exists as a live node
+      await addLandedBranch(repo.dir, "my-stack", "feature/a");
+
+      const tree = await getStackTree(repo.dir, "my-stack");
+      const nodes = getAllNodes(tree);
+
+      // Should appear exactly once (live version, not merged)
+      const matching = nodes.filter((n) => n.branch === "feature/a");
+      expect(matching).toHaveLength(1);
+      expect(matching[0].merged).toBeUndefined();
+    } finally {
+      await repo.cleanup();
+    }
+  });
+
   test("getLandedBranches isolates per stack", async () => {
     const repo = await createTestRepo();
     try {

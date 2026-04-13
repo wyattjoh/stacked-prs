@@ -412,11 +412,27 @@ export async function getStackTree(
   const rootBranches = childrenMap.get(baseBranch) ?? [];
   const roots = rootBranches.map(buildNode);
 
+  // Synthesize merged root nodes from stack-level tombstones.
+  // Skip any tombstone that already appears in the live tree (dedup guard).
+  const liveBranches = new Set(matchingBranches);
+  const landedBranches = await getLandedBranches(dir, resolvedStackName);
+  const tombstoneRoots: StackNode[] = [];
+  for (const branch of landedBranches) {
+    if (liveBranches.has(branch)) continue;
+    tombstoneRoots.push({
+      branch,
+      stackName: resolvedStackName,
+      parent: baseBranch,
+      children: [],
+      merged: true,
+    });
+  }
+
   return {
     stackName: resolvedStackName,
     baseBranch,
     mergeStrategy,
-    roots,
+    roots: [...tombstoneRoots, ...roots],
   };
 }
 
