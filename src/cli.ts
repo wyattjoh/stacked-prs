@@ -509,11 +509,7 @@ await new Command()
     const tree = await getStackTree(dir, stackName);
     const nodes = getAllNodes(tree);
 
-    const repoInfo = await gh("repo", "view", "--json", "owner,name");
-    const { owner, name: repoName } = JSON.parse(repoInfo) as {
-      owner: { login: string };
-      name: string;
-    };
+    const { owner, repo: repoName } = await resolveRepo();
 
     const prStateByBranch = new Map<
       string,
