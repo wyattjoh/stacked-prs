@@ -1515,17 +1515,20 @@ export async function executeLandFromCli(
       };
     }
 
-    completed.completedRebases.push(step.branch);
-
     // Mirror the TUI executor's patch-id drop detection (see the inline
     // check in executeCaseARebases). Branches with zero unique commits
-    // beyond origin/<base> after rebase were auto-merged by patch-id
-    // during the upstream squash merge. Record them so the push and PR
-    // retarget loops below skip these branches, and the cleanup loop
-    // instead closes the PR, deletes the branch, and tombstones it.
-    if (await isBranchAutoMerged(dir, step.branch, step.newTarget)) {
-      completed.autoMerged.push(step.branch);
-    }
+    // beyond their rebase target were auto-merged by patch-id during
+    // the upstream squash merge. Detect FIRST so both fields are
+    // persisted in a single resume-state write; otherwise a crash
+    // between the rebase-complete record and the auto-merge record
+    // would make --resume skip the branch with stale classification.
+    const autoMerged = await isBranchAutoMerged(
+      dir,
+      step.branch,
+      step.newTarget,
+    );
+    completed.completedRebases.push(step.branch);
+    if (autoMerged) completed.autoMerged.push(step.branch);
     await writeLandResumeState(dir, stackName, completed);
   }
 
