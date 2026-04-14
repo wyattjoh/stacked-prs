@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.6.0](https://github.com/wyattjoh/stacked-prs/compare/stacked-prs-v1.5.0...stacked-prs-v1.6.0) (2026-04-14)
+
+
+### Features
+
+* **cli:** add pr, submit, and sync subcommands mirroring Graphite ([199b110](https://github.com/wyattjoh/stacked-prs/commit/199b1108db2af65e3c760a8408c0649d56178789))
+
 ## [1.5.0](https://github.com/wyattjoh/stacked-prs/compare/stacked-prs-v1.4.0...stacked-prs-v1.5.0) (2026-04-14)
 
 
