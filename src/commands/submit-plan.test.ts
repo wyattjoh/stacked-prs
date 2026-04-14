@@ -1,30 +1,33 @@
-import { afterEach, beforeEach, describe, it as test } from "@std/testing/bdd";
+import { describe, it as test } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { addBranch, createTestRepo } from "../lib/testdata/helpers.ts";
-import type { TestRepo } from "../lib/testdata/helpers.ts";
+import {
+  addBranch,
+  createTestRepo,
+  makeTempDir,
+} from "../lib/testdata/helpers.ts";
 import { setBaseBranch, setStackNode } from "../lib/stack.ts";
 import type { StackTree } from "../lib/stack.ts";
 import { setMockDir, writeFixture } from "../lib/gh.ts";
 import { computeSubmitPlan } from "./submit-plan.ts";
 import { generateNavMarkdown } from "./nav.ts";
 
+/** Acquire a temp mock dir, register it, and reset on disposal. */
+async function makeMockDir(): Promise<AsyncDisposable & { path: string }> {
+  const dir = await makeTempDir("stacked-prs-mock-");
+  setMockDir(dir.path);
+  return {
+    path: dir.path,
+    [Symbol.asyncDispose]: async () => {
+      setMockDir(undefined);
+      await dir[Symbol.asyncDispose]();
+    },
+  };
+}
+
 describe("computeSubmitPlan", () => {
-  let repo: TestRepo;
-  let mockDir: string;
-
-  beforeEach(async () => {
-    repo = await createTestRepo();
-    mockDir = await Deno.makeTempDir();
-    setMockDir(mockDir);
-  });
-
-  afterEach(async () => {
-    setMockDir(undefined);
-    await repo.cleanup();
-    await Deno.remove(mockDir, { recursive: true });
-  });
-
   test("marks branches with no PRs as create", async () => {
+    await using repo = await createTestRepo();
+    await using _mock = await makeMockDir();
     await addBranch(repo.dir, "feat/a", "main");
     await addBranch(repo.dir, "feat/b", "feat/a");
 
@@ -54,6 +57,8 @@ describe("computeSubmitPlan", () => {
   });
 
   test("marks update-base when PR base does not match parent", async () => {
+    await using repo = await createTestRepo();
+    await using mock = await makeMockDir();
     await addBranch(repo.dir, "feat/a", "main");
     await addBranch(repo.dir, "feat/b", "feat/a");
 
@@ -63,7 +68,7 @@ describe("computeSubmitPlan", () => {
 
     // feat/a has PR with correct base "main"
     await writeFixture(
-      mockDir,
+      mock.path,
       ["pr", "list", "--head", "feat/a", "--repo", "o/r"],
       [{
         number: 10,
@@ -77,7 +82,7 @@ describe("computeSubmitPlan", () => {
 
     // feat/b has PR with wrong base "main" (should be "feat/a")
     await writeFixture(
-      mockDir,
+      mock.path,
       ["pr", "list", "--head", "feat/b", "--repo", "o/r"],
       [{
         number: 11,
@@ -91,12 +96,12 @@ describe("computeSubmitPlan", () => {
 
     // Empty comment arrays for nav plan
     await writeFixture(
-      mockDir,
+      mock.path,
       ["api", "repos/o/r/issues/10/comments"],
       [],
     );
     await writeFixture(
-      mockDir,
+      mock.path,
       ["api", "repos/o/r/issues/11/comments"],
       [],
     );
@@ -118,6 +123,8 @@ describe("computeSubmitPlan", () => {
   });
 
   test("isNoOp is true when all PRs have correct base and nav is current", async () => {
+    await using repo = await createTestRepo();
+    await using mock = await makeMockDir();
     await addBranch(repo.dir, "feat/a", "main");
 
     await setBaseBranch(repo.dir, "my-stack", "main");
@@ -125,7 +132,7 @@ describe("computeSubmitPlan", () => {
 
     // feat/a has PR with correct base
     await writeFixture(
-      mockDir,
+      mock.path,
       ["pr", "list", "--head", "feat/a", "--repo", "o/r"],
       [{
         number: 10,
@@ -152,7 +159,7 @@ describe("computeSubmitPlan", () => {
     const navBody = generateNavMarkdown(tree, new Map([["feat/a", 10]]), 10);
 
     await writeFixture(
-      mockDir,
+      mock.path,
       ["api", "repos/o/r/issues/10/comments"],
       [{ id: 500, body: navBody }],
     );
@@ -168,6 +175,8 @@ describe("computeSubmitPlan", () => {
   });
 
   test("flips a non-base PR back to draft when it has been marked ready", async () => {
+    await using repo = await createTestRepo();
+    await using mock = await makeMockDir();
     await addBranch(repo.dir, "feat/a", "main");
     await addBranch(repo.dir, "feat/b", "feat/a");
 
@@ -177,7 +186,7 @@ describe("computeSubmitPlan", () => {
 
     // feat/a is correctly ready (parent = main)
     await writeFixture(
-      mockDir,
+      mock.path,
       ["pr", "list", "--head", "feat/a", "--repo", "o/r"],
       [{
         number: 10,
@@ -191,7 +200,7 @@ describe("computeSubmitPlan", () => {
 
     // feat/b correctly targets feat/a but is incorrectly ready (should be draft)
     await writeFixture(
-      mockDir,
+      mock.path,
       ["pr", "list", "--head", "feat/b", "--repo", "o/r"],
       [{
         number: 11,
@@ -203,8 +212,8 @@ describe("computeSubmitPlan", () => {
       }],
     );
 
-    await writeFixture(mockDir, ["api", "repos/o/r/issues/10/comments"], []);
-    await writeFixture(mockDir, ["api", "repos/o/r/issues/11/comments"], []);
+    await writeFixture(mock.path, ["api", "repos/o/r/issues/10/comments"], []);
+    await writeFixture(mock.path, ["api", "repos/o/r/issues/11/comments"], []);
 
     const plan = await computeSubmitPlan(repo.dir, "my-stack", "o", "r");
 
@@ -217,6 +226,8 @@ describe("computeSubmitPlan", () => {
   });
 
   test("flips a base-targeted PR to ready when it is currently a draft", async () => {
+    await using repo = await createTestRepo();
+    await using mock = await makeMockDir();
     await addBranch(repo.dir, "feat/a", "main");
 
     await setBaseBranch(repo.dir, "my-stack", "main");
@@ -224,7 +235,7 @@ describe("computeSubmitPlan", () => {
 
     // feat/a targets main but is still a draft
     await writeFixture(
-      mockDir,
+      mock.path,
       ["pr", "list", "--head", "feat/a", "--repo", "o/r"],
       [{
         number: 10,
@@ -236,7 +247,7 @@ describe("computeSubmitPlan", () => {
       }],
     );
 
-    await writeFixture(mockDir, ["api", "repos/o/r/issues/10/comments"], []);
+    await writeFixture(mock.path, ["api", "repos/o/r/issues/10/comments"], []);
 
     const plan = await computeSubmitPlan(repo.dir, "my-stack", "o", "r");
 

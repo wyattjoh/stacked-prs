@@ -2,11 +2,28 @@ import React from "react";
 import { expect } from "@std/expect";
 import { render } from "ink";
 import { EventEmitter } from "node:events";
-import { addBranch, createTestRepo } from "../lib/testdata/helpers.ts";
+import {
+  addBranch,
+  createTestRepo,
+  makeTempDir,
+} from "../lib/testdata/helpers.ts";
 import type { TestRepo } from "../lib/testdata/helpers.ts";
 import { runGitCommand, setBaseBranch, setStackNode } from "../lib/stack.ts";
 import { setMockDir, writeFixture } from "../lib/gh.ts";
 import { App } from "./app.tsx";
+
+/** Acquire a temp mock dir, register it, and reset on disposal. */
+async function makeMockDir(): Promise<AsyncDisposable & { path: string }> {
+  const dir = await makeTempDir("stacked-prs-mock-");
+  setMockDir(dir.path);
+  return {
+    path: dir.path,
+    [Symbol.asyncDispose]: async () => {
+      setMockDir(undefined);
+      await dir[Symbol.asyncDispose]();
+    },
+  };
+}
 
 /**
  * Stdout shim with controllable dimensions. `ink-testing-library` hard-codes
@@ -116,21 +133,6 @@ async function buildLinearStack(
   await setBaseBranch(repo.dir, "demo", "main");
 }
 
-async function withNarrowTestRepo(
-  fn: (repo: TestRepo, mockDir: string) => Promise<void>,
-) {
-  const repo = await createTestRepo();
-  const mockDir = await Deno.makeTempDir();
-  setMockDir(mockDir);
-  try {
-    await fn(repo, mockDir);
-  } finally {
-    setMockDir(undefined);
-    await repo.cleanup();
-    await Deno.remove(mockDir, { recursive: true });
-  }
-}
-
 // Ink's `render` uses `signal-exit` to install process-wide signal handlers
 // so it can unmount on exit. Deno's default test sanitizers flag those as
 // leaks even after `instance.unmount()`, so these tests opt out of op /
@@ -151,38 +153,38 @@ Deno.test({
   sanitizeResources: false,
   sanitizeExit: false,
   async fn() {
-    await withNarrowTestRepo(async (repo, mockDir) => {
-      await buildLinearStack(repo, mockDir, 10);
-      await runGitCommand(repo.dir, "checkout", "feat/br-09");
+    await using repo = await createTestRepo();
+    await using mock = await makeMockDir();
+    await buildLinearStack(repo, mock.path, 10);
+    await runGitCommand(repo.dir, "checkout", "feat/br-09");
 
-      const stdout = new SizedStdout(50, 18);
-      const stdin = new TestStdin();
-      const instance = render(<App dir={repo.dir} />, {
-        stdout: stdout as never,
-        stdin: stdin as never,
-        exitOnCtrlC: false,
-        debug: true,
-      });
-      try {
-        await new Promise((r) => setTimeout(r, 400));
-
-        for (let step = 0; step < 10; step++) {
-          const frame = stripAnsi(latestFrame(stdout));
-          const { stackMap, detailHeader } = regions(frame);
-          const expected = `feat/br-${String(9 - step).padStart(2, "0")}`;
-          // Ground truth for "which branch is selected" is the detail pane
-          // header line, which always shows the cursor's branch name.
-          expect(detailHeader).toContain(expected);
-          // The core invariant the user cares about: the selected branch
-          // is visible inside the stack-map viewport.
-          expect(stackMap).toContain(expected);
-          stdin.send("\x1b[A");
-          await new Promise((r) => setTimeout(r, 60));
-        }
-      } finally {
-        instance.unmount();
-      }
+    const stdout = new SizedStdout(50, 18);
+    const stdin = new TestStdin();
+    const instance = render(<App dir={repo.dir} />, {
+      stdout: stdout as never,
+      stdin: stdin as never,
+      exitOnCtrlC: false,
+      debug: true,
     });
+    try {
+      await new Promise((r) => setTimeout(r, 400));
+
+      for (let step = 0; step < 10; step++) {
+        const frame = stripAnsi(latestFrame(stdout));
+        const { stackMap, detailHeader } = regions(frame);
+        const expected = `feat/br-${String(9 - step).padStart(2, "0")}`;
+        // Ground truth for "which branch is selected" is the detail pane
+        // header line, which always shows the cursor's branch name.
+        expect(detailHeader).toContain(expected);
+        // The core invariant the user cares about: the selected branch
+        // is visible inside the stack-map viewport.
+        expect(stackMap).toContain(expected);
+        stdin.send("\x1b[A");
+        await new Promise((r) => setTimeout(r, 60));
+      }
+    } finally {
+      instance.unmount();
+    }
   },
 });
 
@@ -240,48 +242,48 @@ Deno.test({
   sanitizeResources: false,
   sanitizeExit: false,
   async fn() {
-    await withNarrowTestRepo(async (repo, mockDir) => {
-      await buildMultipleStacks(repo, mockDir);
-      await runGitCommand(repo.dir, "checkout", "feat/lib-non-empty-array");
+    await using repo = await createTestRepo();
+    await using mock = await makeMockDir();
+    await buildMultipleStacks(repo, mock.path);
+    await runGitCommand(repo.dir, "checkout", "feat/lib-non-empty-array");
 
-      // Narrow width + modest height = similar to the user's screenshot.
-      const stdout = new SizedStdout(50, 20);
-      const stdin = new TestStdin();
-      const instance = render(<App dir={repo.dir} />, {
-        stdout: stdout as never,
-        stdin: stdin as never,
-        exitOnCtrlC: false,
-        debug: true,
-      });
-      try {
-        await new Promise((r) => setTimeout(r, 500));
-
-        // Walk upward through every branch in render order. The ordered
-        // list is reverse-DFS across all stacks; construct it from the
-        // same alphabetical stack ordering the TUI uses.
-        const walk: string[] = [
-          "feat/lib-non-empty-array",
-          "refactor/format-uses-runners",
-          "feat/lib-runners",
-          "refactor/init-already-set-up",
-          "wyattjoh/refresh-fixtures-cron",
-          "feat/di-tests",
-          "feat/di-container",
-          "feat/di-docs",
-          "feat/di-init",
-        ];
-        for (const expected of walk) {
-          const frame = stripAnsi(latestFrame(stdout));
-          const { stackMap, detailHeader } = regions(frame);
-          expect(detailHeader).toContain(expected);
-          expect(stackMap).toContain(expected);
-          stdin.send("\x1b[A");
-          await new Promise((r) => setTimeout(r, 60));
-        }
-      } finally {
-        instance.unmount();
-      }
+    // Narrow width + modest height = similar to the user's screenshot.
+    const stdout = new SizedStdout(50, 20);
+    const stdin = new TestStdin();
+    const instance = render(<App dir={repo.dir} />, {
+      stdout: stdout as never,
+      stdin: stdin as never,
+      exitOnCtrlC: false,
+      debug: true,
     });
+    try {
+      await new Promise((r) => setTimeout(r, 500));
+
+      // Walk upward through every branch in render order. The ordered
+      // list is reverse-DFS across all stacks; construct it from the
+      // same alphabetical stack ordering the TUI uses.
+      const walk: string[] = [
+        "feat/lib-non-empty-array",
+        "refactor/format-uses-runners",
+        "feat/lib-runners",
+        "refactor/init-already-set-up",
+        "wyattjoh/refresh-fixtures-cron",
+        "feat/di-tests",
+        "feat/di-container",
+        "feat/di-docs",
+        "feat/di-init",
+      ];
+      for (const expected of walk) {
+        const frame = stripAnsi(latestFrame(stdout));
+        const { stackMap, detailHeader } = regions(frame);
+        expect(detailHeader).toContain(expected);
+        expect(stackMap).toContain(expected);
+        stdin.send("\x1b[A");
+        await new Promise((r) => setTimeout(r, 60));
+      }
+    } finally {
+      instance.unmount();
+    }
   },
 });
 
@@ -292,48 +294,48 @@ Deno.test({
   sanitizeResources: false,
   sanitizeExit: false,
   async fn() {
-    await withNarrowTestRepo(async (repo, mockDir) => {
-      await buildMultipleStacks(repo, mockDir);
+    await using repo = await createTestRepo();
+    await using mock = await makeMockDir();
+    await buildMultipleStacks(repo, mock.path);
 
-      const stdout = new SizedStdout(45, 24);
-      const stdin = new TestStdin();
-      const instance = render(<App dir={repo.dir} />, {
-        stdout: stdout as never,
-        stdin: stdin as never,
-        exitOnCtrlC: false,
-        debug: true,
-      });
-      try {
-        await new Promise((r) => setTimeout(r, 400));
-        const frame = stripAnsi(latestFrame(stdout));
-        const lines = frame.split("\n");
-        // The HeaderBox spans rows 0-2 (top border, content, bottom border).
-        // The content row (line 1) must contain both the "stacked-prs" label and
-        // the "All stacks" text (active tab is All after initial load). If any
-        // header row wrapped, these assertions would shift.
-        expect(lines[1]).toContain("stacked-prs");
-        expect(lines[1]).toContain("All stacks");
-        // Chrome: HeaderBox (3) + body border (2) + detail pane (10) + status
-        // bar (1) = 16. The body wrapper's top border is the first `┌` in the
-        // frame. The HeaderBox uses round corners (╭/╰) so its borders are not
-        // captured. The HeaderBox occupies rows 0-2, so the body wrapper's `┌`
-        // is at row 3. The detail pane's `┌` sits immediately after the body
-        // wrapper's bottom border; the body wrapper is `stackMapHeight + 2`
-        // rows tall, where stackMapHeight = 24 - 16 = 8, giving a wrapper of
-        // 10 rows (rows 3..12) and the detail pane's `┌` at row 13. Note: the
-        // canopy row inside the body wrapper also starts with `┌`, so we use
-        // the first and last `┌` lines to identify the body wrapper and detail
-        // pane borders respectively.
-        const borderLines: number[] = [];
-        for (let i = 0; i < lines.length; i++) {
-          if (lines[i].includes("┌")) borderLines.push(i);
-        }
-        expect(borderLines[0]).toBe(3); // body wrapper top border
-        expect(borderLines.at(-1)).toBe(13); // detail pane top border
-      } finally {
-        instance.unmount();
-      }
+    const stdout = new SizedStdout(45, 24);
+    const stdin = new TestStdin();
+    const instance = render(<App dir={repo.dir} />, {
+      stdout: stdout as never,
+      stdin: stdin as never,
+      exitOnCtrlC: false,
+      debug: true,
     });
+    try {
+      await new Promise((r) => setTimeout(r, 400));
+      const frame = stripAnsi(latestFrame(stdout));
+      const lines = frame.split("\n");
+      // The HeaderBox spans rows 0-2 (top border, content, bottom border).
+      // The content row (line 1) must contain both the "stacked-prs" label and
+      // the "All stacks" text (active tab is All after initial load). If any
+      // header row wrapped, these assertions would shift.
+      expect(lines[1]).toContain("stacked-prs");
+      expect(lines[1]).toContain("All stacks");
+      // Chrome: HeaderBox (3) + body border (2) + detail pane (10) + status
+      // bar (1) = 16. The body wrapper's top border is the first `┌` in the
+      // frame. The HeaderBox uses round corners (╭/╰) so its borders are not
+      // captured. The HeaderBox occupies rows 0-2, so the body wrapper's `┌`
+      // is at row 3. The detail pane's `┌` sits immediately after the body
+      // wrapper's bottom border; the body wrapper is `stackMapHeight + 2`
+      // rows tall, where stackMapHeight = 24 - 16 = 8, giving a wrapper of
+      // 10 rows (rows 3..12) and the detail pane's `┌` at row 13. Note: the
+      // canopy row inside the body wrapper also starts with `┌`, so we use
+      // the first and last `┌` lines to identify the body wrapper and detail
+      // pane borders respectively.
+      const borderLines: number[] = [];
+      for (let i = 0; i < lines.length; i++) {
+        if (lines[i].includes("┌")) borderLines.push(i);
+      }
+      expect(borderLines[0]).toBe(3); // body wrapper top border
+      expect(borderLines.at(-1)).toBe(13); // detail pane top border
+    } finally {
+      instance.unmount();
+    }
   },
 });
 
@@ -344,43 +346,43 @@ Deno.test({
   sanitizeResources: false,
   sanitizeExit: false,
   async fn() {
-    await withNarrowTestRepo(async (repo, mockDir) => {
-      await buildMultipleStacks(repo, mockDir);
-      await runGitCommand(repo.dir, "checkout", "feat/di-init");
+    await using repo = await createTestRepo();
+    await using mock = await makeMockDir();
+    await buildMultipleStacks(repo, mock.path);
+    await runGitCommand(repo.dir, "checkout", "feat/di-init");
 
-      const stdout = new SizedStdout(45, 22);
-      const stdin = new TestStdin();
-      const instance = render(<App dir={repo.dir} />, {
-        stdout: stdout as never,
-        stdin: stdin as never,
-        exitOnCtrlC: false,
-        debug: true,
-      });
-      try {
-        await new Promise((r) => setTimeout(r, 500));
-        const walk: string[] = [
-          "feat/di-init",
-          "feat/di-docs",
-          "feat/di-container",
-          "feat/di-tests",
-          "wyattjoh/refresh-fixtures-cron",
-          "refactor/init-already-set-up",
-          "feat/lib-runners",
-          "refactor/format-uses-runners",
-          "feat/lib-non-empty-array",
-        ];
-        for (const expected of walk) {
-          const frame = stripAnsi(latestFrame(stdout));
-          const { stackMap, detailHeader } = regions(frame);
-          expect(detailHeader).toContain(expected);
-          expect(stackMap).toContain(expected);
-          stdin.send("\x1b[B"); // down-arrow
-          await new Promise((r) => setTimeout(r, 60));
-        }
-      } finally {
-        instance.unmount();
-      }
+    const stdout = new SizedStdout(45, 22);
+    const stdin = new TestStdin();
+    const instance = render(<App dir={repo.dir} />, {
+      stdout: stdout as never,
+      stdin: stdin as never,
+      exitOnCtrlC: false,
+      debug: true,
     });
+    try {
+      await new Promise((r) => setTimeout(r, 500));
+      const walk: string[] = [
+        "feat/di-init",
+        "feat/di-docs",
+        "feat/di-container",
+        "feat/di-tests",
+        "wyattjoh/refresh-fixtures-cron",
+        "refactor/init-already-set-up",
+        "feat/lib-runners",
+        "refactor/format-uses-runners",
+        "feat/lib-non-empty-array",
+      ];
+      for (const expected of walk) {
+        const frame = stripAnsi(latestFrame(stdout));
+        const { stackMap, detailHeader } = regions(frame);
+        expect(detailHeader).toContain(expected);
+        expect(stackMap).toContain(expected);
+        stdin.send("\x1b[B"); // down-arrow
+        await new Promise((r) => setTimeout(r, 60));
+      }
+    } finally {
+      instance.unmount();
+    }
   },
 });
 
@@ -391,41 +393,41 @@ Deno.test({
   sanitizeResources: false,
   sanitizeExit: false,
   async fn() {
-    await withNarrowTestRepo(async (repo, mockDir) => {
-      // Deep linear chain: the deepest branch's row is wider than 50 cols
-      // once every level adds 3 characters of ladder prefix. That exercises
-      // the horizontal scroll and is the exact shape the user reported.
-      await buildLinearStack(repo, mockDir, 20);
-      await runGitCommand(repo.dir, "checkout", "feat/br-19");
+    await using repo = await createTestRepo();
+    await using mock = await makeMockDir();
+    // Deep linear chain: the deepest branch's row is wider than 50 cols
+    // once every level adds 3 characters of ladder prefix. That exercises
+    // the horizontal scroll and is the exact shape the user reported.
+    await buildLinearStack(repo, mock.path, 20);
+    await runGitCommand(repo.dir, "checkout", "feat/br-19");
 
-      const stdout = new SizedStdout(50, 44);
-      const stdin = new TestStdin();
-      const instance = render(<App dir={repo.dir} />, {
-        stdout: stdout as never,
-        stdin: stdin as never,
-        exitOnCtrlC: false,
-        debug: true,
-      });
-      try {
-        await new Promise((r) => setTimeout(r, 500));
-        for (let step = 0; step < 20; step++) {
-          const frame = stripAnsi(latestFrame(stdout));
-          const { stackMap, detailHeader } = regions(frame);
-          const expected = `feat/br-${String(19 - step).padStart(2, "0")}`;
-          // Ground truth: the detail pane shows which branch is selected.
-          expect(detailHeader).toContain(expected);
-          // The user-visible invariant: the full branch name must be
-          // present in the stack-map region, not clipped by horizontal
-          // scroll. A substring check catches "feat/br-1" missing the
-          // trailing "9" when scrollX is off-by-3.
-          expect(stackMap).toContain(expected);
-          stdin.send("\x1b[A");
-          await new Promise((r) => setTimeout(r, 60));
-        }
-      } finally {
-        instance.unmount();
-      }
+    const stdout = new SizedStdout(50, 44);
+    const stdin = new TestStdin();
+    const instance = render(<App dir={repo.dir} />, {
+      stdout: stdout as never,
+      stdin: stdin as never,
+      exitOnCtrlC: false,
+      debug: true,
     });
+    try {
+      await new Promise((r) => setTimeout(r, 500));
+      for (let step = 0; step < 20; step++) {
+        const frame = stripAnsi(latestFrame(stdout));
+        const { stackMap, detailHeader } = regions(frame);
+        const expected = `feat/br-${String(19 - step).padStart(2, "0")}`;
+        // Ground truth: the detail pane shows which branch is selected.
+        expect(detailHeader).toContain(expected);
+        // The user-visible invariant: the full branch name must be
+        // present in the stack-map region, not clipped by horizontal
+        // scroll. A substring check catches "feat/br-1" missing the
+        // trailing "9" when scrollX is off-by-3.
+        expect(stackMap).toContain(expected);
+        stdin.send("\x1b[A");
+        await new Promise((r) => setTimeout(r, 60));
+      }
+    } finally {
+      instance.unmount();
+    }
   },
 });
 
@@ -435,41 +437,41 @@ Deno.test({
   sanitizeResources: false,
   sanitizeExit: false,
   async fn() {
-    await withNarrowTestRepo(async (repo, mockDir) => {
-      await buildLinearStack(repo, mockDir, 8);
-      await runGitCommand(repo.dir, "checkout", "feat/br-07");
+    await using repo = await createTestRepo();
+    await using mock = await makeMockDir();
+    await buildLinearStack(repo, mock.path, 8);
+    await runGitCommand(repo.dir, "checkout", "feat/br-07");
 
-      const stdout = new SizedStdout(60, 30);
-      const stdin = new TestStdin();
-      const instance = render(<App dir={repo.dir} />, {
-        stdout: stdout as never,
-        stdin: stdin as never,
-        exitOnCtrlC: false,
-        debug: true,
-      });
-      try {
-        await new Promise((r) => setTimeout(r, 400));
-        {
-          const { stackMap, detailHeader } = regions(
-            stripAnsi(latestFrame(stdout)),
-          );
-          expect(detailHeader).toContain("feat/br-07");
-          expect(stackMap).toContain("feat/br-07");
-        }
-
-        stdout.cols = 50;
-        stdout.rowsN = 18;
-        stdout.emit("resize");
-        await new Promise((r) => setTimeout(r, 100));
-
+    const stdout = new SizedStdout(60, 30);
+    const stdin = new TestStdin();
+    const instance = render(<App dir={repo.dir} />, {
+      stdout: stdout as never,
+      stdin: stdin as never,
+      exitOnCtrlC: false,
+      debug: true,
+    });
+    try {
+      await new Promise((r) => setTimeout(r, 400));
+      {
         const { stackMap, detailHeader } = regions(
           stripAnsi(latestFrame(stdout)),
         );
         expect(detailHeader).toContain("feat/br-07");
         expect(stackMap).toContain("feat/br-07");
-      } finally {
-        instance.unmount();
       }
-    });
+
+      stdout.cols = 50;
+      stdout.rowsN = 18;
+      stdout.emit("resize");
+      await new Promise((r) => setTimeout(r, 100));
+
+      const { stackMap, detailHeader } = regions(
+        stripAnsi(latestFrame(stdout)),
+      );
+      expect(detailHeader).toContain("feat/br-07");
+      expect(stackMap).toContain("feat/br-07");
+    } finally {
+      instance.unmount();
+    }
   },
 });

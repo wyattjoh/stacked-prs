@@ -1,7 +1,6 @@
-import { afterEach, beforeEach, describe, it as test } from "@std/testing/bdd";
+import { describe, it as test } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { addBranch, createTestRepo } from "../lib/testdata/helpers.ts";
-import type { TestRepo } from "../lib/testdata/helpers.ts";
 import {
   getAllNodes,
   getMergeStrategy,
@@ -24,17 +23,8 @@ import {
 } from "./config.ts";
 
 describe("config", () => {
-  let repo: TestRepo;
-
-  beforeEach(async () => {
-    repo = await createTestRepo();
-  });
-
-  afterEach(async () => {
-    await repo.cleanup();
-  });
-
   test("configSetBranch: writes metadata readable by getStackTree", async () => {
+    await using repo = await createTestRepo();
     await addBranch(repo.dir, "feature/a", "main");
     await setBaseBranch(repo.dir, "my-stack", "main");
 
@@ -51,6 +41,7 @@ describe("config", () => {
   });
 
   test("configRemoveBranch: removes branch from stack", async () => {
+    await using repo = await createTestRepo();
     await addBranch(repo.dir, "feature/a", "main");
     await setBaseBranch(repo.dir, "my-stack", "main");
     await setStackNode(repo.dir, "feature/a", "my-stack", "main");
@@ -62,6 +53,7 @@ describe("config", () => {
   });
 
   test("configSetStrategy: writes strategy readable by getMergeStrategy", async () => {
+    await using repo = await createTestRepo();
     await configSetStrategy(repo.dir, "my-stack", "squash");
 
     const strategy = await getMergeStrategy(repo.dir, "my-stack");
@@ -69,6 +61,7 @@ describe("config", () => {
   });
 
   test("configGet: returns tree JSON", async () => {
+    await using repo = await createTestRepo();
     await addBranch(repo.dir, "feature/a", "main");
     await setBaseBranch(repo.dir, "my-stack", "main");
     await setStackNode(repo.dir, "feature/a", "my-stack", "main");
@@ -81,6 +74,7 @@ describe("config", () => {
 
   describe("configInsertBranch", () => {
     test("inserts branch between parent and child (reparents child)", async () => {
+      await using repo = await createTestRepo();
       // Tree: main -> feature/a -> feature/b
       await addBranch(repo.dir, "feature/a", "main");
       await addBranch(repo.dir, "feature/b", "feature/a");
@@ -109,6 +103,7 @@ describe("config", () => {
     });
 
     test("inserts branch as new root (reparents old root)", async () => {
+      await using repo = await createTestRepo();
       // Tree: main -> feature/a
       await addBranch(repo.dir, "feature/a", "main");
       await addBranch(repo.dir, "feature/z", "main");
@@ -136,6 +131,7 @@ describe("config", () => {
 
   describe("configFoldBranch", () => {
     test("reparents children of folded branch to its parent, then removes it", async () => {
+      await using repo = await createTestRepo();
       // Tree: main -> feature/a -> feature/b -> feature/c
       await addBranch(repo.dir, "feature/a", "main");
       await addBranch(repo.dir, "feature/b", "feature/a");
@@ -160,6 +156,7 @@ describe("config", () => {
     });
 
     test("folds leaf branch (no children): just removes it", async () => {
+      await using repo = await createTestRepo();
       await addBranch(repo.dir, "feature/a", "main");
       await addBranch(repo.dir, "feature/b", "feature/a");
 
@@ -178,6 +175,7 @@ describe("config", () => {
     });
 
     test("folds middle branch with multiple children: reparents all children", async () => {
+      await using repo = await createTestRepo();
       // Tree: main -> feature/a -> feature/b -> feature/c
       //                                      -> feature/d
       await addBranch(repo.dir, "feature/a", "main");
@@ -209,6 +207,7 @@ describe("config", () => {
 
   describe("configMoveBranch", () => {
     test("moves branch to a new parent (detaches from old, reattaches)", async () => {
+      await using repo = await createTestRepo();
       // Tree: main -> feature/a -> feature/b -> feature/c
       await addBranch(repo.dir, "feature/a", "main");
       await addBranch(repo.dir, "feature/b", "feature/a");
@@ -237,6 +236,7 @@ describe("config", () => {
     });
 
     test("moves root branch to be child of another branch", async () => {
+      await using repo = await createTestRepo();
       // Tree: main -> feature/a
       //            -> feature/b (also root, second root scenario)
       // Actually make a linear tree and move the root to be a leaf
@@ -266,6 +266,7 @@ describe("config", () => {
 
   describe("configLandCleanup", () => {
     test("single root remains after landing: no split", async () => {
+      await using repo = await createTestRepo();
       // Tree: main -> feature/a -> feature/b -> feature/c
       // Land feature/a, feature/b becomes new live root (feature/a stays as merged)
       await addBranch(repo.dir, "feature/a", "main");
@@ -297,6 +298,7 @@ describe("config", () => {
     });
 
     test("multi-root after landing: splits into separate stacks", async () => {
+      await using repo = await createTestRepo();
       // Tree: main -> feature/a -> feature/b
       //                         -> feature/c
       // Land feature/a, leaves two live roots: feature/b and feature/c
@@ -334,6 +336,7 @@ describe("config", () => {
     });
 
     test("reparents direct children of landed root to base branch", async () => {
+      await using repo = await createTestRepo();
       // Linear: main -> feature/a -> feature/b
       // Land feature/a (marked merged); feature/b reparented to main
       await addBranch(repo.dir, "feature/a", "main");
@@ -362,6 +365,7 @@ describe("config", () => {
     });
 
     test("split-triggering land: each new split sees the landed branch as tombstone", async () => {
+      await using repo = await createTestRepo();
       // Tree: main -> feature/a -> feature/b, -> feature/c
       // Land feature/a; splits into stacks b and c. Both must see feature/a
       // as a merged root in their reconstructed tree.
@@ -396,6 +400,7 @@ describe("config", () => {
 
   describe("configLandCleanup (deferred cleanup)", () => {
     test("writes stack-level tombstone instead of branch-level stack-merged", async () => {
+      await using repo = await createTestRepo();
       await addBranch(repo.dir, "feature/a", "main");
       await addBranch(repo.dir, "feature/b", "feature/a");
       await setStackNode(repo.dir, "feature/a", "my-stack", "main");
@@ -423,6 +428,7 @@ describe("config", () => {
     });
 
     test("does not split when only one live root remains after landing", async () => {
+      await using repo = await createTestRepo();
       await addBranch(repo.dir, "feature/a", "main");
       await addBranch(repo.dir, "feature/b", "feature/a");
       await setStackNode(repo.dir, "feature/a", "my-stack", "main");
@@ -442,6 +448,7 @@ describe("config", () => {
 
   describe("configSplitStack", () => {
     test("splits multi-root stack into per-subtree stacks", async () => {
+      await using repo = await createTestRepo();
       // Tree: main -> feature/x -> feature/y
       //                         -> feature/z
       await addBranch(repo.dir, "feature/x", "main");
@@ -478,6 +485,7 @@ describe("config", () => {
     });
 
     test("copies tombstones to each new split stack", async () => {
+      await using repo = await createTestRepo();
       // Tree: main -> feature/a (will be tombstoned) -> feature/b, -> feature/c
       await addBranch(repo.dir, "feature/a", "main");
       await addBranch(repo.dir, "feature/b", "feature/a");

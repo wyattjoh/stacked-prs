@@ -1,5 +1,6 @@
-import { afterEach, beforeEach, describe, it as test } from "@std/testing/bdd";
+import { describe, it as test } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import { makeTempDir } from "./testdata/helpers.ts";
 import {
   fixtureKey,
   gh,
@@ -8,6 +9,19 @@ import {
   setMockDir,
   writeFixture,
 } from "./gh.ts";
+
+/** Acquire a temp mock dir, register it, and reset on disposal. */
+async function makeMockDir(): Promise<AsyncDisposable & { path: string }> {
+  const dir = await makeTempDir("stacked-prs-mock-");
+  setMockDir(dir.path);
+  return {
+    path: dir.path,
+    [Symbol.asyncDispose]: async () => {
+      setMockDir(undefined);
+      await dir[Symbol.asyncDispose]();
+    },
+  };
+}
 
 describe("fixtureKey", () => {
   test("normalizes slashes in branch names", () => {
@@ -75,24 +89,13 @@ describe("selectBestPr", () => {
 });
 
 describe("gh mock mode", () => {
-  let tmpDir: string;
-
-  beforeEach(async () => {
-    tmpDir = await Deno.makeTempDir();
-    setMockDir(tmpDir);
-  });
-
-  afterEach(async () => {
-    setMockDir(undefined);
-    await Deno.remove(tmpDir, { recursive: true });
-  });
-
   test("reads fixture file for pr-list command", async () => {
+    await using mock = await makeMockDir();
     const fixture = [{
       number: 42,
       url: "https://github.com/owner/repo/pull/42",
     }];
-    await writeFixture(tmpDir, [
+    await writeFixture(mock.path, [
       "pr",
       "list",
       "--head",
@@ -113,6 +116,7 @@ describe("gh mock mode", () => {
   });
 
   test("returns empty array for missing fixture", async () => {
+    await using _mock = await makeMockDir();
     const result = await gh(
       "pr",
       "list",
@@ -125,9 +129,10 @@ describe("gh mock mode", () => {
   });
 
   test("reads fixture for api commands", async () => {
+    await using mock = await makeMockDir();
     const fixture = [{ id: 1, body: "test comment" }];
     await writeFixture(
-      tmpDir,
+      mock.path,
       ["api", "repos/owner/repo/issues/101/comments"],
       fixture,
     );
@@ -138,29 +143,19 @@ describe("gh mock mode", () => {
 });
 
 describe("resolveRepo", () => {
-  let tmpDir: string;
-
-  beforeEach(async () => {
-    tmpDir = await Deno.makeTempDir();
-    setMockDir(tmpDir);
-  });
-
-  afterEach(async () => {
-    setMockDir(undefined);
-    await Deno.remove(tmpDir, { recursive: true });
-  });
-
   test("returns explicit owner/repo when both provided", async () => {
+    await using _mock = await makeMockDir();
     const result = await resolveRepo("acme", "widgets");
     expect(result).toEqual({ owner: "acme", repo: "widgets" });
   });
 
   test("extracts owner.login string from nested gh response", async () => {
+    await using mock = await makeMockDir();
     // gh repo view --json owner,name returns { owner: { login: "..." }, name: "..." }
     // A previous bug used the owner object directly in a template literal,
     // producing "[object Object]" instead of the login string.
     await writeFixture(
-      tmpDir,
+      mock.path,
       ["repo", "view", "--json", "owner,name"],
       { owner: { login: "acme-corp" }, name: "my-repo" },
     );

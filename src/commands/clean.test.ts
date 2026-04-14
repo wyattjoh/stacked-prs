@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, it as test } from "@std/testing/bdd";
+import { describe, it as test } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import {
   addBranch,
@@ -6,7 +6,6 @@ import {
   createTestRepo,
   runGit,
 } from "../lib/testdata/helpers.ts";
-import type { TestRepo } from "../lib/testdata/helpers.ts";
 import { setBaseBranch, setStackNode } from "../lib/stack.ts";
 import { executeRestack } from "./restack.ts";
 import { applyClean, detectStaleConfig } from "./clean.ts";
@@ -32,17 +31,8 @@ async function configKeyExists(dir: string, key: string): Promise<boolean> {
 }
 
 describe("detectStaleConfig", () => {
-  let repo: TestRepo;
-
-  beforeEach(async () => {
-    repo = await createTestRepo();
-  });
-
-  afterEach(async () => {
-    await repo.cleanup();
-  });
-
   test("empty repo: returns empty report", async () => {
+    await using repo = await createTestRepo();
     const report = await detectStaleConfig(repo.dir);
     expect(report.findings).toEqual([]);
     expect(report.stacksScanned).toBe(0);
@@ -50,6 +40,7 @@ describe("detectStaleConfig", () => {
   });
 
   test("healthy stack: no findings", async () => {
+    await using repo = await createTestRepo();
     await addBranch(repo.dir, "a", "main");
     await addBranch(repo.dir, "b", "a");
     await setBaseBranch(repo.dir, "test", "main");
@@ -63,6 +54,7 @@ describe("detectStaleConfig", () => {
   });
 
   test("missing branch ref: flags and lists branch stack keys", async () => {
+    await using repo = await createTestRepo();
     await addBranch(repo.dir, "a", "main");
     await addBranch(repo.dir, "b", "a");
     await setBaseBranch(repo.dir, "test", "main");
@@ -82,6 +74,7 @@ describe("detectStaleConfig", () => {
   });
 
   test("stale stack-parent: flags parent ref that does not exist", async () => {
+    await using repo = await createTestRepo();
     await addBranch(repo.dir, "a", "main");
     await setBaseBranch(repo.dir, "test", "main");
     await setStackNode(repo.dir, "a", "test", "ghost");
@@ -97,6 +90,7 @@ describe("detectStaleConfig", () => {
   });
 
   test("empty stack: flags stack with no member branches", async () => {
+    await using repo = await createTestRepo();
     await runGit(repo.dir, "config", "stack.foo.base-branch", "main");
     await runGit(repo.dir, "config", "stack.foo.merge-strategy", "merge");
 
@@ -109,6 +103,7 @@ describe("detectStaleConfig", () => {
   });
 
   test("stale resume-state: flags when no rebase is in progress", async () => {
+    await using repo = await createTestRepo();
     await addBranch(repo.dir, "a", "main");
     await setBaseBranch(repo.dir, "foo", "main");
     await setStackNode(repo.dir, "a", "foo", "main");
@@ -125,6 +120,7 @@ describe("detectStaleConfig", () => {
 
   test("resume-state during in-progress rebase: not flagged", async () => {
     // Reproduce the conflict scenario from restack.test.ts.
+    await using repo = await createTestRepo();
     await runGit(repo.dir, "checkout", "main");
     await commitFile(repo.dir, "shared.txt", "initial\n");
     await addBranch(repo.dir, "root", "main");
@@ -168,6 +164,7 @@ describe("detectStaleConfig", () => {
   });
 
   test("applyClean removes the right keys", async () => {
+    await using repo = await createTestRepo();
     await runGit(repo.dir, "config", "stack.foo.base-branch", "main");
     await runGit(repo.dir, "config", "stack.foo.merge-strategy", "merge");
 
@@ -183,6 +180,7 @@ describe("detectStaleConfig", () => {
   });
 
   test("applyClean is idempotent on already-gone keys", async () => {
+    await using repo = await createTestRepo();
     await runGit(repo.dir, "config", "stack.foo.base-branch", "main");
     const report = await detectStaleConfig(repo.dir);
     expect(report.findings).toHaveLength(1);
@@ -198,6 +196,7 @@ describe("detectStaleConfig", () => {
   });
 
   test("legacy stack-merged on live branch: flags as legacy-merged-flag", async () => {
+    await using repo = await createTestRepo();
     await addBranch(repo.dir, "a", "main");
     await setBaseBranch(repo.dir, "test", "main");
     await setStackNode(repo.dir, "a", "test", "main");
@@ -216,6 +215,7 @@ describe("detectStaleConfig", () => {
   });
 
   test("legacy stack-merged on missing branch: covered by missing-branch, not legacy-merged-flag", async () => {
+    await using repo = await createTestRepo();
     await addBranch(repo.dir, "a", "main");
     await setBaseBranch(repo.dir, "test", "main");
     await setStackNode(repo.dir, "a", "test", "main");
@@ -237,6 +237,7 @@ describe("detectStaleConfig", () => {
   });
 
   test("legacy stack-merged on live branch: applyClean unsets the key", async () => {
+    await using repo = await createTestRepo();
     await addBranch(repo.dir, "a", "main");
     await setBaseBranch(repo.dir, "test", "main");
     await setStackNode(repo.dir, "a", "test", "main");
@@ -257,6 +258,7 @@ describe("detectStaleConfig", () => {
   });
 
   test("--stack-name filter: excludes findings from other stacks", async () => {
+    await using repo = await createTestRepo();
     // Stack "broken" has a missing branch ref.
     await addBranch(repo.dir, "a", "main");
     await addBranch(repo.dir, "b", "a");

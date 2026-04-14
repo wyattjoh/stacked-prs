@@ -1,11 +1,27 @@
-import { afterEach, beforeEach, describe, it as test } from "@std/testing/bdd";
+import { describe, it as test } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { addBranch, createTestRepo } from "../lib/testdata/helpers.ts";
-import type { TestRepo } from "../lib/testdata/helpers.ts";
+import {
+  addBranch,
+  createTestRepo,
+  makeTempDir,
+} from "../lib/testdata/helpers.ts";
 import { setBaseBranch, setStackNode } from "../lib/stack.ts";
 import type { StackNode, StackTree } from "../lib/stack.ts";
 import { setMockDir, writeFixture } from "../lib/gh.ts";
 import { buildNavPlan, generateNavMarkdown } from "./nav.ts";
+
+/** Acquire a temp mock dir, register it, and reset on disposal. */
+async function makeMockDir(): Promise<AsyncDisposable & { path: string }> {
+  const dir = await makeTempDir("stacked-prs-mock-");
+  setMockDir(dir.path);
+  return {
+    path: dir.path,
+    [Symbol.asyncDispose]: async () => {
+      setMockDir(undefined);
+      await dir[Symbol.asyncDispose]();
+    },
+  };
+}
 
 /** Build a minimal StackTree for unit tests (no git required). */
 function makeTree(
@@ -218,22 +234,9 @@ describe("generateNavMarkdown", () => {
 });
 
 describe("buildNavPlan", () => {
-  let repo: TestRepo;
-  let mockDir: string;
-
-  beforeEach(async () => {
-    repo = await createTestRepo();
-    mockDir = await Deno.makeTempDir();
-    setMockDir(mockDir);
-  });
-
-  afterEach(async () => {
-    setMockDir(undefined);
-    await repo.cleanup();
-    await Deno.remove(mockDir, { recursive: true });
-  });
-
   test("plans create actions for PRs with no existing comment", async () => {
+    await using repo = await createTestRepo();
+    await using mock = await makeMockDir();
     await addBranch(repo.dir, "feature/a", "main");
     await addBranch(repo.dir, "feature/b", "feature/a");
 
@@ -242,7 +245,7 @@ describe("buildNavPlan", () => {
     await setStackNode(repo.dir, "feature/b", "my-stack", "feature/a");
 
     await writeFixture(
-      mockDir,
+      mock.path,
       ["pr", "list", "--head", "feature/a", "--repo", "o/r"],
       [{
         number: 101,
@@ -253,7 +256,7 @@ describe("buildNavPlan", () => {
       }],
     );
     await writeFixture(
-      mockDir,
+      mock.path,
       ["pr", "list", "--head", "feature/b", "--repo", "o/r"],
       [{
         number: 102,
@@ -266,12 +269,12 @@ describe("buildNavPlan", () => {
 
     // Empty comment arrays - no existing nav comment
     await writeFixture(
-      mockDir,
+      mock.path,
       ["api", "repos/o/r/issues/101/comments"],
       [],
     );
     await writeFixture(
-      mockDir,
+      mock.path,
       ["api", "repos/o/r/issues/102/comments"],
       [],
     );
@@ -288,13 +291,15 @@ describe("buildNavPlan", () => {
   });
 
   test("plans update action when comment with marker exists", async () => {
+    await using repo = await createTestRepo();
+    await using mock = await makeMockDir();
     await addBranch(repo.dir, "feature/x", "main");
 
     await setBaseBranch(repo.dir, "x-stack", "main");
     await setStackNode(repo.dir, "feature/x", "x-stack", "main");
 
     await writeFixture(
-      mockDir,
+      mock.path,
       ["pr", "list", "--head", "feature/x", "--repo", "o/r"],
       [{
         number: 201,
@@ -306,7 +311,7 @@ describe("buildNavPlan", () => {
     );
 
     await writeFixture(
-      mockDir,
+      mock.path,
       ["api", "repos/o/r/issues/201/comments"],
       [
         {
@@ -325,13 +330,15 @@ describe("buildNavPlan", () => {
   });
 
   test("skips update when comment body is unchanged", async () => {
+    await using repo = await createTestRepo();
+    await using mock = await makeMockDir();
     await addBranch(repo.dir, "feature/x", "main");
 
     await setBaseBranch(repo.dir, "my-stack", "main");
     await setStackNode(repo.dir, "feature/x", "my-stack", "main");
 
     await writeFixture(
-      mockDir,
+      mock.path,
       ["pr", "list", "--head", "feature/x", "--repo", "o/r"],
       [{
         number: 301,
@@ -352,7 +359,7 @@ describe("buildNavPlan", () => {
     const expectedBody = gen(tree, prMap, 301);
 
     await writeFixture(
-      mockDir,
+      mock.path,
       ["api", "repos/o/r/issues/301/comments"],
       [{ id: 500, body: expectedBody }],
     );
@@ -362,6 +369,8 @@ describe("buildNavPlan", () => {
   });
 
   test("skips branches with no PR", async () => {
+    await using repo = await createTestRepo();
+    await using _mock = await makeMockDir();
     await addBranch(repo.dir, "feature/empty", "main");
 
     await setBaseBranch(repo.dir, "empty-stack", "main");

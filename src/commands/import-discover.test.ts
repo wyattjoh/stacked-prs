@@ -1,7 +1,10 @@
-import { afterEach, beforeEach, describe, it as test } from "@std/testing/bdd";
+import { describe, it as test } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { addBranch, createTestRepo } from "../lib/testdata/helpers.ts";
-import type { TestRepo } from "../lib/testdata/helpers.ts";
+import {
+  addBranch,
+  createTestRepo,
+  makeTempDir,
+} from "../lib/testdata/helpers.ts";
 import { setMockDir, writeFixture } from "../lib/gh.ts";
 import type { DiscoveredNode } from "./import-discover.ts";
 import { discoverChain } from "./import-discover.ts";
@@ -16,23 +19,23 @@ function flattenDfs(nodes: DiscoveredNode[]): DiscoveredNode[] {
   return result;
 }
 
+/** Acquire a temp mock dir, register it, and reset on disposal. */
+async function makeMockDir(): Promise<AsyncDisposable & { path: string }> {
+  const dir = await makeTempDir("stacked-prs-mock-");
+  setMockDir(dir.path);
+  return {
+    path: dir.path,
+    [Symbol.asyncDispose]: async () => {
+      setMockDir(undefined);
+      await dir[Symbol.asyncDispose]();
+    },
+  };
+}
+
 describe("discoverChain", () => {
-  let repo: TestRepo;
-  let mockDir: string;
-
-  beforeEach(async () => {
-    repo = await createTestRepo();
-    mockDir = await Deno.makeTempDir();
-    setMockDir(mockDir);
-  });
-
-  afterEach(async () => {
-    setMockDir(undefined);
-    await repo.cleanup();
-    await Deno.remove(mockDir, { recursive: true });
-  });
-
   test("discovers two branches with correct parents", async () => {
+    await using repo = await createTestRepo();
+    await using _mock = await makeMockDir();
     await addBranch(repo.dir, "feat/a", "main");
     await addBranch(repo.dir, "feat/b", "feat/a");
 
@@ -53,6 +56,8 @@ describe("discoverChain", () => {
   });
 
   test("middle-of-chain discovery finds all 3 branches", async () => {
+    await using repo = await createTestRepo();
+    await using _mock = await makeMockDir();
     await addBranch(repo.dir, "feat/a", "main");
     await addBranch(repo.dir, "feat/b", "feat/a");
     await addBranch(repo.dir, "feat/c", "feat/b");
@@ -73,12 +78,14 @@ describe("discoverChain", () => {
   });
 
   test("annotates PR data and warns on base mismatch", async () => {
+    await using repo = await createTestRepo();
+    await using mock = await makeMockDir();
     await addBranch(repo.dir, "feat/a", "main");
     await addBranch(repo.dir, "feat/b", "feat/a");
 
     // feat/a PR with correct base
     await writeFixture(
-      mockDir,
+      mock.path,
       ["pr", "list", "--head", "feat/a", "--repo", "o/r"],
       [{
         number: 10,
@@ -92,7 +99,7 @@ describe("discoverChain", () => {
 
     // feat/b PR with WRONG base (says "main" but git parent is "feat/a")
     await writeFixture(
-      mockDir,
+      mock.path,
       ["pr", "list", "--head", "feat/b", "--repo", "o/r"],
       [{
         number: 11,
@@ -119,6 +126,8 @@ describe("discoverChain", () => {
   });
 
   test("single branch off main", async () => {
+    await using repo = await createTestRepo();
+    await using _mock = await makeMockDir();
     await addBranch(repo.dir, "feat/solo", "main");
 
     const result = await discoverChain(repo.dir, "feat/solo");
@@ -131,6 +140,8 @@ describe("discoverChain", () => {
   });
 
   test("main branch returns empty roots", async () => {
+    await using repo = await createTestRepo();
+    await using _mock = await makeMockDir();
     const result = await discoverChain(repo.dir, "main");
 
     expect(result.baseBranch).toBe("main");
@@ -138,6 +149,8 @@ describe("discoverChain", () => {
   });
 
   test("discovers a forked tree (branch with two children)", async () => {
+    await using repo = await createTestRepo();
+    await using _mock = await makeMockDir();
     // Tree shape:
     //   main
     //   └── feat/a
@@ -167,6 +180,8 @@ describe("discoverChain", () => {
   });
 
   test("tree structure: discovers fork from interior node when starting at leaf", async () => {
+    await using repo = await createTestRepo();
+    await using _mock = await makeMockDir();
     // Tree shape:
     //   main
     //   └── feat/a
@@ -206,6 +221,8 @@ describe("discoverChain", () => {
   });
 
   test("two independent roots off main discovered together", async () => {
+    await using repo = await createTestRepo();
+    await using _mock = await makeMockDir();
     // Tree shape:
     //   main
     //   ├── feat/x

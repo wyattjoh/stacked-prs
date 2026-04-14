@@ -1,7 +1,11 @@
-import { afterEach, beforeEach, describe, it as test } from "@std/testing/bdd";
+import { describe, it as test } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { addBranch, createTestRepo, runGit } from "../lib/testdata/helpers.ts";
-import type { TestRepo } from "../lib/testdata/helpers.ts";
+import {
+  addBranch,
+  createTestRepo,
+  makeTempDir,
+  runGit,
+} from "../lib/testdata/helpers.ts";
 import {
   runGitCommand,
   setBaseBranch,
@@ -11,23 +15,23 @@ import {
 import { setMockDir, writeFixture } from "../lib/gh.ts";
 import { getStackStatus } from "./status.ts";
 
+/** Acquire a temp mock dir, register it, and reset on disposal. */
+async function makeMockDir(): Promise<AsyncDisposable & { path: string }> {
+  const dir = await makeTempDir("stacked-prs-mock-");
+  setMockDir(dir.path);
+  return {
+    path: dir.path,
+    [Symbol.asyncDispose]: async () => {
+      setMockDir(undefined);
+      await dir[Symbol.asyncDispose]();
+    },
+  };
+}
+
 describe("getStackStatus", () => {
-  let repo: TestRepo;
-  let mockDir: string;
-
-  beforeEach(async () => {
-    repo = await createTestRepo();
-    mockDir = await Deno.makeTempDir();
-    setMockDir(mockDir);
-  });
-
-  afterEach(async () => {
-    setMockDir(undefined);
-    await repo.cleanup();
-    await Deno.remove(mockDir, { recursive: true });
-  });
-
   test("returns tree-structured status with depth info for a forked tree (a -> b + c)", async () => {
+    await using repo = await createTestRepo();
+    await using _mock = await makeMockDir();
     // a is a root branch, b and c are children of a
     await addBranch(repo.dir, "feature/a", "main");
     await addBranch(repo.dir, "feature/b", "feature/a");
@@ -72,6 +76,8 @@ describe("getStackStatus", () => {
   });
 
   test("formats human-readable tree output with Stack: header", async () => {
+    await using repo = await createTestRepo();
+    await using _mock = await makeMockDir();
     await addBranch(repo.dir, "feature/a", "main");
     await addBranch(repo.dir, "feature/b", "feature/a");
 
@@ -94,6 +100,8 @@ describe("getStackStatus", () => {
   });
 
   test("correctly identifies current branch with isCurrent flag", async () => {
+    await using repo = await createTestRepo();
+    await using _mock = await makeMockDir();
     await addBranch(repo.dir, "feature/x", "main");
     await addBranch(repo.dir, "feature/y", "feature/x");
 
@@ -117,6 +125,8 @@ describe("getStackStatus", () => {
   });
 
   test("detects behind-parent sync status", async () => {
+    await using repo = await createTestRepo();
+    await using _mock = await makeMockDir();
     await addBranch(repo.dir, "feature/step1", "main");
 
     // Create feature/step2 as a plain branch pointer (no extra commit)
@@ -150,6 +160,8 @@ describe("getStackStatus", () => {
   });
 
   test("handles branches with no PR", async () => {
+    await using repo = await createTestRepo();
+    await using _mock = await makeMockDir();
     await addBranch(repo.dir, "feature/solo", "main");
 
     await setStackNode(repo.dir, "feature/solo", "solo-stack", "main");
@@ -164,13 +176,15 @@ describe("getStackStatus", () => {
   });
 
   test("includes PR info in annotations and display", async () => {
+    await using repo = await createTestRepo();
+    await using mock = await makeMockDir();
     await addBranch(repo.dir, "feature/pr1", "main");
 
     await setStackNode(repo.dir, "feature/pr1", "pr-stack", "main");
     await setBaseBranch(repo.dir, "pr-stack", "main");
 
     await writeFixture(
-      mockDir,
+      mock.path,
       ["pr", "list", "--head", "feature/pr1", "--repo", "test/repo"],
       [{
         number: 101,
@@ -194,13 +208,15 @@ describe("getStackStatus", () => {
   });
 
   test("surfaces merged PR when gh reports MERGED state", async () => {
+    await using repo = await createTestRepo();
+    await using mock = await makeMockDir();
     await addBranch(repo.dir, "feature/landed", "main");
 
     await setStackNode(repo.dir, "feature/landed", "landed-stack", "main");
     await setBaseBranch(repo.dir, "landed-stack", "main");
 
     await writeFixture(
-      mockDir,
+      mock.path,
       ["pr", "list", "--head", "feature/landed", "--repo", "test/repo"],
       [{
         number: 117,
@@ -226,22 +242,9 @@ describe("getStackStatus", () => {
 });
 
 describe("getStackStatus with merged nodes", () => {
-  let repo: TestRepo;
-  let mockDir: string;
-
-  beforeEach(async () => {
-    repo = await createTestRepo();
-    mockDir = await Deno.makeTempDir();
-    setMockDir(mockDir);
-  });
-
-  afterEach(async () => {
-    setMockDir(undefined);
-    await repo.cleanup();
-    await Deno.remove(mockDir, { recursive: true });
-  });
-
   test("returns 'landed' sync status for stack-merged branches", async () => {
+    await using repo = await createTestRepo();
+    await using _mock = await makeMockDir();
     await addBranch(repo.dir, "feature/a", "main");
     await addBranch(repo.dir, "feature/b", "main");
     await setStackNode(repo.dir, "feature/a", "my-stack", "main");

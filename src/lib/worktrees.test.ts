@@ -1,22 +1,12 @@
-import { afterEach, beforeEach, describe, it as test } from "@std/testing/bdd";
+import { describe, it as test } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { commitFile, createTestRepo, runGit } from "./testdata/helpers.ts";
-import type { TestRepo } from "./testdata/helpers.ts";
 import { checkWorktreeSafety, listInProgressOperations } from "./worktrees.ts";
 import { runGitCommand } from "./stack.ts";
 
 describe("checkWorktreeSafety", () => {
-  let repo: TestRepo;
-
-  beforeEach(async () => {
-    repo = await createTestRepo();
-  });
-
-  afterEach(async () => {
-    await repo.cleanup();
-  });
-
   test("single clean worktree, in-scope branch returns empty", async () => {
+    await using repo = await createTestRepo();
     await runGit(repo.dir, "checkout", "-b", "feat/a");
     await commitFile(repo.dir, "a.txt", "a\n");
 
@@ -26,6 +16,7 @@ describe("checkWorktreeSafety", () => {
   });
 
   test("single worktree dirty on in-scope branch returns one entry", async () => {
+    await using repo = await createTestRepo();
     await runGit(repo.dir, "checkout", "-b", "feat/a");
     await commitFile(repo.dir, "a.txt", "a\n");
     await Deno.writeTextFile(`${repo.dir}/a.txt`, "dirty\n");
@@ -38,6 +29,7 @@ describe("checkWorktreeSafety", () => {
   });
 
   test("secondary worktree dirty on in-scope branch returns it", async () => {
+    await using repo = await createTestRepo();
     await runGit(repo.dir, "checkout", "-b", "feat/a");
     await commitFile(repo.dir, "a.txt", "a\n");
     await runGit(repo.dir, "checkout", "main");
@@ -64,6 +56,7 @@ describe("checkWorktreeSafety", () => {
   });
 
   test("secondary worktree dirty on out-of-scope branch is ignored", async () => {
+    await using repo = await createTestRepo();
     await runGit(repo.dir, "checkout", "-b", "feat/a");
     await commitFile(repo.dir, "a.txt", "a\n");
     await runGit(repo.dir, "checkout", "-b", "feat/b");
@@ -88,6 +81,7 @@ describe("checkWorktreeSafety", () => {
   });
 
   test("untracked files count as dirty", async () => {
+    await using repo = await createTestRepo();
     await runGit(repo.dir, "checkout", "-b", "feat/a");
     await commitFile(repo.dir, "a.txt", "a\n");
     await Deno.writeTextFile(`${repo.dir}/untracked.txt`, "new\n");
@@ -99,6 +93,7 @@ describe("checkWorktreeSafety", () => {
   });
 
   test("staged rename reports only the new path", async () => {
+    await using repo = await createTestRepo();
     await runGit(repo.dir, "checkout", "-b", "feat/a");
     await commitFile(repo.dir, "old-name.txt", "content\n");
     await runGit(repo.dir, "mv", "old-name.txt", "new-name.txt");
@@ -110,6 +105,7 @@ describe("checkWorktreeSafety", () => {
   });
 
   test("file with leading space in name is parsed correctly", async () => {
+    await using repo = await createTestRepo();
     await runGit(repo.dir, "checkout", "-b", "feat/a");
     await commitFile(repo.dir, "a.txt", "a\n");
     await Deno.writeTextFile(`${repo.dir}/ leading.txt`, "x\n");
@@ -122,22 +118,14 @@ describe("checkWorktreeSafety", () => {
 });
 
 describe("listInProgressOperations", () => {
-  let repo: TestRepo;
-
-  beforeEach(async () => {
-    repo = await createTestRepo();
-  });
-
-  afterEach(async () => {
-    await repo.cleanup();
-  });
-
   test("returns empty for a clean repo", async () => {
+    await using repo = await createTestRepo();
     const ops = await listInProgressOperations(repo.dir);
     expect(ops).toEqual([]);
   });
 
   test("detects CHERRY_PICK_HEAD", async () => {
+    await using repo = await createTestRepo();
     const { stdout: gitDir } = await runGitCommand(
       repo.dir,
       "rev-parse",
@@ -152,17 +140,8 @@ describe("listInProgressOperations", () => {
 });
 
 describe("findWorktreeCollisions", () => {
-  let repo: TestRepo;
-
-  beforeEach(async () => {
-    repo = await createTestRepo();
-  });
-
-  afterEach(async () => {
-    await repo.cleanup();
-  });
-
   test("reports no collisions when branches are only in the primary worktree", async () => {
+    await using repo = await createTestRepo();
     const { findWorktreeCollisions } = await import("./worktrees.ts");
     const { addBranch } = await import("./testdata/helpers.ts");
     await addBranch(repo.dir, "feat/a", "main");
@@ -171,6 +150,7 @@ describe("findWorktreeCollisions", () => {
   });
 
   test("reports a collision when a branch is checked out in a linked worktree", async () => {
+    await using repo = await createTestRepo();
     const { findWorktreeCollisions } = await import("./worktrees.ts");
     const { addBranch } = await import("./testdata/helpers.ts");
     await addBranch(repo.dir, "feat/a", "main");

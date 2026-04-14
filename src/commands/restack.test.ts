@@ -1,18 +1,12 @@
-import {
-  afterEach,
-  beforeEach,
-  describe,
-  it,
-  it as test,
-} from "@std/testing/bdd";
+import { describe, it, it as test } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import {
   addBranch,
   commitFile,
   createTestRepo,
+  makeTempDir,
   runGit,
 } from "../lib/testdata/helpers.ts";
-import type { TestRepo } from "../lib/testdata/helpers.ts";
 import {
   getStackTree,
   runGitCommand,
@@ -93,17 +87,8 @@ describe("topologicalOrder", () => {
 });
 
 describe("planRestack (dry-run)", () => {
-  let repo: TestRepo;
-
-  beforeEach(async () => {
-    repo = await createTestRepo();
-  });
-
-  afterEach(async () => {
-    await repo.cleanup();
-  });
-
   test("linear chain already in sync returns all skipped-clean", async () => {
+    await using repo = await createTestRepo();
     // main -> a -> b
     await addBranch(repo.dir, "a", "main");
     await addBranch(repo.dir, "b", "a");
@@ -119,6 +104,7 @@ describe("planRestack (dry-run)", () => {
   });
 
   test("base moved: both branches planned, snapshot uses original parent", async () => {
+    await using repo = await createTestRepo();
     // main -> a -> b, then add a commit directly to main
     await addBranch(repo.dir, "a", "main");
     await addBranch(repo.dir, "b", "a");
@@ -144,6 +130,7 @@ describe("planRestack (dry-run)", () => {
   });
 
   test("dry-run makes no mutation", async () => {
+    await using repo = await createTestRepo();
     await addBranch(repo.dir, "a", "main");
     await setBaseBranch(repo.dir, "test", "main");
     await setStackNode(repo.dir, "a", "test", "main");
@@ -169,32 +156,26 @@ describe("planRestack (dry-run)", () => {
  * the restack algorithm can resolve `origin/main`. Called by any test that
  * exercises the origin/<base> resolution path.
  */
-async function setupFakeOrigin(dir: string): Promise<void> {
-  const bareDir = await Deno.makeTempDir({ prefix: "stacked-prs-origin-" });
-  await runGit(dir, "clone", "--bare", dir, bareDir);
-  await runGit(dir, "remote", "add", "origin", bareDir);
+async function setupFakeOrigin(
+  dir: string,
+): Promise<AsyncDisposable & { path: string }> {
+  const bare = await makeTempDir("stacked-prs-origin-");
+  await runGit(dir, "clone", "--bare", dir, bare.path);
+  await runGit(dir, "remote", "add", "origin", bare.path);
   await runGit(dir, "fetch", "origin");
+  return bare;
 }
 
 describe("executeRestack (clean cases)", () => {
-  let repo: TestRepo;
-
-  beforeEach(async () => {
-    repo = await createTestRepo();
-  });
-
-  afterEach(async () => {
-    await repo.cleanup();
-  });
-
   test("linear chain already synced is a no-op", async () => {
+    await using repo = await createTestRepo();
     await addBranch(repo.dir, "a", "main");
     await addBranch(repo.dir, "b", "a");
     await setBaseBranch(repo.dir, "test", "main");
     await setStackNode(repo.dir, "a", "test", "main");
     await setStackNode(repo.dir, "b", "test", "a");
 
-    await setupFakeOrigin(repo.dir);
+    await using _bare = await setupFakeOrigin(repo.dir);
 
     const bBefore = await runGit(repo.dir, "rev-parse", "b");
 
@@ -210,6 +191,7 @@ describe("executeRestack (clean cases)", () => {
   });
 
   test("base advanced: all branches rebased, commits preserved", async () => {
+    await using repo = await createTestRepo();
     await addBranch(repo.dir, "a", "main");
     await addBranch(repo.dir, "b", "a");
     await setBaseBranch(repo.dir, "test", "main");
@@ -217,7 +199,7 @@ describe("executeRestack (clean cases)", () => {
     await setStackNode(repo.dir, "b", "test", "a");
 
     // Simulate `origin/main` advancing by creating an `origin` remote.
-    await setupFakeOrigin(repo.dir);
+    await using _bare = await setupFakeOrigin(repo.dir);
     await runGit(repo.dir, "checkout", "main");
     await commitFile(repo.dir, "main-extra.txt", "extra\n");
     await runGit(repo.dir, "push", "origin", "main");
@@ -240,6 +222,7 @@ describe("executeRestack (clean cases)", () => {
   });
 
   test("regression: middle-branch drift is propagated upward", async () => {
+    await using repo = await createTestRepo();
     // main -> a -> b -> c, then commit directly to a without propagating.
     // Old segment-based restack would drop the commit; per-branch must keep it.
     await addBranch(repo.dir, "a", "main");
@@ -254,7 +237,7 @@ describe("executeRestack (clean cases)", () => {
     await runGit(repo.dir, "checkout", "a");
     await commitFile(repo.dir, "a-drift.txt", "drift\n");
 
-    await setupFakeOrigin(repo.dir);
+    await using _bare = await setupFakeOrigin(repo.dir);
     await runGit(repo.dir, "checkout", "main");
     await runGit(repo.dir, "push", "origin", "main");
 
@@ -273,6 +256,7 @@ describe("executeRestack (clean cases)", () => {
   });
 
   test("regression: inserted branch with new commit propagates to reparented upstack children", async () => {
+    await using repo = await createTestRepo();
     // Scenario from conversation: a new branch is inserted between two existing
     // stack branches, then a commit is added to the inserted branch. Old
     // segment-based restack left the reparented children diverged; per-branch
@@ -299,7 +283,7 @@ describe("executeRestack (clean cases)", () => {
     // Add a commit to x (b and c still don't have this commit).
     await commitFile(repo.dir, "x-fix.txt", "inserted fix\n");
 
-    await setupFakeOrigin(repo.dir);
+    await using _bare = await setupFakeOrigin(repo.dir);
     await runGit(repo.dir, "checkout", "main");
     await runGit(repo.dir, "push", "origin", "main");
 
@@ -319,6 +303,7 @@ describe("executeRestack (clean cases)", () => {
   });
 
   test("preserves merge commits in stack branches", async () => {
+    await using repo = await createTestRepo();
     // main initial commit already exists from createTestRepo.
 
     // Create a side branch off main with a commit. This is NOT in the stack,
@@ -352,7 +337,7 @@ describe("executeRestack (clean cases)", () => {
     await setStackNode(repo.dir, "feat/a", "test", "main");
 
     // Advance origin/main so feat/a needs rebasing.
-    await setupFakeOrigin(repo.dir);
+    await using _bare = await setupFakeOrigin(repo.dir);
     await runGit(repo.dir, "checkout", "main");
     await commitFile(repo.dir, "main-extra.txt", "main extra\n");
     await runGit(repo.dir, "push", "origin", "main");
@@ -388,19 +373,8 @@ describe("executeRestack (clean cases)", () => {
 });
 
 describe("executeRestack (conflict handling)", () => {
-  let repo: TestRepo;
-
-  beforeEach(async () => {
-    repo = await createTestRepo();
-  });
-
-  afterEach(async () => {
-    // Abort any in-progress rebase so cleanup() can succeed.
-    await runGit(repo.dir, "rebase", "--abort").catch(() => {});
-    await repo.cleanup();
-  });
-
   test("conflict stops the walk; siblings are deferred to resume", async () => {
+    await using repo = await createTestRepo();
     // main -> root -> { leftConflict, rightClean }
     // Add a commit on main that touches the same file as leftConflict.
     await runGit(repo.dir, "checkout", "main");
@@ -425,7 +399,7 @@ describe("executeRestack (conflict handling)", () => {
     await setStackNode(repo.dir, "rightClean", "test", "root");
 
     // Advance origin/main with a conflicting change to shared.txt.
-    await setupFakeOrigin(repo.dir);
+    await using _bare = await setupFakeOrigin(repo.dir);
     await runGit(repo.dir, "checkout", "main");
     await Deno.writeTextFile(`${repo.dir}/shared.txt`, "main version\n");
     await runGit(repo.dir, "add", "shared.txt");
@@ -459,18 +433,8 @@ describe("executeRestack (conflict handling)", () => {
 });
 
 describe("executeRestack (resume)", () => {
-  let repo: TestRepo;
-
-  beforeEach(async () => {
-    repo = await createTestRepo();
-  });
-
-  afterEach(async () => {
-    await runGit(repo.dir, "rebase", "--abort").catch(() => {});
-    await repo.cleanup();
-  });
-
   test("resume after manual conflict resolution continues the walk", async () => {
+    await using repo = await createTestRepo();
     await runGit(repo.dir, "checkout", "main");
     await commitFile(repo.dir, "shared.txt", "initial\n");
     await addBranch(repo.dir, "root", "main");
@@ -487,7 +451,7 @@ describe("executeRestack (resume)", () => {
     await setStackNode(repo.dir, "leftConflict", "test", "root");
     await setStackNode(repo.dir, "rightClean", "test", "root");
 
-    await setupFakeOrigin(repo.dir);
+    await using _bare = await setupFakeOrigin(repo.dir);
     await runGit(repo.dir, "checkout", "main");
     await Deno.writeTextFile(`${repo.dir}/shared.txt`, "main version\n");
     await runGit(repo.dir, "add", "shared.txt");
@@ -538,10 +502,11 @@ describe("executeRestack (resume)", () => {
   });
 
   test("resume without in-progress state throws", async () => {
+    await using repo = await createTestRepo();
     await addBranch(repo.dir, "a", "main");
     await setBaseBranch(repo.dir, "test", "main");
     await setStackNode(repo.dir, "a", "test", "main");
-    await setupFakeOrigin(repo.dir);
+    await using _bare = await setupFakeOrigin(repo.dir);
 
     let threw = false;
     try {
@@ -555,17 +520,8 @@ describe("executeRestack (resume)", () => {
 });
 
 describe("executeRestack (filters)", () => {
-  let repo: TestRepo;
-
-  beforeEach(async () => {
-    repo = await createTestRepo();
-  });
-
-  afterEach(async () => {
-    await repo.cleanup();
-  });
-
   test("--upstack-from rebases the target subtree, leaves ancestors alone", async () => {
+    await using repo = await createTestRepo();
     // main -> a -> b -> c. Advance main so all three become stale, then scope
     // the restack to `b`'s upstack (b and c). `a` must stay untouched.
     await addBranch(repo.dir, "a", "main");
@@ -576,7 +532,7 @@ describe("executeRestack (filters)", () => {
     await setStackNode(repo.dir, "b", "test", "a");
     await setStackNode(repo.dir, "c", "test", "b");
 
-    await setupFakeOrigin(repo.dir);
+    await using _bare = await setupFakeOrigin(repo.dir);
     await runGit(repo.dir, "checkout", "main");
     await commitFile(repo.dir, "main-extra.txt", "extra\n");
     await runGit(repo.dir, "push", "origin", "main");
@@ -594,6 +550,7 @@ describe("executeRestack (filters)", () => {
   });
 
   test("--upstack-from on a forked tree includes all descendants", async () => {
+    await using repo = await createTestRepo();
     // main -> auth -> auth-a
     //              -> auth-b
     // Scope to `auth`; both auth-a and auth-b must be in scope, auth too.
@@ -605,7 +562,7 @@ describe("executeRestack (filters)", () => {
     await setStackNode(repo.dir, "auth-a", "test", "auth");
     await setStackNode(repo.dir, "auth-b", "test", "auth");
 
-    await setupFakeOrigin(repo.dir);
+    await using _bare = await setupFakeOrigin(repo.dir);
     await runGit(repo.dir, "checkout", "main");
     await commitFile(repo.dir, "main-extra.txt", "extra\n");
     await runGit(repo.dir, "push", "origin", "main");
@@ -621,6 +578,7 @@ describe("executeRestack (filters)", () => {
   });
 
   test("--downstack-from rebases the path from root to the target", async () => {
+    await using repo = await createTestRepo();
     // main -> a -> b -> c. Scope to `b`'s downstack (a and b). `c` must stay
     // untouched.
     await addBranch(repo.dir, "a", "main");
@@ -631,7 +589,7 @@ describe("executeRestack (filters)", () => {
     await setStackNode(repo.dir, "b", "test", "a");
     await setStackNode(repo.dir, "c", "test", "b");
 
-    await setupFakeOrigin(repo.dir);
+    await using _bare = await setupFakeOrigin(repo.dir);
     await runGit(repo.dir, "checkout", "main");
     await commitFile(repo.dir, "main-extra.txt", "extra\n");
     await runGit(repo.dir, "push", "origin", "main");
@@ -651,6 +609,7 @@ describe("executeRestack (filters)", () => {
   });
 
   test("--only rebases just the named branch", async () => {
+    await using repo = await createTestRepo();
     // main -> a -> b -> c. Scope to `a`. Neither `b` nor `c` may move.
     await addBranch(repo.dir, "a", "main");
     await addBranch(repo.dir, "b", "a");
@@ -660,7 +619,7 @@ describe("executeRestack (filters)", () => {
     await setStackNode(repo.dir, "b", "test", "a");
     await setStackNode(repo.dir, "c", "test", "b");
 
-    await setupFakeOrigin(repo.dir);
+    await using _bare = await setupFakeOrigin(repo.dir);
     await runGit(repo.dir, "checkout", "main");
     await commitFile(repo.dir, "main-extra.txt", "extra\n");
     await runGit(repo.dir, "push", "origin", "main");
@@ -682,18 +641,8 @@ describe("executeRestack (filters)", () => {
 });
 
 describe("executeRestack (codex review fixes)", () => {
-  let repo: TestRepo;
-
-  beforeEach(async () => {
-    repo = await createTestRepo();
-  });
-
-  afterEach(async () => {
-    await runGit(repo.dir, "rebase", "--abort").catch(() => {});
-    await repo.cleanup();
-  });
-
   test("[fix1] resume correctly identifies conflicted branch when a clean branch precedes it", async () => {
+    await using repo = await createTestRepo();
     // main -> a (clean) -> b (clean) -> c (conflict).
     // `a` and `b` will be skipped-clean, `c` hits a conflict. On resume, the
     // old "first non-completed in plan order" inference would incorrectly mark
@@ -714,7 +663,7 @@ describe("executeRestack (codex review fixes)", () => {
     await setStackNode(repo.dir, "b", "test", "a");
     await setStackNode(repo.dir, "c", "test", "b");
 
-    await setupFakeOrigin(repo.dir);
+    await using _bare = await setupFakeOrigin(repo.dir);
     await runGit(repo.dir, "checkout", "main");
     await Deno.writeTextFile(`${repo.dir}/shared.txt`, "main version\n");
     await runGit(repo.dir, "add", "shared.txt");
@@ -753,6 +702,7 @@ describe("executeRestack (codex review fixes)", () => {
   });
 
   test("[fix2] missing origin/base fails preflight without persisting resume-state", async () => {
+    await using repo = await createTestRepo();
     await addBranch(repo.dir, "a", "main");
     await addBranch(repo.dir, "b", "a");
     await setBaseBranch(repo.dir, "test", "main");
@@ -787,6 +737,7 @@ describe("executeRestack (codex review fixes)", () => {
   });
 
   test("[fix3] force-push between sessions is detected by the resume guard", async () => {
+    await using repo = await createTestRepo();
     // Trigger a conflict on `c`, then before resuming, force-push `rightClean`
     // so its tip no longer matches the snapshot. Resume should refuse to
     // touch rightClean.
@@ -806,7 +757,7 @@ describe("executeRestack (codex review fixes)", () => {
     await setStackNode(repo.dir, "leftConflict", "test", "root");
     await setStackNode(repo.dir, "rightClean", "test", "root");
 
-    await setupFakeOrigin(repo.dir);
+    await using _bare = await setupFakeOrigin(repo.dir);
     await runGit(repo.dir, "checkout", "main");
     await Deno.writeTextFile(`${repo.dir}/shared.txt`, "main version\n");
     await runGit(repo.dir, "add", "shared.txt");
@@ -861,6 +812,7 @@ describe("executeRestack (codex review fixes)", () => {
   });
 
   test("[fix4] resume after manual git rebase --abort clears state and throws", async () => {
+    await using repo = await createTestRepo();
     // Trigger a conflict to get resume-state + an in-progress rebase.
     await runGit(repo.dir, "checkout", "main");
     await commitFile(repo.dir, "shared.txt", "initial\n");
@@ -875,7 +827,7 @@ describe("executeRestack (codex review fixes)", () => {
     await setStackNode(repo.dir, "root", "test", "main");
     await setStackNode(repo.dir, "leftConflict", "test", "root");
 
-    await setupFakeOrigin(repo.dir);
+    await using _bare = await setupFakeOrigin(repo.dir);
     await runGit(repo.dir, "checkout", "main");
     await Deno.writeTextFile(`${repo.dir}/shared.txt`, "main version\n");
     await runGit(repo.dir, "add", "shared.txt");
@@ -913,11 +865,12 @@ describe("executeRestack (codex review fixes)", () => {
   });
 
   test("[fix5] dirty worktree blocks executeRestack with a clear error", async () => {
+    await using repo = await createTestRepo();
     await addBranch(repo.dir, "a", "main");
     await setBaseBranch(repo.dir, "test", "main");
     await setStackNode(repo.dir, "a", "test", "main");
 
-    await setupFakeOrigin(repo.dir);
+    await using _bare = await setupFakeOrigin(repo.dir);
     await runGit(repo.dir, "checkout", "main");
     await commitFile(repo.dir, "main-extra.txt", "extra\n");
     await runGit(repo.dir, "push", "origin", "main");
@@ -940,16 +893,17 @@ describe("executeRestack (codex review fixes)", () => {
     expect(message).toContain("uncommitted changes");
     expect(message).toContain("dirty.txt");
 
-    // Clean up dirty file before afterEach cleanup.
+    // Clean up dirty file before the test repo is disposed.
     await Deno.remove(`${repo.dir}/dirty.txt`);
   });
 
   test("[fix5] skipWorktreeCheck bypasses the dirty worktree guard", async () => {
+    await using repo = await createTestRepo();
     await addBranch(repo.dir, "a", "main");
     await setBaseBranch(repo.dir, "test", "main");
     await setStackNode(repo.dir, "a", "test", "main");
 
-    await setupFakeOrigin(repo.dir);
+    await using _bare = await setupFakeOrigin(repo.dir);
     await runGit(repo.dir, "checkout", "main");
     await commitFile(repo.dir, "main-extra.txt", "extra\n");
     await runGit(repo.dir, "push", "origin", "main");
@@ -970,13 +924,14 @@ describe("executeRestack (codex review fixes)", () => {
   });
 
   test("--upstack-from with a non-existent branch produces no rebases", async () => {
+    await using repo = await createTestRepo();
     await addBranch(repo.dir, "a", "main");
     await addBranch(repo.dir, "b", "a");
     await setBaseBranch(repo.dir, "test", "main");
     await setStackNode(repo.dir, "a", "test", "main");
     await setStackNode(repo.dir, "b", "test", "a");
 
-    await setupFakeOrigin(repo.dir);
+    await using _bare = await setupFakeOrigin(repo.dir);
     await runGit(repo.dir, "checkout", "main");
     await commitFile(repo.dir, "main-extra.txt", "extra\n");
     await runGit(repo.dir, "push", "origin", "main");
@@ -1000,18 +955,8 @@ describe("executeRestack (codex review fixes)", () => {
 });
 
 describe("executeRestack (deleted branches)", () => {
-  let repo: TestRepo;
-
-  beforeEach(async () => {
-    repo = await createTestRepo();
-  });
-
-  afterEach(async () => {
-    await runGit(repo.dir, "rebase", "--abort").catch(() => {});
-    await repo.cleanup();
-  });
-
   test("planRestack throws when a stack-config branch is deleted", async () => {
+    await using repo = await createTestRepo();
     await addBranch(repo.dir, "a", "main");
     await addBranch(repo.dir, "b", "a");
     await setBaseBranch(repo.dir, "test", "main");
@@ -1037,6 +982,7 @@ describe("executeRestack (deleted branches)", () => {
   });
 
   test("resume detects a deleted branch and clears state", async () => {
+    await using repo = await createTestRepo();
     // Build a stack and trigger a conflict so we have resume-state.
     await runGit(repo.dir, "checkout", "main");
     await commitFile(repo.dir, "shared.txt", "initial\n");
@@ -1051,7 +997,7 @@ describe("executeRestack (deleted branches)", () => {
     await setStackNode(repo.dir, "root", "test", "main");
     await setStackNode(repo.dir, "leftConflict", "test", "root");
 
-    await setupFakeOrigin(repo.dir);
+    await using _bare = await setupFakeOrigin(repo.dir);
     await runGit(repo.dir, "checkout", "main");
     await Deno.writeTextFile(`${repo.dir}/shared.txt`, "main\n");
     await runGit(repo.dir, "add", "shared.txt");

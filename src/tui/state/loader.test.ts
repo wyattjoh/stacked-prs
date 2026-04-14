@@ -1,28 +1,31 @@
-import { afterEach, beforeEach, describe, it as test } from "@std/testing/bdd";
+import { describe, it as test } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { addBranch, createTestRepo } from "../../lib/testdata/helpers.ts";
-import type { TestRepo } from "../../lib/testdata/helpers.ts";
+import {
+  addBranch,
+  createTestRepo,
+  makeTempDir,
+} from "../../lib/testdata/helpers.ts";
 import { runGitCommand, setBaseBranch, setStackNode } from "../../lib/stack.ts";
 import { setMockDir, writeFixture } from "../../lib/gh.ts";
 import { loadLocal, loadPrsProgressive } from "./loader.ts";
 
+/** Acquire a temp mock dir, register it, and reset on disposal. */
+async function makeMockDir(): Promise<AsyncDisposable & { path: string }> {
+  const dir = await makeTempDir("stacked-prs-mock-");
+  setMockDir(dir.path);
+  return {
+    path: dir.path,
+    [Symbol.asyncDispose]: async () => {
+      setMockDir(undefined);
+      await dir[Symbol.asyncDispose]();
+    },
+  };
+}
+
 describe("loadLocal", () => {
-  let repo: TestRepo;
-  let mockDir: string;
-
-  beforeEach(async () => {
-    repo = await createTestRepo();
-    mockDir = await Deno.makeTempDir();
-    setMockDir(mockDir);
-  });
-
-  afterEach(async () => {
-    setMockDir(undefined);
-    await repo.cleanup();
-    await Deno.remove(mockDir, { recursive: true });
-  });
-
   test("returns trees and sync map for configured stacks", async () => {
+    await using repo = await createTestRepo();
+    await using _mock = await makeMockDir();
     await addBranch(repo.dir, "feat/a", "main");
     await setStackNode(repo.dir, "feat/a", "alpha", "main");
     await setBaseBranch(repo.dir, "alpha", "main");
@@ -37,54 +40,37 @@ describe("loadLocal", () => {
 
 describe("loadLocal with merged nodes", () => {
   test("sets 'landed' sync status for stack-merged branches", async () => {
-    const repo = await createTestRepo();
-    try {
-      await addBranch(repo.dir, "feature/a", "main");
-      await addBranch(repo.dir, "feature/b", "main");
-      await setStackNode(repo.dir, "feature/a", "my-stack", "main");
-      await setStackNode(repo.dir, "feature/b", "my-stack", "main");
-      await setBaseBranch(repo.dir, "my-stack", "main");
-      // Mark feature/a as historically merged; branch ref still exists in config
-      await runGitCommand(
-        repo.dir,
-        "config",
-        "branch.feature/a.stack-merged",
-        "true",
-      );
+    await using repo = await createTestRepo();
+    await addBranch(repo.dir, "feature/a", "main");
+    await addBranch(repo.dir, "feature/b", "main");
+    await setStackNode(repo.dir, "feature/a", "my-stack", "main");
+    await setStackNode(repo.dir, "feature/b", "my-stack", "main");
+    await setBaseBranch(repo.dir, "my-stack", "main");
+    // Mark feature/a as historically merged; branch ref still exists in config
+    await runGitCommand(
+      repo.dir,
+      "config",
+      "branch.feature/a.stack-merged",
+      "true",
+    );
 
-      const result = await loadLocal(repo.dir);
-      expect(result.syncByBranch.get("feature/a")).toBe("landed");
-      expect(result.syncByBranch.get("feature/b")).toBe("up-to-date");
-    } finally {
-      await repo.cleanup();
-    }
+    const result = await loadLocal(repo.dir);
+    expect(result.syncByBranch.get("feature/a")).toBe("landed");
+    expect(result.syncByBranch.get("feature/b")).toBe("up-to-date");
   });
 });
 
 describe("loadPrsProgressive", () => {
-  let repo: TestRepo;
-  let mockDir: string;
-
-  beforeEach(async () => {
-    repo = await createTestRepo();
-    mockDir = await Deno.makeTempDir();
-    setMockDir(mockDir);
-  });
-
-  afterEach(async () => {
-    setMockDir(undefined);
-    await repo.cleanup();
-    await Deno.remove(mockDir, { recursive: true });
-  });
-
   test("invokes onLoaded for each branch", async () => {
+    await using _repo = await createTestRepo();
+    await using mock = await makeMockDir();
     await writeFixture(
-      mockDir,
+      mock.path,
       ["pr", "list", "--head", "feat/a"],
       [{ number: 1, url: "u", state: "OPEN", isDraft: false }],
     );
     await writeFixture(
-      mockDir,
+      mock.path,
       ["pr", "list", "--head", "feat/b"],
       [],
     );
@@ -104,8 +90,10 @@ describe("loadPrsProgressive", () => {
   });
 
   test("surfaces merged PR when no open PR exists", async () => {
+    await using _repo = await createTestRepo();
+    await using mock = await makeMockDir();
     await writeFixture(
-      mockDir,
+      mock.path,
       ["pr", "list", "--head", "feat/landed"],
       [{
         number: 117,
@@ -129,8 +117,10 @@ describe("loadPrsProgressive", () => {
   });
 
   test("prefers open PR over merged PR on same head ref", async () => {
+    await using _repo = await createTestRepo();
+    await using mock = await makeMockDir();
     await writeFixture(
-      mockDir,
+      mock.path,
       ["pr", "list", "--head", "feat/reopened"],
       [
         {
@@ -162,8 +152,10 @@ describe("loadPrsProgressive", () => {
   });
 
   test("aborts cleanly when signal triggers", async () => {
+    await using _repo = await createTestRepo();
+    await using mock = await makeMockDir();
     await writeFixture(
-      mockDir,
+      mock.path,
       ["pr", "list", "--head", "feat/a"],
       [],
     );

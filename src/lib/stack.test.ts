@@ -1,7 +1,6 @@
-import { afterEach, beforeEach, describe, it as test } from "@std/testing/bdd";
+import { describe, it as test } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { addBranch, createTestRepo, runGit } from "./testdata/helpers.ts";
-import type { TestRepo } from "./testdata/helpers.ts";
 import {
   addLandedBranch,
   findNode,
@@ -28,29 +27,22 @@ import {
 import type { StackNode, StackTree } from "./stack.ts";
 
 describe("stack", () => {
-  let repo: TestRepo;
-
-  beforeEach(async () => {
-    repo = await createTestRepo();
-  });
-
-  afterEach(async () => {
-    await repo.cleanup();
-  });
-
   test("merge strategy: writes and reads", async () => {
+    await using repo = await createTestRepo();
     await setMergeStrategy(repo.dir, "my-stack", "squash");
     const strategy = await getMergeStrategy(repo.dir, "my-stack");
     expect(strategy).toBe("squash");
   });
 
   test("merge strategy: returns undefined for unset", async () => {
+    await using repo = await createTestRepo();
     const strategy = await getMergeStrategy(repo.dir, "no-such-stack");
     expect(strategy).toBeUndefined();
   });
 
   describe("removeStackBranch", () => {
     test("removes stack metadata for a branch", async () => {
+      await using repo = await createTestRepo();
       await addBranch(repo.dir, "feature/auth", "main");
       await setBaseBranch(repo.dir, "auth-stack", "main");
       await setStackNode(repo.dir, "feature/auth", "auth-stack", "main");
@@ -62,6 +54,7 @@ describe("stack", () => {
     });
 
     test("does not affect other branches in the stack", async () => {
+      await using repo = await createTestRepo();
       await addBranch(repo.dir, "feature/step1", "main");
       await addBranch(repo.dir, "feature/step2", "feature/step1");
 
@@ -97,17 +90,8 @@ describe("stack", () => {
 });
 
 describe("validateStackTree", () => {
-  let repo: TestRepo;
-
-  beforeEach(async () => {
-    repo = await createTestRepo();
-  });
-
-  afterEach(async () => {
-    await repo.cleanup();
-  });
-
   test("valid tree passes validation", async () => {
+    await using repo = await createTestRepo();
     await addBranch(repo.dir, "feature/step1", "main");
     await addBranch(repo.dir, "feature/step2", "feature/step1");
     await setBaseBranch(repo.dir, "my-stack", "main");
@@ -122,6 +106,7 @@ describe("validateStackTree", () => {
   });
 
   test("detects missing git ref", async () => {
+    await using repo = await createTestRepo();
     await addBranch(repo.dir, "feature/real", "main");
     await setBaseBranch(repo.dir, "ghost-stack", "main");
     await setStackNode(repo.dir, "feature/real", "ghost-stack", "main");
@@ -143,6 +128,7 @@ describe("validateStackTree", () => {
   });
 
   test("detects orphaned branch", async () => {
+    await using repo = await createTestRepo();
     await addBranch(repo.dir, "feature/base", "main");
     await addBranch(repo.dir, "feature/child", "feature/base");
     await setBaseBranch(repo.dir, "orphan-stack", "main");
@@ -168,17 +154,8 @@ describe("validateStackTree", () => {
 });
 
 describe("getStackTree migration", () => {
-  let repo: TestRepo;
-
-  beforeEach(async () => {
-    repo = await createTestRepo();
-  });
-
-  afterEach(async () => {
-    await repo.cleanup();
-  });
-
   test("auto-migrates old format (with stack-order) to tree format", async () => {
+    await using repo = await createTestRepo();
     await addBranch(repo.dir, "feature/step1", "main");
     await addBranch(repo.dir, "feature/step2", "feature/step1");
     await addBranch(repo.dir, "feature/step3", "feature/step2");
@@ -228,6 +205,7 @@ describe("getStackTree migration", () => {
   });
 
   test("does not migrate if already in tree format", async () => {
+    await using repo = await createTestRepo();
     await addBranch(repo.dir, "feature/step1", "main");
     await addBranch(repo.dir, "feature/step2", "feature/step1");
     await setBaseBranch(repo.dir, "tree-stack", "main");
@@ -259,17 +237,8 @@ describe("getStackTree migration", () => {
 });
 
 describe("getStackTree", () => {
-  let repo: TestRepo;
-
-  beforeEach(async () => {
-    repo = await createTestRepo();
-  });
-
-  afterEach(async () => {
-    await repo.cleanup();
-  });
-
   test("builds a single-node tree", async () => {
+    await using repo = await createTestRepo();
     await addBranch(repo.dir, "feature/auth", "main");
     await setBaseBranch(repo.dir, "auth-stack", "main");
     await setStackNode(repo.dir, "feature/auth", "auth-stack", "main");
@@ -287,6 +256,7 @@ describe("getStackTree", () => {
   });
 
   test("builds a linear chain as a tree", async () => {
+    await using repo = await createTestRepo();
     await addBranch(repo.dir, "feature/step1", "main");
     await addBranch(repo.dir, "feature/step2", "feature/step1");
     await addBranch(repo.dir, "feature/step3", "feature/step2");
@@ -318,6 +288,7 @@ describe("getStackTree", () => {
   });
 
   test("builds a forked tree with alphabetical sibling order", async () => {
+    await using repo = await createTestRepo();
     await addBranch(repo.dir, "feature/base", "main");
     await addBranch(repo.dir, "feature/zebra", "feature/base");
     await addBranch(repo.dir, "feature/alpha", "feature/base");
@@ -348,6 +319,7 @@ describe("getStackTree", () => {
   });
 
   test("handles multiple roots", async () => {
+    await using repo = await createTestRepo();
     await addBranch(repo.dir, "feature/root-a", "main");
     await addBranch(repo.dir, "feature/root-b", "main");
     await setBaseBranch(repo.dir, "multi-root-stack", "main");
@@ -362,6 +334,7 @@ describe("getStackTree", () => {
   });
 
   test("detects stack name from current branch", async () => {
+    await using repo = await createTestRepo();
     await addBranch(repo.dir, "feature/current", "main");
     await setBaseBranch(repo.dir, "current-stack", "main");
     await setStackNode(repo.dir, "feature/current", "current-stack", "main");
@@ -621,22 +594,14 @@ describe("renderTree", () => {
 });
 
 describe("listAllStacks", () => {
-  let repo: TestRepo;
-
-  beforeEach(async () => {
-    repo = await createTestRepo();
-  });
-
-  afterEach(async () => {
-    await repo.cleanup();
-  });
-
   test("returns empty list when no stacks configured", async () => {
+    await using repo = await createTestRepo();
     const names = await listAllStacks(repo.dir);
     expect(names).toEqual([]);
   });
 
   test("returns sorted unique stack names", async () => {
+    await using repo = await createTestRepo();
     await addBranch(repo.dir, "feat/a", "main");
     await addBranch(repo.dir, "feat/b", "main");
     await addBranch(repo.dir, "feat/c", "main");
@@ -653,22 +618,14 @@ describe("listAllStacks", () => {
 });
 
 describe("getAllStackTrees", () => {
-  let repo: TestRepo;
-
-  beforeEach(async () => {
-    repo = await createTestRepo();
-  });
-
-  afterEach(async () => {
-    await repo.cleanup();
-  });
-
   test("returns empty list when no stacks", async () => {
+    await using repo = await createTestRepo();
     const trees = await getAllStackTrees(repo.dir);
     expect(trees).toEqual([]);
   });
 
   test("returns one StackTree per stack", async () => {
+    await using repo = await createTestRepo();
     await addBranch(repo.dir, "feat/a", "main");
     await addBranch(repo.dir, "feat/b", "main");
 
@@ -683,6 +640,7 @@ describe("getAllStackTrees", () => {
   });
 
   test("skips stacks with broken metadata", async () => {
+    await using repo = await createTestRepo();
     await addBranch(repo.dir, "feat/a", "main");
     await addBranch(repo.dir, "feat/b", "main");
 
@@ -701,8 +659,8 @@ describe("getAllStackTrees", () => {
 
 describe("getStackTree merged field", () => {
   test("backwards compat: reads branch-level stack-merged flag", async () => {
-    const repo = await createTestRepo();
-    try {
+    await using repo = await createTestRepo();
+    {
       await addBranch(repo.dir, "feature/a", "main");
       await addBranch(repo.dir, "feature/b", "main");
       await setStackNode(repo.dir, "feature/a", "my-stack", "main");
@@ -721,14 +679,12 @@ describe("getStackTree merged field", () => {
       const nodeB = tree.roots.find((n) => n.branch === "feature/b");
       expect(nodeA?.merged).toBe(true);
       expect(nodeB?.merged).toBeUndefined();
-    } finally {
-      await repo.cleanup();
     }
   });
 
   test("stack-level tombstone does not duplicate when live config exists", async () => {
-    const repo = await createTestRepo();
-    try {
+    await using repo = await createTestRepo();
+    {
       await addBranch(repo.dir, "feature/a", "main");
       await setStackNode(repo.dir, "feature/a", "my-stack", "main");
       await setBaseBranch(repo.dir, "my-stack", "main");
@@ -748,16 +704,14 @@ describe("getStackTree merged field", () => {
       );
       expect(matching).toHaveLength(1);
       expect(matching[0].merged).toBe(true);
-    } finally {
-      await repo.cleanup();
     }
   });
 });
 
 describe("addLandedBranch", () => {
   test("writes branch name to stack-level config", async () => {
-    const repo = await createTestRepo();
-    try {
+    await using repo = await createTestRepo();
+    {
       await setBaseBranch(repo.dir, "my-stack", "main");
       await addLandedBranch(repo.dir, "my-stack", "feature/a");
 
@@ -768,14 +722,12 @@ describe("addLandedBranch", () => {
         "stack.my-stack.landed-branches",
       );
       expect(stdout).toBe("feature/a");
-    } finally {
-      await repo.cleanup();
     }
   });
 
   test("supports multiple landed branches", async () => {
-    const repo = await createTestRepo();
-    try {
+    await using repo = await createTestRepo();
+    {
       await setBaseBranch(repo.dir, "my-stack", "main");
       await addLandedBranch(repo.dir, "my-stack", "feature/a");
       await addLandedBranch(repo.dir, "my-stack", "feature/b");
@@ -789,14 +741,12 @@ describe("addLandedBranch", () => {
       const branches = stdout.split("\n");
       expect(branches).toContain("feature/a");
       expect(branches).toContain("feature/b");
-    } finally {
-      await repo.cleanup();
     }
   });
 
   test("is idempotent: skips duplicate branch names", async () => {
-    const repo = await createTestRepo();
-    try {
+    await using repo = await createTestRepo();
+    {
       await setBaseBranch(repo.dir, "my-stack", "main");
       await addLandedBranch(repo.dir, "my-stack", "feature/a");
       await addLandedBranch(repo.dir, "my-stack", "feature/a");
@@ -808,25 +758,21 @@ describe("addLandedBranch", () => {
         "stack.my-stack.landed-branches",
       );
       expect(stdout).toBe("feature/a");
-    } finally {
-      await repo.cleanup();
     }
   });
 
   test("getLandedBranches returns empty array when no tombstones exist", async () => {
-    const repo = await createTestRepo();
-    try {
+    await using repo = await createTestRepo();
+    {
       await setBaseBranch(repo.dir, "my-stack", "main");
       const result = await getLandedBranches(repo.dir, "my-stack");
       expect(result).toEqual([]);
-    } finally {
-      await repo.cleanup();
     }
   });
 
   test("getLandedBranches returns all landed branches for a stack", async () => {
-    const repo = await createTestRepo();
-    try {
+    await using repo = await createTestRepo();
+    {
       await setBaseBranch(repo.dir, "my-stack", "main");
       await addLandedBranch(repo.dir, "my-stack", "feature/a");
       await addLandedBranch(repo.dir, "my-stack", "feature/b");
@@ -835,14 +781,12 @@ describe("addLandedBranch", () => {
       expect(result).toContain("feature/a");
       expect(result).toContain("feature/b");
       expect(result).toHaveLength(2);
-    } finally {
-      await repo.cleanup();
     }
   });
 
   test("getStackTree reconstructs merged root from stack-level tombstone", async () => {
-    const repo = await createTestRepo();
-    try {
+    await using repo = await createTestRepo();
+    {
       await addBranch(repo.dir, "feature/a", "main");
       await addBranch(repo.dir, "feature/b", "main");
       await setStackNode(repo.dir, "feature/a", "my-stack", "main");
@@ -865,14 +809,12 @@ describe("addLandedBranch", () => {
 
       expect(nodeB).toBeDefined();
       expect(nodeB!.merged).toBeUndefined();
-    } finally {
-      await repo.cleanup();
     }
   });
 
   test("getStackTree deduplicates: live branch takes precedence over tombstone", async () => {
-    const repo = await createTestRepo();
-    try {
+    await using repo = await createTestRepo();
+    {
       await addBranch(repo.dir, "feature/a", "main");
       await setStackNode(repo.dir, "feature/a", "my-stack", "main");
       await setBaseBranch(repo.dir, "my-stack", "main");
@@ -887,14 +829,12 @@ describe("addLandedBranch", () => {
       const matching = nodes.filter((n) => n.branch === "feature/a");
       expect(matching).toHaveLength(1);
       expect(matching[0].merged).toBeUndefined();
-    } finally {
-      await repo.cleanup();
     }
   });
 
   test("getStackTree deduplicates: live non-root branch also present as tombstone", async () => {
-    const repo = await createTestRepo();
-    try {
+    await using repo = await createTestRepo();
+    {
       await addBranch(repo.dir, "feature/a", "main");
       await addBranch(repo.dir, "feature/b", "feature/a");
       await setStackNode(repo.dir, "feature/a", "my-stack", "main");
@@ -915,14 +855,12 @@ describe("addLandedBranch", () => {
       // No tombstone root should appear for feature/b
       const rootB = tree.roots.find((n) => n.branch === "feature/b");
       expect(rootB).toBeUndefined();
-    } finally {
-      await repo.cleanup();
     }
   });
 
   test("getLandedBranches isolates per stack", async () => {
-    const repo = await createTestRepo();
-    try {
+    await using repo = await createTestRepo();
+    {
       await setBaseBranch(repo.dir, "stack-a", "main");
       await setBaseBranch(repo.dir, "stack-b", "main");
       await addLandedBranch(repo.dir, "stack-a", "feature/x");
@@ -933,8 +871,6 @@ describe("addLandedBranch", () => {
 
       expect(aResult).toEqual(["feature/x"]);
       expect(bResult).toEqual(["feature/y"]);
-    } finally {
-      await repo.cleanup();
     }
   });
 });

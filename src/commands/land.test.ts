@@ -74,31 +74,27 @@ describe("land types", () => {
 
 describe("isShallowRepository", () => {
   it("returns false for a fresh non-shallow repo", async () => {
-    const repo = await createTestRepo();
-    try {
+    await using repo = await createTestRepo();
+    {
       expect(await isShallowRepository(repo.dir)).toBe(false);
-    } finally {
-      await repo.cleanup();
     }
   });
 });
 
 describe("runLandPreflight", () => {
   it("returns no blockers for a clean repo", async () => {
-    const repo = await createTestRepo();
-    try {
+    await using repo = await createTestRepo();
+    {
       await addBranch(repo.dir, "feat/a", "main");
       const report = await runLandPreflight(repo.dir, ["feat/a"]);
       expect(report.blockers).toEqual([]);
       expect(report.isShallow).toBe(false);
-    } finally {
-      await repo.cleanup();
     }
   });
 
   it("reports a dirty worktree as a blocker", async () => {
-    const repo = await createTestRepo();
-    try {
+    await using repo = await createTestRepo();
+    {
       await addBranch(repo.dir, "feat/a", "main");
       await runGit(repo.dir, "checkout", "feat/a");
       await Deno.writeTextFile(`${repo.dir}/dirty.txt`, "untracked\n");
@@ -107,16 +103,14 @@ describe("runLandPreflight", () => {
       expect(
         report.blockers.some((b) => b.kind === "dirty-worktree"),
       ).toBe(true);
-    } finally {
-      await repo.cleanup();
     }
   });
 });
 
 describe("classifyLandCase", () => {
   it("returns all-merged when every branch is merged", async () => {
-    const repo = await createTestRepo();
-    try {
+    await using repo = await createTestRepo();
+    {
       await addBranch(repo.dir, "feat/a", "main");
       await addBranch(repo.dir, "feat/b", "feat/a");
       await initStack(repo, "s", [["feat/a", "main"], ["feat/b", "feat/a"]]);
@@ -126,14 +120,12 @@ describe("classifyLandCase", () => {
         ["feat/b", "MERGED"],
       ]);
       expect(classifyLandCase(tree, prStates)).toBe("all-merged");
-    } finally {
-      await repo.cleanup();
     }
   });
 
   it("returns root-merged when only the root is merged", async () => {
-    const repo = await createTestRepo();
-    try {
+    await using repo = await createTestRepo();
+    {
       await addBranch(repo.dir, "feat/a", "main");
       await addBranch(repo.dir, "feat/b", "feat/a");
       await initStack(repo, "s", [["feat/a", "main"], ["feat/b", "feat/a"]]);
@@ -143,14 +135,12 @@ describe("classifyLandCase", () => {
         ["feat/b", "OPEN"],
       ]);
       expect(classifyLandCase(tree, prStates)).toBe("root-merged");
-    } finally {
-      await repo.cleanup();
     }
   });
 
   it("throws UnsupportedLandShape when only a leaf is merged", async () => {
-    const repo = await createTestRepo();
-    try {
+    await using repo = await createTestRepo();
+    {
       await addBranch(repo.dir, "feat/a", "main");
       await addBranch(repo.dir, "feat/b", "feat/a");
       await initStack(repo, "s", [["feat/a", "main"], ["feat/b", "feat/a"]]);
@@ -162,14 +152,12 @@ describe("classifyLandCase", () => {
       expect(() => classifyLandCase(tree, prStates)).toThrow(
         UnsupportedLandShape,
       );
-    } finally {
-      await repo.cleanup();
     }
   });
 
   it("throws for multi-root with only one merged root", async () => {
-    const repo = await createTestRepo();
-    try {
+    await using repo = await createTestRepo();
+    {
       await addBranch(repo.dir, "feat/a", "main");
       await addBranch(repo.dir, "feat/b", "main");
       await initStack(repo, "s", [["feat/a", "main"], ["feat/b", "main"]]);
@@ -181,16 +169,14 @@ describe("classifyLandCase", () => {
       expect(() => classifyLandCase(tree, prStates)).toThrow(
         UnsupportedLandShape,
       );
-    } finally {
-      await repo.cleanup();
     }
   });
 });
 
 describe("captureSnapshot", () => {
   it("records tip and parent-tip for every branch", async () => {
-    const repo = await createTestRepo();
-    try {
+    await using repo = await createTestRepo();
+    {
       await addBranch(repo.dir, "feat/a", "main");
       await addBranch(repo.dir, "feat/b", "feat/a");
       await initStack(repo, "s", [["feat/a", "main"], ["feat/b", "feat/a"]]);
@@ -201,16 +187,14 @@ describe("captureSnapshot", () => {
       expect(a.recordedParent).toBe("main");
       expect(a.tipSha.length).toBe(40);
       expect(a.parentTipSha.length).toBe(40);
-    } finally {
-      await repo.cleanup();
     }
   });
 });
 
 describe("buildRebaseSteps", () => {
   it("for root-merged linear stack, first child targets origin/base", async () => {
-    const repo = await createTestRepo();
-    try {
+    await using repo = await createTestRepo();
+    {
       await addBranch(repo.dir, "feat/a", "main");
       await addBranch(repo.dir, "feat/b", "feat/a");
       await addBranch(repo.dir, "feat/c", "feat/b");
@@ -232,16 +216,14 @@ describe("buildRebaseSteps", () => {
       const snapB = snap.find((s) => s.branch === "feat/b")!;
       expect(steps[0].oldParentSha).toBe(snapA.tipSha);
       expect(steps[1].oldParentSha).toBe(snapB.tipSha);
-    } finally {
-      await repo.cleanup();
     }
   });
 });
 
 describe("buildPushSteps", () => {
   it("returns steps in leaves-first order", async () => {
-    const repo = await createTestRepo();
-    try {
+    await using repo = await createTestRepo();
+    {
       await addBranch(repo.dir, "feat/a", "main");
       await addBranch(repo.dir, "feat/b", "feat/a");
       await addBranch(repo.dir, "feat/c", "feat/b");
@@ -255,16 +237,14 @@ describe("buildPushSteps", () => {
       const { buildPushSteps } = await import("./land.ts");
       const pushes = buildPushSteps(tree, snap, "feat/a");
       expect(pushes.map((p) => p.branch)).toEqual(["feat/c", "feat/b"]);
-    } finally {
-      await repo.cleanup();
     }
   });
 });
 
 describe("buildPrUpdateSteps", () => {
   it("retargets former children of merged root to base branch", async () => {
-    const repo = await createTestRepo();
-    try {
+    await using repo = await createTestRepo();
+    {
       await addBranch(repo.dir, "feat/a", "main");
       await addBranch(repo.dir, "feat/b", "feat/a");
       await addBranch(repo.dir, "feat/c", "feat/b");
@@ -285,14 +265,12 @@ describe("buildPrUpdateSteps", () => {
       expect(updates[0].prNumber).toBe(20);
       expect(updates[0].newBase).toBe("main");
       expect(updates[0].flipToReady).toBe(true);
-    } finally {
-      await repo.cleanup();
     }
   });
 
   it("does not flip non-draft children to ready", async () => {
-    const repo = await createTestRepo();
-    try {
+    await using repo = await createTestRepo();
+    {
       await addBranch(repo.dir, "feat/a", "main");
       await addBranch(repo.dir, "feat/b", "feat/a");
       await initStack(repo, "s", [["feat/a", "main"], ["feat/b", "feat/a"]]);
@@ -303,16 +281,14 @@ describe("buildPrUpdateSteps", () => {
       ]);
       const updates = buildPrUpdateSteps(tree, prInfoByBranch, "feat/a");
       expect(updates[0].flipToReady).toBe(false);
-    } finally {
-      await repo.cleanup();
     }
   });
 });
 
 describe("previewLandCleanup", () => {
   it("returns no splits when the merged root has a single child", async () => {
-    const repo = await createTestRepo();
-    try {
+    await using repo = await createTestRepo();
+    {
       await addBranch(repo.dir, "feat/a", "main");
       await addBranch(repo.dir, "feat/b", "feat/a");
       await initStack(repo, "s", [["feat/a", "main"], ["feat/b", "feat/a"]]);
@@ -320,14 +296,12 @@ describe("previewLandCleanup", () => {
       const preview = previewLandCleanup(tree, "feat/a");
       expect(preview.splits).toEqual([]);
       expect(preview.remainingRoots).toEqual(["feat/b"]);
-    } finally {
-      await repo.cleanup();
     }
   });
 
   it("reports two splits when the merged root has two direct children", async () => {
-    const repo = await createTestRepo();
-    try {
+    await using repo = await createTestRepo();
+    {
       await addBranch(repo.dir, "feat/a", "main");
       await addBranch(repo.dir, "feat/b", "feat/a");
       await addBranch(repo.dir, "feat/c", "feat/a");
@@ -339,16 +313,14 @@ describe("previewLandCleanup", () => {
       const tree = await getStackTree(repo.dir, "s");
       const preview = previewLandCleanup(tree, "feat/a");
       expect(preview.splits.length).toBe(2);
-    } finally {
-      await repo.cleanup();
     }
   });
 });
 
 describe("tombstone survives branch deletion", () => {
   it("landed branch appears in tree after git branch -D", async () => {
-    const repo = await createTestRepo();
-    try {
+    await using repo = await createTestRepo();
+    {
       await addBranch(repo.dir, "feat/a", "main");
       await addBranch(repo.dir, "feat/b", "feat/a");
       await initStack(repo, "s", [["feat/a", "main"], ["feat/b", "feat/a"]]);
@@ -379,16 +351,14 @@ describe("tombstone survives branch deletion", () => {
       expect(nodeB).toBeDefined();
       expect(nodeB!.merged).toBeUndefined();
       expect(nodeB!.parent).toBe("main");
-    } finally {
-      await repo.cleanup();
     }
   });
 });
 
 describe("executeLand case B (all-merged)", () => {
   it("deletes every branch and clears stack config", async () => {
-    const repo = await createTestRepo();
-    try {
+    await using repo = await createTestRepo();
+    {
       await addBranch(repo.dir, "feat/a", "main");
       await addBranch(repo.dir, "feat/b", "feat/a");
       await initStack(repo, "s", [["feat/a", "main"], ["feat/b", "feat/a"]]);
@@ -444,16 +414,14 @@ describe("executeLand case B (all-merged)", () => {
 
       expect(result.plan.case).toBe("all-merged");
       expect(result.split).toEqual([]);
-    } finally {
-      await repo.cleanup();
     }
   });
 });
 
 describe("executeLand case A tombstone integration", () => {
   it("preserves merged root as tombstone after executeLand", async () => {
-    const env = await createRepoWithOrigin();
-    try {
+    await using env = await createRepoWithOrigin();
+    {
       await addBranch(env.dir, "feat/a", "main");
       await runGit(env.dir, "push", "origin", "feat/a");
       await addBranch(env.dir, "feat/b", "feat/a");
@@ -516,17 +484,14 @@ describe("executeLand case A tombstone integration", () => {
       const liveB = tree.roots.find((n) => n.branch === "feat/b" && !n.merged);
       expect(liveB).toBeDefined();
       expect(liveB!.parent).toBe("main");
-    } finally {
-      await env.cleanup();
-      setMockDir(undefined);
     }
   });
 });
 
 describe("fetchBase", () => {
   it("throws a clear error when origin has no base branch", async () => {
-    const repo = await createTestRepo();
-    try {
+    await using repo = await createTestRepo();
+    {
       const { fetchBase } = await import("./land.ts");
       let caught: Error | null = null;
       try {
@@ -536,16 +501,14 @@ describe("fetchBase", () => {
       }
       expect(caught).not.toBeNull();
       expect(caught!.message.includes("fetch")).toBe(true);
-    } finally {
-      await repo.cleanup();
     }
   });
 });
 
 describe("isBranchAutoMerged", () => {
   it("returns true when branch has zero commits beyond origin/base", async () => {
-    const env = await createRepoWithOrigin();
-    try {
+    await using env = await createRepoWithOrigin();
+    {
       // feat/a shares its only commit with main (patch already upstream).
       await runGit(env.dir, "checkout", "-b", "feat/a", "main");
       await Deno.writeTextFile(`${env.dir}/x.txt`, "x\n");
@@ -568,27 +531,23 @@ describe("isBranchAutoMerged", () => {
       expect(await isBranchAutoMerged(env.dir, "feat/a", "origin/main")).toBe(
         true,
       );
-    } finally {
-      await env.cleanup();
     }
   });
 
   it("returns false when branch has unique commits", async () => {
-    const env = await createRepoWithOrigin();
-    try {
+    await using env = await createRepoWithOrigin();
+    {
       await addBranch(env.dir, "feat/a", "main");
       await runGit(env.dir, "push", "origin", "feat/a");
       expect(await isBranchAutoMerged(env.dir, "feat/a", "main")).toBe(false);
-    } finally {
-      await env.cleanup();
     }
   });
 });
 
 describe("planLand", () => {
   it("builds a root-merged plan for a linear stack", async () => {
-    const repo = await createTestRepo();
-    try {
+    await using repo = await createTestRepo();
+    {
       await addBranch(repo.dir, "feat/a", "main");
       await addBranch(repo.dir, "feat/b", "feat/a");
       await initStack(repo, "s", [["feat/a", "main"], ["feat/b", "feat/a"]]);
@@ -609,14 +568,12 @@ describe("planLand", () => {
       expect(plan.prUpdates.length).toBe(1);
       expect(plan.prUpdates[0].newBase).toBe("main");
       expect(plan.branchesToDelete).toEqual(["feat/a"]);
-    } finally {
-      await repo.cleanup();
     }
   });
 
   it("builds an all-merged plan with empty rebase/push/prUpdates", async () => {
-    const repo = await createTestRepo();
-    try {
+    await using repo = await createTestRepo();
+    {
       await addBranch(repo.dir, "feat/a", "main");
       await addBranch(repo.dir, "feat/b", "feat/a");
       await initStack(repo, "s", [["feat/a", "main"], ["feat/b", "feat/a"]]);
@@ -630,16 +587,14 @@ describe("planLand", () => {
       expect(plan.pushSteps).toEqual([]);
       expect(plan.prUpdates).toEqual([]);
       expect([...plan.branchesToDelete].sort()).toEqual(["feat/a", "feat/b"]);
-    } finally {
-      await repo.cleanup();
     }
   });
 });
 
 describe("executeLand case A conflict rollback", () => {
   it("rebase conflict rolls back every touched branch to its pre-land SHA", async () => {
-    const env = await createRepoWithOrigin();
-    try {
+    await using env = await createRepoWithOrigin();
+    {
       // Create a conflict: feat/a and main both modify README.md.
       await runGit(env.dir, "checkout", "-b", "feat/a", "main");
       await Deno.writeTextFile(
@@ -713,16 +668,14 @@ describe("executeLand case A conflict rollback", () => {
         "REBASE_HEAD",
       );
       expect(rebaseHead.code).not.toBe(0);
-    } finally {
-      await env.cleanup();
     }
   });
 });
 
 describe("executeLand case A push phase", () => {
   it("force-with-leases leaves-first", async () => {
-    const env = await createRepoWithOrigin();
-    try {
+    await using env = await createRepoWithOrigin();
+    {
       await addBranch(env.dir, "feat/a", "main");
       await runGit(env.dir, "push", "origin", "feat/a");
       await addBranch(env.dir, "feat/b", "feat/a");
@@ -774,17 +727,14 @@ describe("executeLand case A push phase", () => {
         .filter((e) => e.step.kind === "push" && e.status === "ok")
         .map((e) => (e.step as { kind: "push"; branch: string }).branch);
       expect(pushOks).toEqual(["feat/c", "feat/b"]);
-    } finally {
-      await env.cleanup();
-      setMockDir(undefined);
     }
   });
 });
 
 describe("executeLand case A pr-update phase", () => {
   it("retargets PR base and flips draft to ready", async () => {
-    const env = await createRepoWithOrigin();
-    try {
+    await using env = await createRepoWithOrigin();
+    {
       await addBranch(env.dir, "feat/a", "main");
       await runGit(env.dir, "push", "origin", "feat/a");
       await addBranch(env.dir, "feat/b", "feat/a");
@@ -827,17 +777,14 @@ describe("executeLand case A pr-update phase", () => {
         (e) => e.step.kind === "pr-update" && e.status === "ok",
       );
       expect(prUpdate).toBeDefined();
-    } finally {
-      await env.cleanup();
-      setMockDir(undefined);
     }
   });
 });
 
 describe("executeLand case A rebase phase", () => {
   it("rebases child onto origin/main for merge-strategy root-merged", async () => {
-    const env = await createRepoWithOrigin();
-    try {
+    await using env = await createRepoWithOrigin();
+    {
       await addBranch(env.dir, "feat/a", "main");
       await runGit(env.dir, "push", "origin", "feat/a");
       await addBranch(env.dir, "feat/b", "feat/a");
@@ -906,17 +853,14 @@ describe("executeLand case A rebase phase", () => {
         branchShaResult.stdout,
       );
       expect(isAncestorResult.code).toBe(0);
-    } finally {
-      await env.cleanup();
-      setMockDir(undefined);
     }
   });
 });
 
 describe("executeLand case A pr-close phase", () => {
   it("closes PRs for auto-merged branches with a comment", async () => {
-    const env = await createRepoWithOrigin();
-    try {
+    await using env = await createRepoWithOrigin();
+    {
       // Build: main - A - B where B has no unique commits vs A (so rebase
       // drops all of B's commits and marks it auto-merged).
       await runGit(env.dir, "checkout", "-b", "feat/a", "main");
@@ -967,17 +911,14 @@ describe("executeLand case A pr-close phase", () => {
         (e) => e.step.kind === "pr-close" && e.status === "ok",
       );
       expect(closeEvent).toBeDefined();
-    } finally {
-      await env.cleanup();
-      setMockDir(undefined);
     }
   });
 });
 
 describe("executeLand case A cleanup phase", () => {
   it("reparents children, deletes merged root, and restores HEAD", async () => {
-    const env = await createRepoWithOrigin();
-    try {
+    await using env = await createRepoWithOrigin();
+    {
       await addBranch(env.dir, "feat/a", "main");
       await runGit(env.dir, "push", "origin", "feat/a");
       await addBranch(env.dir, "feat/b", "feat/a");
@@ -1029,17 +970,14 @@ describe("executeLand case A cleanup phase", () => {
         "branch.feat/b.stack-parent",
       );
       expect(parent.stdout).toBe("main");
-    } finally {
-      await env.cleanup();
-      setMockDir(undefined);
     }
   });
 });
 
 describe("executeLand case A nav phase", () => {
   it("emits a nav event after PR retarget", async () => {
-    const env = await createRepoWithOrigin();
-    try {
+    await using env = await createRepoWithOrigin();
+    {
       await addBranch(env.dir, "feat/a", "main");
       await runGit(env.dir, "push", "origin", "feat/a");
       await addBranch(env.dir, "feat/b", "feat/a");
@@ -1088,17 +1026,14 @@ describe("executeLand case A nav phase", () => {
       expect(navEvent!.status === "ok" || navEvent!.status === "skipped").toBe(
         true,
       );
-    } finally {
-      await env.cleanup();
-      setMockDir(undefined);
     }
   });
 });
 
 describe("executeLand HEAD safety", () => {
   it("deletes branches even when HEAD starts on a branch being deleted", async () => {
-    const env = await createRepoWithOrigin();
-    try {
+    await using env = await createRepoWithOrigin();
+    {
       await addBranch(env.dir, "feat/a", "main");
       await addBranch(env.dir, "feat/b", "feat/a");
       await initStack(env, "s", [["feat/a", "main"], ["feat/b", "feat/a"]]);
@@ -1149,16 +1084,14 @@ describe("executeLand HEAD safety", () => {
       );
       expect(headRef.code).toBe(0);
       expect(headRef.stdout.trim()).toBe("main");
-    } finally {
-      await env.cleanup();
     }
   });
 });
 
 describe("executeLand idempotent deletion", () => {
   it("emits skipped when a branch is already absent", async () => {
-    const env = await createRepoWithOrigin();
-    try {
+    await using env = await createRepoWithOrigin();
+    {
       await addBranch(env.dir, "feat/a", "main");
       await addBranch(env.dir, "feat/b", "feat/a");
       await initStack(env, "s", [["feat/a", "main"], ["feat/b", "feat/a"]]);
@@ -1187,16 +1120,14 @@ describe("executeLand idempotent deletion", () => {
       );
       expect(bDeleteEvent).toBeDefined();
       expect(bDeleteEvent!.status).toBe("skipped");
-    } finally {
-      await env.cleanup();
     }
   });
 });
 
 describe("executeLand stale-plan detection", () => {
   it("aborts before mutation when a merged PR has been reopened", async () => {
-    const env = await createRepoWithOrigin();
-    try {
+    await using env = await createRepoWithOrigin();
+    {
       await addBranch(env.dir, "feat/a", "main");
       await runGit(env.dir, "push", "origin", "feat/a");
       await addBranch(env.dir, "feat/b", "feat/a");
@@ -1252,17 +1183,14 @@ describe("executeLand stale-plan detection", () => {
         "refs/heads/feat/a",
       );
       expect(aExists.code).toBe(0);
-    } finally {
-      await env.cleanup();
-      setMockDir(undefined);
     }
   });
 });
 
 describe("classifyLandCase with historical merged nodes", () => {
   it("ignores stack-merged nodes when computing all-merged", async () => {
-    const repo = await createTestRepo();
-    try {
+    await using repo = await createTestRepo();
+    {
       await addBranch(repo.dir, "feature/a", "main");
       await addBranch(repo.dir, "feature/b", "main");
       await setStackNode(repo.dir, "feature/a", "my-stack", "main");
@@ -1285,14 +1213,12 @@ describe("classifyLandCase with historical merged nodes", () => {
       // Should be "all-merged" — feature/a historical node should not block this
       const landCase = classifyLandCase(tree, prStates);
       expect(landCase).toBe("all-merged");
-    } finally {
-      await repo.cleanup();
     }
   });
 
   it("ignores stack-merged nodes when checking root for root-merged", async () => {
-    const repo = await createTestRepo();
-    try {
+    await using repo = await createTestRepo();
+    {
       await addBranch(repo.dir, "feature/a", "main");
       await addBranch(repo.dir, "feature/b", "main");
       await setStackNode(repo.dir, "feature/a", "my-stack", "main");
@@ -1315,16 +1241,14 @@ describe("classifyLandCase with historical merged nodes", () => {
       expect(() => classifyLandCase(tree, prStates)).toThrow(
         UnsupportedLandShape,
       );
-    } finally {
-      await repo.cleanup();
     }
   });
 });
 
 describe("executeLandFromCli resume guard", () => {
   it("throws when --resume is passed but no land-resume-state exists", async () => {
-    const repo = await createRepoWithOrigin();
-    try {
+    await using repo = await createRepoWithOrigin();
+    {
       await addBranch(repo.dir, "feature/a", "main");
       await setStackNode(repo.dir, "feature/a", "my-stack", "main");
       await setBaseBranch(repo.dir, "my-stack", "main");
@@ -1334,14 +1258,12 @@ describe("executeLandFromCli resume guard", () => {
           resume: true,
         }),
       ).rejects.toThrow("No land in progress");
-    } finally {
-      await repo.cleanup();
     }
   });
 
   it("throws when no --resume but land-resume-state already exists", async () => {
-    const repo = await createRepoWithOrigin();
-    try {
+    await using repo = await createRepoWithOrigin();
+    {
       await addBranch(repo.dir, "feature/a", "main");
       await setStackNode(repo.dir, "feature/a", "my-stack", "main");
       await setBaseBranch(repo.dir, "my-stack", "main");
@@ -1357,8 +1279,6 @@ describe("executeLandFromCli resume guard", () => {
       await expect(
         executeLandFromCli(repo.dir, "my-stack", new Map(), new Map(), {}),
       ).rejects.toThrow("land already in progress");
-    } finally {
-      await repo.cleanup();
     }
   });
 });
@@ -1368,8 +1288,8 @@ describe("executeLandFromCli auto-merged detection", () => {
   // patch-id drop, push and PR retarget are skipped, the PR is closed
   // with a comment, and the branch is deleted and tombstoned.
   it("skips push, closes PR, deletes and tombstones auto-merged children", async () => {
-    const env = await createRepoWithOrigin();
-    try {
+    await using env = await createRepoWithOrigin();
+    {
       // main - A (merged) - B (patch-id equals part of A's squash merge)
       await runGit(env.dir, "checkout", "-b", "feat/a", "main");
       await Deno.writeTextFile(`${env.dir}/shared.txt`, "shared content\n");
@@ -1455,9 +1375,6 @@ describe("executeLandFromCli auto-merged detection", () => {
       // landed-branches includes feat/b.
       const landed = await getLandedBranches(env.dir, "s");
       expect(landed).toContain("feat/b");
-    } finally {
-      await env.cleanup();
-      setMockDir(undefined);
     }
   });
 });

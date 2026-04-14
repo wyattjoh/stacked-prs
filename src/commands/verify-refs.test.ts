@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, it as test } from "@std/testing/bdd";
+import { describe, it as test } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import {
   addBranch,
@@ -6,22 +6,12 @@ import {
   createTestRepo,
   runGit,
 } from "../lib/testdata/helpers.ts";
-import type { TestRepo } from "../lib/testdata/helpers.ts";
 import { setBaseBranch, setStackNode } from "../lib/stack.ts";
 import { verifyRefs } from "./verify-refs.ts";
 
 describe("verifyRefs", () => {
-  let repo: TestRepo;
-
-  beforeEach(async () => {
-    repo = await createTestRepo();
-  });
-
-  afterEach(async () => {
-    await repo.cleanup();
-  });
-
   test("all branches up-to-date returns valid", async () => {
+    await using repo = await createTestRepo();
     await addBranch(repo.dir, "feature/a", "main");
     await addBranch(repo.dir, "feature/b", "feature/a");
 
@@ -43,6 +33,7 @@ describe("verifyRefs", () => {
   });
 
   test("detects stale branch after parent moves ahead", async () => {
+    await using repo = await createTestRepo();
     await addBranch(repo.dir, "feature/a", "main");
     await addBranch(repo.dir, "feature/b", "feature/a");
 
@@ -69,6 +60,7 @@ describe("verifyRefs", () => {
   });
 
   test("multiple stale branches", async () => {
+    await using repo = await createTestRepo();
     await addBranch(repo.dir, "feature/a", "main");
     await addBranch(repo.dir, "feature/b", "feature/a");
     await addBranch(repo.dir, "feature/c", "feature/b");
@@ -92,6 +84,7 @@ describe("verifyRefs", () => {
   });
 
   test("clean stack has no duplicates", async () => {
+    await using repo = await createTestRepo();
     await addBranch(repo.dir, "feature/a", "main");
     await addBranch(repo.dir, "feature/b", "feature/a");
 
@@ -106,6 +99,7 @@ describe("verifyRefs", () => {
   });
 
   test("detects duplicate patches across branches", async () => {
+    await using repo = await createTestRepo();
     // Create A off main with a unique file
     await runGit(repo.dir, "checkout", "-b", "feature/a", "main");
     await commitFile(repo.dir, "shared.txt", "shared content\n");
@@ -139,6 +133,7 @@ describe("verifyRefs", () => {
   });
 
   test("single-branch stack is always valid", async () => {
+    await using repo = await createTestRepo();
     await addBranch(repo.dir, "feature/a", "main");
 
     await setBaseBranch(repo.dir, "my-stack", "main");
@@ -151,6 +146,7 @@ describe("verifyRefs", () => {
   });
 
   test("forked tree: ancestry checked across branches at different depths", async () => {
+    await using repo = await createTestRepo();
     // Tree shape:
     //   main
     //   └── feature/a
