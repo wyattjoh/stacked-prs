@@ -1359,9 +1359,11 @@ describe("executeLandFromCli resume guard", () => {
 });
 
 describe("executeLandFromCli auto-merged detection", () => {
-  // Enabled at end of Task 6 (delete + tombstone loop). Exercises Tasks 3-6
-  // end-to-end: rebase detects patch-id drop, push/PR-retarget are skipped,
-  // PR is closed with comment, branch is deleted and tombstoned.
+  // Exercises end-to-end auto-merged handling: rebase detects the
+  // patch-id drop, push and PR retarget are skipped, the PR is closed
+  // with a comment, and the branch is deleted and tombstoned.
+  // Currently ignored; enabled once the CLI push/retarget/cleanup
+  // guards are in place.
   it.ignore("skips push, closes PR, deletes and tombstones auto-merged children", async () => {
     const env = await createRepoWithOrigin();
     try {
