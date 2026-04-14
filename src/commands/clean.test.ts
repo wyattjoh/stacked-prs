@@ -197,6 +197,65 @@ describe("detectStaleConfig", () => {
     expect(second.removed).toEqual(first.removed);
   });
 
+  test("legacy stack-merged on live branch: flags as legacy-merged-flag", async () => {
+    await addBranch(repo.dir, "a", "main");
+    await setBaseBranch(repo.dir, "test", "main");
+    await setStackNode(repo.dir, "a", "test", "main");
+    // Stranded pre-migration flag: branch is alive, stack-name is set,
+    // but the branch carries an orphan stack-merged=true.
+    await runGit(repo.dir, "config", "branch.a.stack-merged", "true");
+
+    const report = await detectStaleConfig(repo.dir);
+    const legacy = report.findings.filter(
+      (f) => f.kind === "legacy-merged-flag",
+    );
+    expect(legacy).toHaveLength(1);
+    expect(legacy[0].branch).toBe("a");
+    expect(legacy[0].stackName).toBe("test");
+    expect(legacy[0].configKeys).toEqual(["branch.a.stack-merged"]);
+  });
+
+  test("legacy stack-merged on missing branch: covered by missing-branch, not legacy-merged-flag", async () => {
+    await addBranch(repo.dir, "a", "main");
+    await setBaseBranch(repo.dir, "test", "main");
+    await setStackNode(repo.dir, "a", "test", "main");
+    await runGit(repo.dir, "config", "branch.a.stack-merged", "true");
+    // Delete the ref.
+    await runGit(repo.dir, "update-ref", "-d", "refs/heads/a");
+
+    const report = await detectStaleConfig(repo.dir);
+    const legacy = report.findings.filter(
+      (f) => f.kind === "legacy-merged-flag",
+    );
+    expect(legacy).toHaveLength(0);
+    const missing = report.findings.filter(
+      (f) => f.kind === "missing-branch",
+    );
+    expect(missing).toHaveLength(1);
+    // missing-branch collects *all* branch.a.stack-* keys, including stack-merged.
+    expect(missing[0].configKeys).toContain("branch.a.stack-merged");
+  });
+
+  test("legacy stack-merged on live branch: applyClean unsets the key", async () => {
+    await addBranch(repo.dir, "a", "main");
+    await setBaseBranch(repo.dir, "test", "main");
+    await setStackNode(repo.dir, "a", "test", "main");
+    await runGit(repo.dir, "config", "branch.a.stack-merged", "true");
+
+    const report = await detectStaleConfig(repo.dir);
+    await applyClean(
+      repo.dir,
+      report.findings.filter((f) => f.kind === "legacy-merged-flag"),
+    );
+
+    expect(await configKeyExists(repo.dir, "branch.a.stack-merged")).toBe(
+      false,
+    );
+    // Live keys are untouched.
+    expect(await configKeyExists(repo.dir, "branch.a.stack-name")).toBe(true);
+    expect(await configKeyExists(repo.dir, "branch.a.stack-parent")).toBe(true);
+  });
+
   test("--stack-name filter: excludes findings from other stacks", async () => {
     // Stack "broken" has a missing branch ref.
     await addBranch(repo.dir, "a", "main");

@@ -9,7 +9,8 @@ export type CleanFindingKind =
   | "missing-branch"
   | "stale-stack-parent"
   | "empty-stack"
-  | "stale-resume-state";
+  | "stale-resume-state"
+  | "legacy-merged-flag";
 
 export interface CleanFinding {
   kind: CleanFindingKind;
@@ -243,6 +244,42 @@ export async function detectStaleConfig(
         });
       }
     }
+  }
+
+  // Check 5: legacy stack-merged flags on live branches. Pre-migration
+  // lands that didn't complete left branch-level stack-merged=true keys
+  // even after the branch was revived. getStackTree honors them via
+  // backwards-compat read, so the node renders merged indefinitely.
+  // Only flag branches that are *also* live (ref exists); deleted
+  // branches are already covered by the missing-branch check above,
+  // which collects every branch.<name>.stack-* key.
+  const rawMergedEntries = await gitConfigGetRegexp(
+    dir,
+    "^branch\\..*\\.stack-merged$",
+  );
+  for (const [key, value] of rawMergedEntries) {
+    if (value !== "true") continue;
+    const match = key.match(/^branch\.(.+)\.stack-merged$/);
+    if (!match) continue;
+    const branch = match[1];
+
+    // Must be associated with a known stack via stack-name.
+    const stackName = await gitConfig(dir, `branch.${branch}.stack-name`);
+    if (!stackName) continue;
+    if (scopeStack && stackName !== scopeStack) continue;
+
+    // Must be a live ref; deleted branches are covered by missing-branch.
+    if (!(await branchRefExists(dir, branch))) continue;
+
+    findings.push({
+      kind: "legacy-merged-flag",
+      branch,
+      stackName,
+      details: `Branch '${branch}' in stack '${stackName}' carries a legacy ` +
+        `stack-merged=true flag. It renders as merged in the TUI indefinitely. ` +
+        `Removing the flag restores live rendering.`,
+      configKeys: [`branch.${branch}.stack-merged`],
+    });
   }
 
   return {
