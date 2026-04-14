@@ -163,17 +163,18 @@ the specified new parent.
 
 ### `/stacked-prs sync`
 
-Fetch main, rebase the stack tree, and push to remote.
+Fetch each stack's base from origin and restack + force-push **every stack** in
+the repo. Mirrors `gt sync`.
 
 ```
-/stacked-prs sync                              # full stack
-/stacked-prs sync --upstack-from=<branch>      # branch and all descendants
-/stacked-prs sync --downstack-from=<branch>    # branch and all ancestors
-/stacked-prs sync --only=<branch>              # just the current branch
+/stacked-prs sync --dry-run       # preview plan across all stacks
+/stacked-prs sync                 # prompts [y/N] before executing
+/stacked-prs sync --force         # execute without prompting
 ```
 
-Fetches main, calls the segment-based tree rebase, runs ancestry verification,
-and force-pushes with `--force-with-lease`.
+The CLI stops at the first conflict or push failure and reports which stack
+failed so the remaining stacks stay untouched. For a single-stack or
+branch-scoped rebase without fetching or pushing, use `/stacked-prs restack`.
 
 ### `/stacked-prs restack`
 
@@ -183,7 +184,16 @@ want to rebase locally before reviewing the diff. Accepts the same
 
 ### `/stacked-prs submit`
 
-Create or update PRs for all branches in the stack:
+Push every stack branch and create or update PRs. Mirrors `gt submit`. Has three
+modes:
+
+```
+/stacked-prs submit --dry-run     # preview plan
+/stacked-prs submit               # prompts [y/N] before executing
+/stacked-prs submit --force       # execute without prompting
+```
+
+On each run the CLI:
 
 - **Creates PRs** for branches without one (targeting the correct parent; marked
   draft when the parent is not the stack's base branch)
@@ -252,6 +262,16 @@ Key bindings:
   remote restore on failure. Use `↑`/`↓` to scroll the modal.
 - `?`: toggle full key help
 - `q` / `esc` / `ctrl-c`: quit
+
+### `/stacked-prs pr`
+
+Open the current (or specified) branch's PR in the browser. Mirrors `gt pr`.
+
+```
+/stacked-prs pr                     # open current branch's PR
+/stacked-prs pr --branch=<name>     # open the PR for a specific branch
+/stacked-prs pr --print             # print the URL instead of opening
+```
 
 ### `/stacked-prs land`
 
@@ -326,6 +346,9 @@ deno run --allow-run=git,gh --allow-env --allow-read \
 | `cli.ts verify-refs`                          | Checks branch ancestry after rebase, outputs repair commands         |
 | `cli.ts import-discover`                      | Discovers branch trees between a branch and main                     |
 | `cli.ts submit-plan`                          | Computes the full submit plan (PRs to create/update, nav changes)    |
+| `cli.ts submit [--dry-run] [--force]`         | Run the submit plan: push + PR create/edit + draft flips + nav       |
+| `cli.ts sync [--dry-run] [--force]`           | Fetch + restack + push across **every** stack in the repo            |
+| `cli.ts pr [--branch=<name>] [--print]`       | Open the branch's PR in the browser via `gh pr view --web`           |
 | `cli.ts land [--dry-run] [--json] [--resume]` | Land a merged PR; plan only with `--dry-run`, resume after conflicts |
 
 `--stack-name` auto-detects from the current branch's git config when omitted.

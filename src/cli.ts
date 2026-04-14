@@ -11,6 +11,13 @@ import { verifyRefs } from "./commands/verify-refs.ts";
 import { discoverChain } from "./commands/import-discover.ts";
 import { computeSubmitPlan } from "./commands/submit-plan.ts";
 import { applyClean, detectStaleConfig } from "./commands/clean.ts";
+import { findPrForBranch } from "./commands/pr.ts";
+import { executeSubmit, renderSubmitPlan } from "./commands/submit.ts";
+import {
+  computeSyncPlan,
+  executeSync,
+  renderSyncPlan,
+} from "./commands/sync.ts";
 import {
   create as createBranch,
   type CreatePlan,
@@ -717,6 +724,195 @@ await new Command()
         console.error(`  Or abort: ${result.recovery?.abort}`);
       } else {
         console.error("Land failed:", result.error);
+      }
+    }
+
+    if (!result.ok) Deno.exit(1);
+  })
+  // --- pr ---
+  .command("pr", "Open the pull request for a branch in the browser")
+  .option("--branch <name:string>", "Branch (default: current)")
+  .option("--owner <owner:string>", "GitHub repo owner")
+  .option("--repo <repo:string>", "GitHub repo name")
+  .option("--print", "Print the PR URL instead of opening the browser")
+  .option("--json", "Output as JSON")
+  .action(async (options) => {
+    const { owner, repo } = await resolveRepo(options.owner, options.repo);
+    const result = await findPrForBranch(dir, owner, repo, options.branch);
+
+    if (options.json) {
+      console.log(JSON.stringify(result, null, 2));
+      if (!result.ok) Deno.exit(1);
+      return;
+    }
+
+    if (!result.ok) {
+      console.error(result.error);
+      Deno.exit(1);
+    }
+
+    if (options.print) {
+      console.log(result.pr!.url);
+      return;
+    }
+
+    // Delegate opening to gh so we don't have to shell out to `open` / `xdg-open`.
+    await gh(
+      "pr",
+      "view",
+      String(result.pr!.number),
+      "--repo",
+      `${owner}/${repo}`,
+      "--web",
+    );
+  })
+  // --- submit ---
+  .command(
+    "submit",
+    "Push branches and create/update PRs (runs the full submit plan)",
+  )
+  .option(
+    "--stack-name <name:string>",
+    "Stack name (auto-detected from current branch)",
+  )
+  .option("--owner <owner:string>", "GitHub repo owner")
+  .option("--repo <repo:string>", "GitHub repo name")
+  .option("--dry-run", "Print the plan without executing")
+  .option("--force", "Execute without the interactive confirmation prompt")
+  .option("--json", "Output as JSON")
+  .action(async (options) => {
+    const stackName = await resolveStackName(dir, options.stackName);
+    const { owner, repo } = await resolveRepo(options.owner, options.repo);
+    const plan = await computeSubmitPlan(dir, stackName, owner, repo);
+
+    if (options.dryRun) {
+      if (options.json) {
+        console.log(JSON.stringify(plan, null, 2));
+      } else {
+        console.log(renderSubmitPlan(plan));
+      }
+      return;
+    }
+
+    if (plan.isNoOp) {
+      if (options.json) {
+        console.log(JSON.stringify({ ok: true, isNoOp: true }, null, 2));
+      } else {
+        console.log(
+          "All PRs are up to date with correct bases, draft state, and nav comments.",
+        );
+      }
+      return;
+    }
+
+    if (!options.force) {
+      if (!Deno.stdin.isTerminal()) {
+        console.error(
+          "Cannot prompt in non-interactive mode. Pass --force to execute, or --dry-run to inspect.",
+        );
+        Deno.exit(1);
+      }
+      console.log(renderSubmitPlan(plan));
+      const answer = prompt("Proceed? [y/N]");
+      if (answer?.trim().toLowerCase() !== "y") {
+        console.log("Aborted.");
+        return;
+      }
+    }
+
+    const result = await executeSubmit(dir, plan, owner, repo);
+
+    if (options.json) {
+      console.log(JSON.stringify(result, null, 2));
+    } else if (result.ok) {
+      console.log(
+        `Pushed ${result.pushedBranches.length} branch(es). ` +
+          `Created ${result.prsCreated.length} PR(s), ` +
+          `updated ${result.prsBaseUpdated.length} base(s), ` +
+          `flipped ${result.draftTransitions.length} draft state(s), ` +
+          `applied ${result.navCommentsApplied} nav comment(s).`,
+      );
+      for (const pr of result.prsCreated) {
+        console.log(`  ${pr.branch} -> ${pr.url}`);
+      }
+    } else {
+      console.error(`Submit failed: ${result.error}`);
+    }
+
+    if (!result.ok) Deno.exit(1);
+  })
+  // --- sync ---
+  .command(
+    "sync",
+    "Fetch origin and restack+push every stack (applies to all stacks)",
+  )
+  .option("--dry-run", "Print the plan without executing")
+  .option("--force", "Execute without the interactive confirmation prompt")
+  .option("--json", "Output as JSON")
+  .action(async (options) => {
+    const plan = await computeSyncPlan(dir);
+
+    if (options.dryRun) {
+      if (options.json) {
+        console.log(JSON.stringify(plan, null, 2));
+      } else {
+        console.log(renderSyncPlan(plan));
+      }
+      return;
+    }
+
+    if (plan.isNoOp && plan.stacks.length > 0) {
+      if (options.json) {
+        console.log(JSON.stringify({ ok: true, isNoOp: true }, null, 2));
+      } else {
+        console.log("All stacks are already synced with origin.");
+      }
+      // Still fetch, so the user's origin refs are up to date even on a no-op.
+      for (const base of plan.baseBranches) {
+        await runGitCommand(dir, "fetch", "origin", base);
+      }
+      return;
+    }
+
+    if (!options.force) {
+      if (!Deno.stdin.isTerminal()) {
+        console.error(
+          "Cannot prompt in non-interactive mode. Pass --force to execute, or --dry-run to inspect.",
+        );
+        Deno.exit(1);
+      }
+      console.log(renderSyncPlan(plan));
+      const answer = prompt("Proceed? [y/N]");
+      if (answer?.trim().toLowerCase() !== "y") {
+        console.log("Aborted.");
+        return;
+      }
+    }
+
+    const result = await executeSync(dir, plan);
+
+    if (options.json) {
+      console.log(JSON.stringify(result, null, 2));
+    } else if (result.ok) {
+      console.log(
+        `Fetched ${result.fetched.join(", ")}. Synced ${
+          result.stacks.filter((s) => s.ok).length
+        } stack(s).`,
+      );
+      for (const s of result.stacks) {
+        if (s.pushed && s.pushed.length > 0) {
+          console.log(`  ${s.stackName}: pushed ${s.pushed.join(", ")}`);
+        }
+      }
+    } else {
+      console.error(`Sync failed at stack: ${result.failedAt}`);
+      const failed = result.stacks.find((s) => !s.ok);
+      if (failed?.error) console.error(`  ${failed.error}`);
+      if (failed?.restack?.error === "conflict" && failed.restack.recovery) {
+        console.error("\nTo resolve:");
+        console.error(`  ${failed.restack.recovery.resolve}`);
+        console.error(`  Then: ${failed.restack.recovery.resume}`);
+        console.error(`  Or abort: ${failed.restack.recovery.abort}`);
       }
     }
 

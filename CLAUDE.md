@@ -42,6 +42,9 @@ src/
 │   ├── verify-refs.ts          # Post-rebase branch ancestry verification
 │   ├── import-discover.ts      # Chain detection: walks git graph to find branch trees
 │   ├── submit-plan.ts          # Computes full submit plan
+│   ├── submit.ts               # Executes submit plan: push + PR create/edit/ready + nav
+│   ├── sync.ts                 # Cross-stack fetch + restack + push
+│   ├── pr.ts                   # Branch-to-PR lookup
 │   └── land.ts                 # Land planning and execution (pure planLand + impure executeLand)
 └── tui/                        # Ink-based interactive view (status -i)
     ├── app.tsx
@@ -93,9 +96,19 @@ deno task compile:linux   # Linux (xclip/wl-copy clipboard support)
 ```
 
 Subcommands: `status` (add `-i`/`--interactive` to launch the TUI), `create`,
-`restack`, `nav`, `verify-refs`, `import-discover`, `submit-plan`, `land`,
-`clean`. `commands/config.ts` is a library; import its functions, do not try to
-invoke it via `cli.ts`.
+`restack`, `nav`, `verify-refs`, `import-discover`, `submit-plan`, `submit`,
+`sync`, `pr`, `land`, `clean`. `commands/config.ts` is a library; import its
+functions, do not try to invoke it via `cli.ts`.
+
+`submit` wraps `submit-plan` with an execution path: force-push, then
+`gh pr create|edit|ready` per branch, then apply nav comments. `sync` iterates
+every stack returned by `getAllStackTrees` and composes fetch + `restack` +
+force-push per stack, stopping at the first failure. `pr` is a thin lookup over
+`gh pr list` that delegates browser-opening to `gh pr view --web`. Both `submit`
+and `sync` share a tri-modal CLI shape: `--dry-run` prints the plan only,
+default (no flags) prompts `[y/N]`, and `--force` executes without prompting.
+This matches the SKILL.md confirmation-gate philosophy: Claude uses `--dry-run`
+to inspect, then `--force` after approval.
 
 ## Architecture
 
@@ -143,6 +156,9 @@ can be continued across process invocations.
 | `src/commands/verify-refs.ts`     | Post-rebase verification                                         | `cli.ts verify-refs`                                                    |
 | `src/commands/import-discover.ts` | Branch tree detection                                            | `cli.ts import-discover`                                                |
 | `src/commands/submit-plan.ts`     | Submit planning                                                  | `cli.ts submit-plan`                                                    |
+| `src/commands/submit.ts`          | Execute submit plan (push + gh ops + nav)                        | `cli.ts submit [--dry-run] [--force] [--json]`                          |
+| `src/commands/sync.ts`            | Cross-stack fetch + restack + push                               | `cli.ts sync [--dry-run] [--force] [--json]`                            |
+| `src/commands/pr.ts`              | Branch-to-PR lookup                                              | `cli.ts pr [--branch=<name>] [--print] [--json]`                        |
 | `src/commands/land.ts`            | Land planning and execution (pure planLand + impure executeLand) | `cli.ts land [--dry-run] [--json] [--resume]`; also imported by the TUI |
 | `src/tui/app.tsx`                 | Root Ink component, owns reducer + effects                       | Launched by `cli.ts status -i`                                          |
 

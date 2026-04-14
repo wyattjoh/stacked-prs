@@ -7,7 +7,7 @@ description: >-
   stack", "stack PRs", "stacked branches", "push to stack", "dependent PRs",
   "chained branches", "rebase my stack", "sync stack", "submit stack",
   "land stack", "import stack", "split branch", "fold branch".
-argument-hint: "[init|create|insert|split|fold|move|sync|restack|submit|status|land|import|clean|help]"
+argument-hint: "[init|create|insert|split|fold|move|sync|restack|submit|status|pr|land|import|clean|help]"
 allowed-tools: >-
   Bash(git *), Bash(gh *), Bash(deno run *),
   Read, Grep, Glob, TodoWrite
@@ -328,47 +328,42 @@ Detach a branch and reattach it as a child of a different parent.
 
 ### `sync`
 
-Fetch origin base, pre-flight verify-refs, dry-run plan, worktree safety check,
-plan, confirm, rebase, post-flight verify-refs, push.
+Fetch each stack's base from origin, restack every stack in the repo, and
+force-push the rebased branches. Mirrors `gt sync`: applies to **every** stack,
+not just the one containing the current branch.
 
-**Flags:** `--upstack-from=<branch>`, `--downstack-from=<branch>`,
-`--only=<branch>` (default: full stack)
+Backed by `cli.ts sync`, which has three modes:
 
-1. `git fetch origin <base-branch>` (no refspec; local base is never updated).
-   If fetch fails (offline, auth), stop with the error.
-2. Run `cli.ts verify-refs --stack-name=<name>` (read-only). Parse the JSON:
-   - If it reports duplicate patches on unrelated branches or other structural
-     problems the per-branch rebase cannot fix, stop and show the report. Tell
-     the user to resolve manually.
-   - If it reports drift (a parent that is not an ancestor of a child), remember
-     the findings for the plan presentation. Do not stop.
-   - If clean, continue.
-3. Run `cli.ts restack --dry-run --json --stack-name=<name> [flags]`. Parse the
-   `rebases` array.
-4. **No-op check:** if every entry has status `skipped-clean` AND pre-flight
-   `verify-refs` was clean, report "Stack is already fully synced with
-   origin/<base-branch>" and stop.
-5. Collect branches with status `planned` from the dry-run. Run the worktree
-   safety check (library function `checkWorktreeSafety`). If any dirty worktrees
-   are returned, present the list with cleanup commands
-   (`git -C <path> stash push -u` or manual commit) and stop. No mutation.
-6. **Present the full plan:**
-   - Base: rebasing against `origin/<base-branch>`.
-   - Drift notes from pre-flight `verify-refs`, if any (e.g. "propagating
-     previously-unpropagated commits from <branch> into descendants").
-   - Per-branch rebase list as a tree, showing old-parent to new-target.
-   - Branches to force-push.
-7. **Wait for confirmation.**
-8. Run `cli.ts restack --stack-name=<name> [flags]`.
-   - If conflicts: the rebase stops at the first conflicted branch and leaves
-     git mid-rebase. Pause, help the user resolve the files, then run
-     `git rebase --continue` (or re-invoke `cli.ts restack` with `--resume` to
-     pick up the remaining branches).
-9. Run `cli.ts verify-refs --stack-name=<name>` (post-flight). If it is not
-   clean, **abort the push**, print the report, and tell the user to inspect. Do
-   not roll back automatically.
-10. `git push --force-with-lease origin <rebased-branches>`.
-11. Report result.
+- `--dry-run`: compute and print the plan without mutating anything.
+- No flags: print the plan and prompt `[y/N]` before executing.
+- `--force`: execute without the prompt (non-interactive or trusted automation).
+
+1. Run `cli.ts sync --dry-run --json` to inspect the plan. Parse the returned
+   `stacks[]` array: each entry has `stackName`, `baseBranch`, `rebases[]`,
+   `branchesToPush[]`, and `isNoOp`.
+2. **No-op check:** if `plan.isNoOp` is true, report "All stacks are already
+   synced with origin" and stop (the CLI still fetches base branches in this
+   path so the user's origin refs stay current).
+3. For each non-no-op stack, run `cli.ts verify-refs --stack-name=<name>`
+   (read-only). If any stack reports duplicate patches or structural drift that
+   the per-branch rebase cannot fix, stop and ask the user to resolve manually.
+4. Collect every branch with status `planned` across all stacks. Run
+   `checkWorktreeSafety` on the union. If any dirty worktrees are returned,
+   present them with cleanup commands and stop.
+5. **Present the full plan** grouped by stack: base branches to fetch, each
+   stack's rebase list (old-parent → new-target), and the branches to force-push
+   per stack.
+6. **Wait for confirmation.**
+7. Run `cli.ts sync --force` to execute. The CLI fetches each base once, then
+   for each stack runs `restack` and `git push --force-with-lease`. On the first
+   conflict or push failure it stops and reports `failedAt: <stackName>`.
+   - If a conflict: resolve the files in the stack that failed, then run
+     `cli.ts restack --stack-name=<failed> --resume`. Re-run `cli.ts sync` to
+     finish the remaining stacks.
+8. Run `cli.ts verify-refs --stack-name=<name>` per synced stack as a
+   post-flight check. If it is not clean on any stack, print the report and ask
+   the user to inspect.
+9. Report per-stack results.
 
 ### `restack`
 
@@ -395,7 +390,9 @@ reorganization before reviewing the diff.
 
 ### `submit`
 
-Create or update PRs for all branches, add/update stack navigation comments.
+Push every stack branch, create or update PRs with correct bases and draft
+state, and refresh the stack navigation comments. Mirrors `gt submit`. Backed by
+`cli.ts submit`.
 
 **Before running submit**, remind the user to verify each branch is CI-clean at
 its own tip (see "Verifying CI health before submitting" in the "Building
@@ -409,30 +406,43 @@ for review. All other PRs in the stack are kept as drafts so they cannot be
 merged out of order. The submit plan reconciles drift on every run via the
 `desiredDraft` and `draftAction` fields per branch.
 
-1. Determine repo owner/name from `gh repo view --json owner,name`
-2. Run `cli.ts submit-plan --stack-name=<name> --owner=<owner> --repo=<repo>`
-3. **No-op check:** if `isNoOp` is true, report "All PRs are up to date with
-   correct bases, draft state, and nav comments" and stop
-4. **Present full plan:**
-   - Git: branches to push
-   - GitHub: PRs to create (branches with action "create"; show base + suggest
-     title; flag `--draft` for any branch where `desiredDraft` is true)
+`cli.ts submit` has three modes:
+
+- `--dry-run`: compute and print the plan without mutating anything.
+- No flags: print the plan and prompt `[y/N]` before executing.
+- `--force`: execute without the prompt.
+
+1. Run `cli.ts submit --dry-run --stack-name=<name>` to inspect the plan. The
+   underlying `submit-plan` command is still available when you need the raw
+   JSON shape (`cli.ts submit-plan --stack-name=<name>`).
+2. **No-op check:** if the plan reports `isNoOp: true`, report "All PRs are up
+   to date with correct bases, draft state, and nav comments" and stop.
+3. **Present full plan:**
+   - Git: branches to force-push.
+   - GitHub: PRs to create (branches with action "create"; show base + flag
+     `--draft` for any branch where `desiredDraft` is true).
    - GitHub: PRs to update base (branches with action "update-base"; show old ->
-     new base)
+     new base).
    - GitHub: PRs to flip draft state (branches with `draftAction` of "to-draft"
      or "to-ready"; show the transition and the reason, e.g. "parent is feat/a,
-     not main")
-   - Comments: nav comments to create/update (from navComments array)
-5. **Wait for confirmation**
-6. `git push --force-with-lease origin <all-branches>`
-7. Create/update PRs:
-   - For action "create": run `gh pr create --base <parent> ...`. Pass `--draft`
-     when `desiredDraft` is true (i.e., parent is not the stack's base branch)
-   - For action "update-base": run `gh pr edit <num> --base <new-parent>`
-   - For draftAction "to-draft": run `gh pr ready <num> --undo`
-   - For draftAction "to-ready": run `gh pr ready <num>`
-8. Execute nav plan via `cli.ts nav --stack-name=<name>`
-9. Report all PR URLs
+     not main").
+   - Comments: nav comments to create/update.
+4. **Wait for confirmation.**
+5. Run `cli.ts submit --force --stack-name=<name>` to execute. The CLI pushes
+   with `--force-with-lease`, then creates/edits PRs via `gh pr create|edit`,
+   flips draft state via `gh pr ready` / `gh pr ready --undo`, and applies the
+   nav comment plan.
+6. Report the PR URLs from the CLI output.
+
+### `pr`
+
+Open the pull request for a branch in the browser. Mirrors `gt pr`. Backed by
+`cli.ts pr`. Read-only and needs no confirmation.
+
+- `cli.ts pr` opens the current branch's PR.
+- `cli.ts pr --branch <name>` opens the PR for an explicit branch.
+- `cli.ts pr --print` prints the URL instead of opening the browser.
+- `cli.ts pr --json` returns a structured lookup result.
 
 ### `status`
 
@@ -652,6 +662,11 @@ command.
 - `deno run ... cli.ts clean --json` (report-only; `--force` mutates)
 - `deno run ... cli.ts create --dry-run` (with or without `--json`)
 - `deno run ... cli.ts land --dry-run` (with or without `--json`)
+- `deno run ... cli.ts submit --dry-run` (with or without `--json`)
+- `deno run ... cli.ts submit-plan` (JSON plan)
+- `deno run ... cli.ts sync --dry-run` (with or without `--json`)
+- `deno run ... cli.ts pr` (read-only PR lookup; also opens the browser, which
+  is a local action, not a repo mutation)
 
 **If the plan changes mid-execution** (e.g., rebase conflicts), pause and
 re-present the remaining operations before continuing.
@@ -764,6 +779,48 @@ Computes the full submit plan for a stack: which PRs need creating, which need
 base updates, and what nav comment changes are needed. Iterates nodes in DFS
 order. Returns JSON with per-branch actions and an `isNoOp` flag.
 
+### `submit`
+
+```bash
+deno run --allow-run=git,gh --allow-env --allow-read ${CLAUDE_PLUGIN_ROOT}/src/cli.ts submit \
+  [--stack-name=<name>] [--owner=<owner> --repo=<repo>] \
+  [--dry-run] [--force] [--json]
+```
+
+Runs the full submit flow: force-pushes branches, creates or edits PRs (with
+`--draft` derived from the stack's shape), flips draft state when needed, and
+applies the nav comment plan. `--dry-run` prints the plan without mutating; with
+no flags the CLI prints the plan and prompts `[y/N]`; `--force` skips the
+prompt.
+
+### `sync`
+
+```bash
+deno run --allow-run=git,gh --allow-env --allow-read ${CLAUDE_PLUGIN_ROOT}/src/cli.ts sync \
+  [--dry-run] [--force] [--json]
+```
+
+Applies to **every** stack in the repo. Fetches each distinct base branch from
+origin once, then for each stack runs `restack` and force-pushes the rebased
+branches. Stops at the first conflict or push failure; the returned JSON
+(`--json`) records `failedAt: <stackName>` so the caller can resume that stack
+with `cli.ts restack --stack-name=<failed> --resume` and then re-run
+`cli.ts
+sync` for the rest. Same three-mode shape as submit: `--dry-run`,
+interactive default, `--force`.
+
+### `pr`
+
+```bash
+deno run --allow-run=git,gh --allow-env --allow-read ${CLAUDE_PLUGIN_ROOT}/src/cli.ts pr \
+  [--branch=<name>] [--owner=<owner> --repo=<repo>] [--print] [--json]
+```
+
+Opens the PR for the current (or specified) branch in the browser via
+`gh pr
+view --web`. `--print` emits the URL instead. `--json` returns the raw
+lookup result (`{ ok, branch, pr?: { number, url, state, isDraft }, error? }`).
+
 ### `land`
 
 ```bash
@@ -800,5 +857,8 @@ internally by the other subcommands and are not invoked directly.
 
 ## References
 
+- [Workflows and usage guide](references/workflows.md) for end-to-end recipes
+  combining CLI commands and Claude-orchestrated skill flows. Surface this when
+  a user asks "how do I use this?" or wants a worked example.
 - [Git commands reference](references/git-commands.md) for rebase, --onto,
   conflict resolution, and edge cases
