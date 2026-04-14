@@ -183,7 +183,7 @@ export interface StackNode {
   stackName: string;
   parent: string;
   children: StackNode[];
-  /** True when branch.<name>.stack-merged = "true" in git config. */
+  /** True when this branch has been landed. Source: stack.<stackName>.landed-branches or legacy branch.<name>.stack-merged. */
   merged?: boolean;
 }
 
