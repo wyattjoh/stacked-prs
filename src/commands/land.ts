@@ -1595,6 +1595,16 @@ export async function executeLandFromCli(
   await detachHeadFromDeleted(dir, toDelete);
   for (const branch of toDelete) {
     if (completed.deletedBranches.includes(branch)) continue;
+
+    // Tombstone first so a crash between the ref delete and the config
+    // writes cannot silently drop the tombstone. Both writes are
+    // idempotent: addLandedBranch is multi-value but de-dupes, and
+    // configLandCleanup already tombstoned mergedRoot earlier.
+    await addLandedBranch(dir, stackName, branch);
+    if (branch !== mergedRoot) {
+      await removeStackBranch(dir, branch);
+    }
+
     const { code: existsCode } = await runGitCommand(
       dir,
       "rev-parse",
@@ -1606,11 +1616,16 @@ export async function executeLandFromCli(
       await writeLandResumeState(dir, stackName, completed);
       continue;
     }
-    await runGitCommand(dir, "branch", "-D", branch);
-    // Idempotent: configLandCleanup already tombstoned mergedRoot above.
-    await addLandedBranch(dir, stackName, branch);
-    if (branch !== mergedRoot) {
-      await removeStackBranch(dir, branch);
+    const { code: deleteCode } = await runGitCommand(
+      dir,
+      "branch",
+      "-D",
+      branch,
+    );
+    if (deleteCode !== 0) {
+      // Leave the ref in place; the tombstone still stands. Do NOT mark
+      // this branch deleted so a subsequent --resume can retry.
+      continue;
     }
     completed.deletedBranches.push(branch);
     await writeLandResumeState(dir, stackName, completed);
