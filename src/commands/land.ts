@@ -1523,6 +1523,7 @@ export async function executeLandFromCli(
 
   for (const step of plan.pushSteps) {
     if (completed.completedPushes.includes(step.branch)) continue;
+    if (completed.autoMerged.includes(step.branch)) continue;
     await runGitCommand(
       dir,
       "push",
