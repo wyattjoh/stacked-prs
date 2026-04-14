@@ -68,6 +68,39 @@ async function gitConfigSet(
 }
 
 /**
+ * Detect the repo's default branch. Tries origin/HEAD first (the canonical
+ * source), then falls back to a local `main` or `master`. Throws when none
+ * resolves.
+ */
+export async function detectDefaultBranch(dir: string): Promise<string> {
+  const originHead = await runGitCommand(
+    dir,
+    "symbolic-ref",
+    "--short",
+    "refs/remotes/origin/HEAD",
+  );
+  if (originHead.code === 0 && originHead.stdout) {
+    const trimmed = originHead.stdout.replace(/^origin\//, "");
+    if (trimmed) return trimmed;
+  }
+
+  for (const candidate of ["main", "master"]) {
+    const probe = await runGitCommand(
+      dir,
+      "rev-parse",
+      "--verify",
+      "--quiet",
+      `refs/heads/${candidate}`,
+    );
+    if (probe.code === 0) return candidate;
+  }
+
+  throw new Error(
+    "Could not detect default branch: no origin/HEAD and no local main or master",
+  );
+}
+
+/**
  * Run `git rev-parse <ref>` and return the trimmed SHA. Throws on failure.
  * Shared by restack and land to avoid duplicate implementations.
  */
