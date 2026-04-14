@@ -179,6 +179,7 @@ import {
 } from "../lib/worktrees.ts";
 import { gh } from "../lib/gh.ts";
 import {
+  addLandedBranch,
   clearStackConfig,
   findNode,
   getAllNodes,
@@ -1086,6 +1087,9 @@ async function executeCaseA(
       emit(hooks, { kind: "delete", branch }, "failed", stderr);
       continue;
     }
+    // Record every deleted branch as a tombstone so the TUI retains history.
+    // Idempotent with the configLandCleanup write for mergedRoot.
+    await addLandedBranch(dir, plan.stackName, branch);
     await removeStackBranch(dir, branch);
     emit(hooks, { kind: "delete", branch }, "ok");
   }
