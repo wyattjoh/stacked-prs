@@ -1535,6 +1535,8 @@ export async function executeLandFromCli(
       continue;
     }
     await runGitCommand(dir, "branch", "-D", branch);
+    // Idempotent: configLandCleanup already tombstoned mergedRoot above.
+    await addLandedBranch(dir, stackName, branch);
     if (branch !== mergedRoot) {
       await removeStackBranch(dir, branch);
     }
