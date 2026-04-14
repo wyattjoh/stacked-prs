@@ -1,4 +1,9 @@
-import { gitConfig, type MergeStrategy, runGitCommand } from "../lib/stack.ts";
+import {
+  detectDefaultBranch,
+  gitConfig,
+  type MergeStrategy,
+  runGitCommand,
+} from "../lib/stack.ts";
 
 export interface CreateBranchOptions {
   branch: string;
@@ -172,12 +177,59 @@ export async function planCreate(
     };
   }
 
-  // Case 2 / 3 handled in later tasks.
+  // Not in a stack — try auto-init from the base branch.
+  let defaultBranch: string;
+  try {
+    defaultBranch = await detectDefaultBranch(dir);
+  } catch (err) {
+    return {
+      ok: false,
+      error: "not-on-stack",
+      message: err instanceof Error ? err.message : String(err),
+    };
+  }
+
+  if (current !== defaultBranch) {
+    return {
+      ok: false,
+      error: "not-on-stack",
+      message:
+        `current branch "${current}" is not part of a stack and is not the base branch ("${defaultBranch}"); run \`init\` or switch branches`,
+    };
+  }
+
+  const stackName = opts.stackName ?? opts.branch;
+  const mergeStrategy: MergeStrategy = opts.mergeStrategy ?? "merge";
+
+  const existingStackBase = await gitConfig(
+    dir,
+    `stack.${stackName}.base-branch`,
+  );
+  if (existingStackBase !== undefined) {
+    return {
+      ok: false,
+      error: "stack-exists",
+      message:
+        `stack "${stackName}" already exists (stack.${stackName}.base-branch is set); choose a different --stack-name`,
+    };
+  }
+
+  const worktreeCase = opts.createWorktree !== undefined;
+
   return {
-    ok: false,
-    error: "not-on-stack",
-    message:
-      `current branch "${current}" is not part of a stack; run \`init\` first or switch to a stack branch`,
+    ok: true,
+    plan: {
+      case: worktreeCase ? "auto-init-worktree" : "auto-init",
+      branch: opts.branch,
+      parent: defaultBranch,
+      baseBranch: defaultBranch,
+      stackName,
+      mergeStrategy,
+      willCommit: opts.message !== undefined,
+      worktreePath: worktreeCase
+        ? `${opts.createWorktree}/${opts.branch}`
+        : undefined,
+    },
   };
 }
 
@@ -245,7 +297,51 @@ export async function executeCreate(
     return { ok: true, plan };
   }
 
-  // Case 2 and case 3 added in later tasks.
+  if (plan.case === "auto-init") {
+    const checkout = await runGitOrFail(dir, "checkout", "-b", plan.branch);
+    if (!checkout.ok) {
+      return { ok: false, error: "git-failed", message: checkout.message };
+    }
+
+    if (opts.message !== undefined) {
+      const commit = await runGitCommand(dir, "commit", "-m", opts.message);
+      if (commit.code !== 0) {
+        const stderr = (commit.stderr || commit.stdout).toLowerCase();
+        if (
+          stderr.includes("nothing to commit") ||
+          stderr.includes("no changes added")
+        ) {
+          return {
+            ok: false,
+            error: "nothing-staged",
+            message: "nothing staged; stage changes before using -m",
+          };
+        }
+        return {
+          ok: false,
+          error: "git-failed",
+          message: (commit.stderr || commit.stdout).trim(),
+        };
+      }
+    }
+
+    const writes: Array<[string, string]> = [
+      [`branch.${plan.branch}.stack-name`, plan.stackName],
+      [`branch.${plan.branch}.stack-parent`, plan.baseBranch],
+      [`stack.${plan.stackName}.base-branch`, plan.baseBranch],
+      [`stack.${plan.stackName}.merge-strategy`, plan.mergeStrategy],
+    ];
+    for (const [key, value] of writes) {
+      const r = await runGitOrFail(dir, "config", key, value);
+      if (!r.ok) {
+        return { ok: false, error: "git-failed", message: r.message };
+      }
+    }
+
+    return { ok: true, plan };
+  }
+
+  // Case 3 added in the next task.
   return {
     ok: false,
     error: "git-failed",

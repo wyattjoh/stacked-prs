@@ -179,3 +179,84 @@ describe("create — case 1 (child in existing stack)", () => {
     expect(probe).toBe("");
   });
 });
+
+describe("create — case 2 (auto-init in-repo)", () => {
+  let repo: TestRepo;
+
+  beforeEach(async () => {
+    repo = await createTestRepo();
+    // Default branch is main; no stack config yet.
+  });
+
+  afterEach(async () => {
+    await repo.cleanup();
+  });
+
+  test("plans auto-init with defaulted stack name", async () => {
+    const result = await planCreate(repo.dir, { branch: "feat/a" });
+    expect(result.ok).toBe(true);
+    expect(result.plan?.case).toBe("auto-init");
+    expect(result.plan?.stackName).toBe("feat/a");
+    expect(result.plan?.parent).toBe("main");
+    expect(result.plan?.baseBranch).toBe("main");
+    expect(result.plan?.mergeStrategy).toBe("merge");
+  });
+
+  test("creates a new stack from main", async () => {
+    const result = await create(repo.dir, { branch: "feat/a" });
+    expect(result.ok).toBe(true);
+    expect(result.plan?.case).toBe("auto-init");
+
+    expect(
+      await runGit(repo.dir, "config", "branch.feat/a.stack-name"),
+    ).toBe("feat/a");
+    expect(
+      await runGit(repo.dir, "config", "branch.feat/a.stack-parent"),
+    ).toBe("main");
+    expect(
+      await runGit(repo.dir, "config", "stack.feat/a.base-branch"),
+    ).toBe("main");
+    expect(
+      await runGit(repo.dir, "config", "stack.feat/a.merge-strategy"),
+    ).toBe("merge");
+  });
+
+  test("honors explicit --stack-name and --merge-strategy", async () => {
+    const result = await create(repo.dir, {
+      branch: "feat/a",
+      stackName: "my-stack",
+      mergeStrategy: "squash",
+    });
+    expect(result.ok).toBe(true);
+    expect(result.plan?.stackName).toBe("my-stack");
+    expect(result.plan?.mergeStrategy).toBe("squash");
+    expect(
+      await runGit(repo.dir, "config", "stack.my-stack.merge-strategy"),
+    ).toBe("squash");
+  });
+
+  test("rejects when stack-name already exists", async () => {
+    await runGit(repo.dir, "config", "stack.taken.base-branch", "main");
+
+    const result = await create(repo.dir, {
+      branch: "feat/a",
+      stackName: "taken",
+    });
+    expect(result.ok).toBe(false);
+    expect(result.error).toBe("stack-exists");
+  });
+
+  test("commits staged changes when -m is passed", async () => {
+    await Deno.writeTextFile(`${repo.dir}/file.txt`, "hi\n");
+    await runGit(repo.dir, "add", "file.txt");
+
+    const result = await create(repo.dir, {
+      branch: "feat/a",
+      message: "add file",
+    });
+    expect(result.ok).toBe(true);
+
+    const log = await runGit(repo.dir, "log", "--format=%s", "-n", "1");
+    expect(log).toBe("add file");
+  });
+});
