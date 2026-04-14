@@ -369,9 +369,17 @@ export async function fetchBase(
 
 /**
  * True iff `branch` has zero unique commits beyond `origin/<baseBranch>`.
- * Indicates the branch was auto-merged by patch-id during rebase onto the
- * updated base. Used by both `executeLand` and `executeLandFromCli` to skip
- * pushes / PR retargets and close + delete + tombstone the branch.
+ * Indicates the branch was auto-merged by patch-id against the upstream
+ * base during rebase.
+ *
+ * Compares against `origin/<baseBranch>` specifically (not the rebased
+ * parent branch as the inline TUI check does), so callers must have run
+ * `fetchBase` first to guarantee `origin/<baseBranch>` resolves. Returns
+ * `false` on any `rev-list` failure (missing branch, missing origin ref,
+ * etc.) so a verification gap never causes a branch to be tombstoned.
+ *
+ * Used by `executeLandFromCli` to skip push / PR retarget and instead
+ * close + delete + tombstone auto-merged branches.
  */
 export async function isBranchAutoMerged(
   dir: string,
@@ -385,7 +393,7 @@ export async function isBranchAutoMerged(
     `origin/${baseBranch}..${branch}`,
   );
   if (code !== 0) return false;
-  return stdout.trim() === "0";
+  return stdout === "0";
 }
 
 /**

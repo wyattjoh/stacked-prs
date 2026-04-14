@@ -6,6 +6,7 @@ import {
   classifyLandCase,
   executeLand,
   executeLandFromCli,
+  isBranchAutoMerged,
   isShallowRepository,
   LandError,
   type LandProgressEvent,
@@ -561,7 +562,6 @@ describe("isBranchAutoMerged", () => {
       await runGit(env.dir, "checkout", "feat/a");
       await runGit(env.dir, "rebase", "origin/main");
 
-      const { isBranchAutoMerged } = await import("./land.ts");
       expect(await isBranchAutoMerged(env.dir, "feat/a", "main")).toBe(true);
     } finally {
       await env.cleanup();
@@ -573,7 +573,6 @@ describe("isBranchAutoMerged", () => {
     try {
       await addBranch(env.dir, "feat/a", "main");
       await runGit(env.dir, "push", "origin", "feat/a");
-      const { isBranchAutoMerged } = await import("./land.ts");
       expect(await isBranchAutoMerged(env.dir, "feat/a", "main")).toBe(false);
     } finally {
       await env.cleanup();
