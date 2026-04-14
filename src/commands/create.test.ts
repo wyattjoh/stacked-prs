@@ -154,6 +154,15 @@ describe("create — case 1 (child in existing stack)", () => {
     expect(result.error).toBe("worktree-requires-base");
   });
 
+  test("rejects -m when nothing is staged", async () => {
+    const result = await create(repo.dir, {
+      branch: "feat/b",
+      message: "noop",
+    });
+    expect(result.ok).toBe(false);
+    expect(result.error).toBe("nothing-staged");
+  });
+
   test("errors when on untracked non-base branch", async () => {
     await runGit(repo.dir, "checkout", "-b", "random");
     const result = await create(repo.dir, { branch: "feat/c" });
@@ -259,6 +268,15 @@ describe("create — case 2 (auto-init in-repo)", () => {
     const log = await runGit(repo.dir, "log", "--format=%s", "-n", "1");
     expect(log).toBe("add file");
   });
+
+  test("rejects -m when nothing is staged", async () => {
+    const result = await create(repo.dir, {
+      branch: "feat/a",
+      message: "noop",
+    });
+    expect(result.ok).toBe(false);
+    expect(result.error).toBe("nothing-staged");
+  });
 });
 
 describe("create — case 3 (auto-init worktree)", () => {
@@ -348,13 +366,37 @@ describe("create — case 3 (auto-init worktree)", () => {
     expect(stat.isFile).toBe(true);
   });
 
-  test("rejects when worktree target already exists", async () => {
+  test("rejects when worktree target already exists (non-empty dir)", async () => {
+    // git worktree add accepts an empty directory but rejects a non-empty one
+    // with "already exists". Pre-populate so git itself fires the conflict.
     await Deno.mkdir(`${worktreeRoot}/feat/a`, { recursive: true });
+    await Deno.writeTextFile(`${worktreeRoot}/feat/a/conflict.txt`, "oops\n");
     const result = await create(repo.dir, {
       branch: "feat/a",
       createWorktree: worktreeRoot,
     });
     expect(result.ok).toBe(false);
     expect(result.error).toBe("worktree-exists");
+  });
+
+  test("rejects -m when nothing is staged (leaves repo on base, no new branch)", async () => {
+    const result = await create(repo.dir, {
+      branch: "feat/a",
+      message: "noop",
+      createWorktree: worktreeRoot,
+    });
+    expect(result.ok).toBe(false);
+    expect(result.error).toBe("nothing-staged");
+
+    // Rollback verification: current repo still on main, no orphan branch.
+    expect(await runGit(repo.dir, "branch", "--show-current")).toBe("main");
+    const probe = await runGit(
+      repo.dir,
+      "rev-parse",
+      "--verify",
+      "--quiet",
+      "refs/heads/feat/a",
+    ).catch(() => "");
+    expect(probe).toBe("");
   });
 });

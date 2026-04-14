@@ -1,3 +1,4 @@
+import { join } from "@std/path";
 import {
   detectDefaultBranch,
   gitConfig,
@@ -89,6 +90,78 @@ async function runGitOrFail(
     return { ok: false, message: (stderr || stdout).trim() };
   }
   return { ok: true };
+}
+
+// attemptCommit checks the index first (locale-free) before running git commit.
+// Returns nothing-staged when the index is clean, git-failed on commit error.
+async function attemptCommit(
+  dir: string,
+  message: string,
+): Promise<
+  | { ok: true }
+  | { ok: false; error: "nothing-staged" | "git-failed"; message: string }
+> {
+  // git diff --cached --quiet exits 0 when index is clean, 1 when staged changes exist.
+  const diffCheck = await runGitCommand(dir, "diff", "--cached", "--quiet");
+  if (diffCheck.code === 0) {
+    return {
+      ok: false,
+      error: "nothing-staged",
+      message: "nothing staged; stage changes before using -m",
+    };
+  }
+  const commit = await runGitCommand(dir, "commit", "-m", message);
+  if (commit.code !== 0) {
+    return {
+      ok: false,
+      error: "git-failed",
+      message: (commit.stderr || commit.stdout).trim(),
+    };
+  }
+  return { ok: true };
+}
+
+// addWorktree wraps git worktree add and remaps path/registration conflicts to
+// the worktree-exists error rather than the generic git-failed error.
+async function addWorktree(
+  dir: string,
+  ...args: string[]
+): Promise<
+  | { ok: true }
+  | { ok: false; error: "worktree-exists" | "git-failed"; message: string }
+> {
+  const { code, stdout, stderr } = await runGitCommand(
+    dir,
+    "worktree",
+    "add",
+    ...args,
+  );
+  if (code === 0) return { ok: true };
+  const combined = (stderr || stdout).toLowerCase();
+  if (
+    combined.includes("already exists") ||
+    combined.includes("already registered") ||
+    combined.includes("is already used by worktree")
+  ) {
+    return {
+      ok: false,
+      error: "worktree-exists",
+      message: (stderr || stdout).trim(),
+    };
+  }
+  return { ok: false, error: "git-failed", message: (stderr || stdout).trim() };
+}
+
+// rollbackNewBranch attempts to undo a checkout -b that succeeded before a
+// subsequent step failed. Best-effort: ignores failures so callers can return
+// their original error cleanly.
+async function rollbackNewBranch(
+  dir: string,
+  baseBranch: string,
+  newBranch: string,
+): Promise<void> {
+  await runGitCommand(dir, "checkout", baseBranch);
+  await runGitCommand(dir, "branch", "-D", newBranch);
 }
 
 export async function planCreate(
@@ -201,34 +274,27 @@ export async function planCreate(
   const stackName = opts.stackName ?? opts.branch;
   const mergeStrategy: MergeStrategy = opts.mergeStrategy ?? "merge";
 
-  const existingStackBase = await gitConfig(
+  // Use --get-regexp to catch any orphan stack-level keys from a prior partial
+  // run, not just the base-branch key.
+  const existingStack = await runGitCommand(
     dir,
-    `stack.${stackName}.base-branch`,
+    "config",
+    "--get-regexp",
+    `^stack\\.${stackName.replace(/\./g, "\\.")}\\.`,
   );
-  if (existingStackBase !== undefined) {
+  if (existingStack.code === 0 && existingStack.stdout) {
     return {
       ok: false,
       error: "stack-exists",
       message:
-        `stack "${stackName}" already exists (stack.${stackName}.base-branch is set); choose a different --stack-name`,
+        `stack "${stackName}" already has config entries; choose a different --stack-name`,
     };
   }
 
   const worktreeCase = opts.createWorktree !== undefined;
-
-  if (worktreeCase) {
-    const worktreePath = `${opts.createWorktree}/${opts.branch}`;
-    try {
-      await Deno.stat(worktreePath);
-      return {
-        ok: false,
-        error: "worktree-exists",
-        message: `worktree path already exists: ${worktreePath}`,
-      };
-    } catch {
-      // Does not exist — good.
-    }
-  }
+  const worktreePath = worktreeCase
+    ? join(opts.createWorktree!, opts.branch)
+    : undefined;
 
   return {
     ok: true,
@@ -240,9 +306,7 @@ export async function planCreate(
       stackName,
       mergeStrategy,
       willCommit: opts.message !== undefined,
-      worktreePath: worktreeCase
-        ? `${opts.createWorktree}/${opts.branch}`
-        : undefined,
+      worktreePath,
     },
   };
 }
@@ -263,29 +327,9 @@ export async function executeCreate(
     }
 
     if (opts.message !== undefined) {
-      const commit = await runGitCommand(
-        dir,
-        "commit",
-        "-m",
-        opts.message,
-      );
-      if (commit.code !== 0) {
-        const stderr = (commit.stderr || commit.stdout).toLowerCase();
-        if (
-          stderr.includes("nothing to commit") ||
-          stderr.includes("no changes added")
-        ) {
-          return {
-            ok: false,
-            error: "nothing-staged",
-            message: "nothing staged; stage changes before using -m",
-          };
-        }
-        return {
-          ok: false,
-          error: "git-failed",
-          message: (commit.stderr || commit.stdout).trim(),
-        };
+      const commit = await attemptCommit(dir, opts.message);
+      if (!commit.ok) {
+        return { ok: false, error: commit.error, message: commit.message };
       }
     }
 
@@ -318,24 +362,9 @@ export async function executeCreate(
     }
 
     if (opts.message !== undefined) {
-      const commit = await runGitCommand(dir, "commit", "-m", opts.message);
-      if (commit.code !== 0) {
-        const stderr = (commit.stderr || commit.stdout).toLowerCase();
-        if (
-          stderr.includes("nothing to commit") ||
-          stderr.includes("no changes added")
-        ) {
-          return {
-            ok: false,
-            error: "nothing-staged",
-            message: "nothing staged; stage changes before using -m",
-          };
-        }
-        return {
-          ok: false,
-          error: "git-failed",
-          message: (commit.stderr || commit.stdout).trim(),
-        };
+      const commit = await attemptCommit(dir, opts.message);
+      if (!commit.ok) {
+        return { ok: false, error: commit.error, message: commit.message };
       }
     }
 
@@ -371,50 +400,37 @@ export async function executeCreate(
       if (!checkout.ok) {
         return { ok: false, error: "git-failed", message: checkout.message };
       }
-      const commit = await runGitCommand(dir, "commit", "-m", opts.message);
-      if (commit.code !== 0) {
-        const stderr = (commit.stderr || commit.stdout).toLowerCase();
-        if (
-          stderr.includes("nothing to commit") ||
-          stderr.includes("no changes added")
-        ) {
-          return {
-            ok: false,
-            error: "nothing-staged",
-            message: "nothing staged; stage changes before using -m",
-          };
-        }
-        return {
-          ok: false,
-          error: "git-failed",
-          message: (commit.stderr || commit.stdout).trim(),
-        };
+
+      const commit = await attemptCommit(dir, opts.message);
+      if (!commit.ok) {
+        await rollbackNewBranch(dir, plan.baseBranch, plan.branch);
+        return { ok: false, error: commit.error, message: commit.message };
       }
+
       const back = await runGitOrFail(dir, "checkout", "-");
       if (!back.ok) {
+        await rollbackNewBranch(dir, plan.baseBranch, plan.branch);
         return { ok: false, error: "git-failed", message: back.message };
       }
-      const addWt = await runGitOrFail(
+
+      const wtAdd = await addWorktree(
         dir,
-        "worktree",
-        "add",
         plan.worktreePath,
         plan.branch,
       );
-      if (!addWt.ok) {
-        return { ok: false, error: "git-failed", message: addWt.message };
+      if (!wtAdd.ok) {
+        await rollbackNewBranch(dir, plan.baseBranch, plan.branch);
+        return { ok: false, error: wtAdd.error, message: wtAdd.message };
       }
     } else {
-      const addWt = await runGitOrFail(
+      const wtAdd = await addWorktree(
         dir,
-        "worktree",
-        "add",
         plan.worktreePath,
         "-b",
         plan.branch,
       );
-      if (!addWt.ok) {
-        return { ok: false, error: "git-failed", message: addWt.message };
+      if (!wtAdd.ok) {
+        return { ok: false, error: wtAdd.error, message: wtAdd.message };
       }
     }
 
