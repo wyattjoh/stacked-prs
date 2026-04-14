@@ -475,7 +475,16 @@ confirmation step -- the plan is built and executed in one call.
 ### `clean`
 
 Detect and remove stale stack/branch config entries (orphaned branches, missing
-parents, empty stacks, stale resume-state).
+parents, empty stacks, stale resume-state, legacy `stack-merged` flags on live
+branches).
+
+`clean` also understands `stack.<name>.landed-branches`: a multi-value key that
+acts as the stack-level tombstone list for branches that have been landed and
+deleted. Entries there are expected and are not stale. The branch-level
+`branch.<name>.stack-merged = true` key is the legacy pre-migration form; when
+it appears on a live branch with a live `stack-name`, `clean` reports a
+`legacy-merged-flag` finding and `--confirm` removes it. See `CLAUDE.md` for the
+full git-config schema.
 
 **Flags:** `--stack-name=<name>`, `--confirm`, `--json`
 
