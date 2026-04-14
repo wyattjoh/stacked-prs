@@ -1508,6 +1508,15 @@ export async function executeLandFromCli(
     }
 
     completed.completedRebases.push(step.branch);
+
+    // Mirror the TUI executor's patch-id drop detection (see the inline
+    // check in executeCaseARebases). Branches with zero unique commits
+    // beyond origin/<base> after rebase were auto-merged by patch-id
+    // during the upstream squash merge. Record them so Tasks 4-6 skip
+    // push / PR retarget and instead close the PR, delete, and tombstone.
+    if (await isBranchAutoMerged(dir, step.branch, plan.baseBranch)) {
+      completed.autoMerged.push(step.branch);
+    }
     await writeLandResumeState(dir, stackName, completed);
   }
 

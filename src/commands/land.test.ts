@@ -1357,3 +1357,89 @@ describe("executeLandFromCli resume guard", () => {
     }
   });
 });
+
+describe("executeLandFromCli auto-merged detection", () => {
+  // Enabled at end of Task 6 (delete + tombstone loop). Exercises Tasks 3-6
+  // end-to-end: rebase detects patch-id drop, push/PR-retarget are skipped,
+  // PR is closed with comment, branch is deleted and tombstoned.
+  it.ignore("skips push, closes PR, deletes and tombstones auto-merged children", async () => {
+    const env = await createRepoWithOrigin();
+    try {
+      // main - A (merged) - B (patch-id equals part of A's squash merge)
+      await runGit(env.dir, "checkout", "-b", "feat/a", "main");
+      await Deno.writeTextFile(`${env.dir}/shared.txt`, "shared content\n");
+      await runGit(env.dir, "add", "shared.txt");
+      await runGit(env.dir, "commit", "-m", "add shared");
+      await runGit(env.dir, "push", "origin", "feat/a");
+
+      await runGit(env.dir, "checkout", "-b", "feat/b", "feat/a");
+      await runGit(env.dir, "push", "origin", "feat/b");
+      await initStack(env, "s", [
+        ["feat/a", "main"],
+        ["feat/b", "feat/a"],
+      ]);
+
+      // Squash-merge feat/a into main.
+      await runGit(env.dir, "checkout", "main");
+      await Deno.writeTextFile(`${env.dir}/shared.txt`, "shared content\n");
+      await runGit(env.dir, "add", "shared.txt");
+      await runGit(env.dir, "commit", "-m", "squashed feat/a");
+      await runGit(env.dir, "push", "origin", "main");
+      await runGit(env.dir, "fetch", "origin", "main");
+
+      const prStates: PrStateByBranch = new Map([
+        ["feat/a", "MERGED"],
+        ["feat/b", "OPEN"],
+      ]);
+      const prInfo = new Map<string, PrInfo>([
+        ["feat/b", { number: 42, url: "", state: "OPEN", isDraft: false }],
+      ]);
+
+      const mockDir = await Deno.makeTempDir();
+      setMockDir(mockDir);
+      await writeFixture(mockDir, ["repo", "view"], {
+        owner: { login: "acme" },
+        name: "widgets",
+      });
+
+      try {
+        const result = await executeLandFromCli(
+          env.dir,
+          "s",
+          prStates,
+          prInfo,
+          {},
+        );
+        expect(result.ok).toBe(true);
+      } finally {
+        setMockDir(undefined);
+      }
+
+      // feat/b must be deleted locally.
+      const bProbe = await runGitCommand(
+        env.dir,
+        "rev-parse",
+        "--verify",
+        "refs/heads/feat/b",
+      );
+      expect(bProbe.code !== 0).toBe(true);
+
+      // getStackTree must reconstruct feat/b as a merged tombstone.
+      const { getStackTree, getLandedBranches } = await import(
+        "../lib/stack.ts"
+      );
+      const tree = await getStackTree(env.dir, "s");
+      const tombstoneB = tree.roots
+        .flatMap((r) => [r, ...r.children])
+        .find((n) => n.branch === "feat/b" && n.merged === true);
+      expect(tombstoneB).toBeDefined();
+
+      // landed-branches includes feat/b.
+      const landed = await getLandedBranches(env.dir, "s");
+      expect(landed).toContain("feat/b");
+    } finally {
+      await env.cleanup();
+      setMockDir(undefined);
+    }
+  });
+});
