@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.5.0](https://github.com/wyattjoh/stacked-prs/compare/stacked-prs-v1.4.0...stacked-prs-v1.5.0) (2026-04-14)
+
+
+### Features
+
+* **nav:** preserve merged PRs in nav history via landed-pr config ([814dfe7](https://github.com/wyattjoh/stacked-prs/commit/814dfe7924f58eef212e9647dd691fe4b0c8a4ba))
+
 ## [1.4.0](https://github.com/wyattjoh/stacked-prs/compare/stacked-prs-v1.3.1...stacked-prs-v1.4.0) (2026-04-14)
 
 
