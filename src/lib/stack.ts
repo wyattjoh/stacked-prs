@@ -262,6 +262,41 @@ export async function setBaseBranch(
   await gitConfigSet(dir, `stack.${stackName}.base-branch`, baseBranch);
 }
 
+/**
+ * Remove all stack-level config keys for a stack.
+ * Used when a stack is fully landed or split and its namespace should be freed.
+ * Tolerates exit 5 ("key absent") from git config --unset; any other non-zero
+ * exit is an actual failure (lock contention, permissions, etc.) and throws.
+ */
+export async function clearStackConfig(
+  dir: string,
+  stackName: string,
+): Promise<void> {
+  const singleValueKeys = [
+    `stack.${stackName}.base-branch`,
+    `stack.${stackName}.merge-strategy`,
+    `stack.${stackName}.resume-state`,
+  ];
+  for (const key of singleValueKeys) {
+    const { code, stderr } = await runGitCommand(dir, "config", "--unset", key);
+    if (code !== 0 && code !== 5) {
+      throw new Error(`git config --unset ${key} failed: ${stderr}`);
+    }
+  }
+  // landed-branches is multi-value; --unset-all is needed to remove all values.
+  const { code, stderr } = await runGitCommand(
+    dir,
+    "config",
+    "--unset-all",
+    `stack.${stackName}.landed-branches`,
+  );
+  if (code !== 0 && code !== 5) {
+    throw new Error(
+      `git config --unset-all stack.${stackName}.landed-branches failed: ${stderr}`,
+    );
+  }
+}
+
 /** Build a StackTree for the given stack name (or detect from current branch). */
 export async function getStackTree(
   dir: string,

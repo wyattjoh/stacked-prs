@@ -179,6 +179,7 @@ import {
 } from "../lib/worktrees.ts";
 import { gh } from "../lib/gh.ts";
 import {
+  clearStackConfig,
   findNode,
   getAllNodes,
   getConflictFiles,
@@ -648,14 +649,6 @@ function describeBlockers(blockers: LandBlocker[]): string {
   return `Preflight blocked: ${parts.join("; ")}`;
 }
 
-async function unsetConfig(dir: string, key: string): Promise<void> {
-  await runGitCommand(dir, "config", "--unset", key);
-}
-
-async function unsetAllConfig(dir: string, key: string): Promise<void> {
-  await runGitCommand(dir, "config", "--unset-all", key);
-}
-
 /**
  * If HEAD is currently a symbolic ref pointing to one of `branchesToDelete`,
  * detach it to the current commit SHA so the deletion can proceed. Has no
@@ -718,10 +711,7 @@ async function executeCaseBCleanup(
     emit(hooks, { kind: "delete", branch }, "ok");
   }
 
-  await unsetConfig(dir, `stack.${plan.stackName}.merge-strategy`);
-  await unsetConfig(dir, `stack.${plan.stackName}.base-branch`);
-  await unsetConfig(dir, `stack.${plan.stackName}.resume-state`);
-  await unsetAllConfig(dir, `stack.${plan.stackName}.landed-branches`);
+  await clearStackConfig(dir, plan.stackName);
 
   await restoreHead(dir, plan, hooks);
 
@@ -1421,10 +1411,7 @@ export async function executeLandFromCli(
       completed.deletedBranches.push(branch);
       await writeLandResumeState(dir, stackName, completed);
     }
-    await unsetConfig(dir, `stack.${stackName}.merge-strategy`);
-    await unsetConfig(dir, `stack.${stackName}.base-branch`);
-    await unsetConfig(dir, `stack.${stackName}.resume-state`);
-    await unsetAllConfig(dir, `stack.${stackName}.landed-branches`);
+    await clearStackConfig(dir, stackName);
     await clearLandResumeState(dir, stackName);
     await restoreHead(dir, plan, {
       onProgress: () => {},

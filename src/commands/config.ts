@@ -1,12 +1,12 @@
 import {
   addLandedBranch,
+  clearStackConfig,
   getAllNodes,
   getLandedBranches,
   getMergeStrategy,
   getStackTree,
   type MergeStrategy,
   removeStackBranch,
-  runGitCommand,
   setBaseBranch,
   setMergeStrategy,
   setStackNode,
@@ -138,30 +138,9 @@ export async function configSplitStack(
 
   // Fully unset the original stack's config so it does not linger as an
   // orphan that `clean` would detect as empty.
-  await unsetStackConfig(dir, stackName);
+  await clearStackConfig(dir, stackName);
 
   return splits;
-}
-
-async function unsetStackConfig(
-  dir: string,
-  stackName: string,
-): Promise<void> {
-  const keys = [
-    `stack.${stackName}.base-branch`,
-    `stack.${stackName}.merge-strategy`,
-    `stack.${stackName}.resume-state`,
-  ];
-  for (const key of keys) {
-    await runGitCommand(dir, "config", "--unset", key);
-  }
-  // landed-branches is multi-value, use --unset-all
-  await runGitCommand(
-    dir,
-    "config",
-    "--unset-all",
-    `stack.${stackName}.landed-branches`,
-  );
 }
 
 export interface InsertBranchOpts {
