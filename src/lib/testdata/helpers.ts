@@ -6,9 +6,28 @@ const GIT_ENV = {
   GIT_CONFIG_NOSYSTEM: "1",
 };
 
-export interface TestRepo {
+export interface TestRepo extends AsyncDisposable {
   dir: string;
   cleanup: () => Promise<void>;
+}
+
+export interface TempDir extends AsyncDisposable {
+  path: string;
+}
+
+/**
+ * Create a temp directory that cleans itself up when disposed via
+ * `await using`. Failures during cleanup are swallowed to match the
+ * best-effort semantics tests expect.
+ */
+export async function makeTempDir(prefix: string): Promise<TempDir> {
+  const path = await Deno.makeTempDir({ prefix });
+  return {
+    path,
+    [Symbol.asyncDispose]: async () => {
+      await Deno.remove(path, { recursive: true }).catch(() => {});
+    },
+  };
 }
 
 /** Run a git command in a directory, return trimmed stdout. */
@@ -41,9 +60,12 @@ export async function createTestRepo(): Promise<TestRepo> {
   await runGit(dir, "config", "core.editor", "true");
   await commitFile(dir, "README.md", "# Test Repo\n");
 
+  const cleanup = () => Deno.remove(dir, { recursive: true });
+
   return {
     dir,
-    cleanup: () => Deno.remove(dir, { recursive: true }),
+    cleanup,
+    [Symbol.asyncDispose]: cleanup,
   };
 }
 

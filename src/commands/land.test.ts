@@ -50,13 +50,16 @@ async function createRepoWithOrigin(): Promise<TestRepo & { origin: string }> {
   await runGit(work.dir, "remote", "add", "origin", origin);
   await runGit(work.dir, "push", "origin", "main");
 
+  const cleanup = async () => {
+    await work.cleanup();
+    await Deno.remove(origin, { recursive: true });
+  };
+
   return {
     dir: work.dir,
     origin,
-    cleanup: async () => {
-      await work.cleanup();
-      await Deno.remove(origin, { recursive: true });
-    },
+    cleanup,
+    [Symbol.asyncDispose]: cleanup,
   };
 }
 
