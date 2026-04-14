@@ -1413,6 +1413,7 @@ describe("executeLandFromCli auto-merged detection", () => {
           {},
         );
         expect(result.ok).toBe(true);
+        expect(result.result?.autoMergedBranches).toContain("feat/b");
       } finally {
         setMockDir(undefined);
       }
