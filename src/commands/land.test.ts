@@ -1362,9 +1362,7 @@ describe("executeLandFromCli auto-merged detection", () => {
   // Exercises end-to-end auto-merged handling: rebase detects the
   // patch-id drop, push and PR retarget are skipped, the PR is closed
   // with a comment, and the branch is deleted and tombstoned.
-  // Currently ignored; enabled once the CLI push/retarget/cleanup
-  // guards are in place.
-  it.ignore("skips push, closes PR, deletes and tombstones auto-merged children", async () => {
+  it("skips push, closes PR, deletes and tombstones auto-merged children", async () => {
     const env = await createRepoWithOrigin();
     try {
       // main - A (merged) - B (patch-id equals part of A's squash merge)

@@ -1590,8 +1590,9 @@ export async function executeLandFromCli(
   }
 
   const mergedRoot = plan.branchesToDelete[0];
-  await detachHeadFromDeleted(dir, plan.branchesToDelete);
-  for (const branch of plan.branchesToDelete) {
+  const toDelete = [...plan.branchesToDelete, ...completed.autoMerged];
+  await detachHeadFromDeleted(dir, toDelete);
+  for (const branch of toDelete) {
     if (completed.deletedBranches.includes(branch)) continue;
     const { code: existsCode } = await runGitCommand(
       dir,
@@ -1601,6 +1602,7 @@ export async function executeLandFromCli(
     );
     if (existsCode !== 0) {
       completed.deletedBranches.push(branch);
+      await writeLandResumeState(dir, stackName, completed);
       continue;
     }
     await runGitCommand(dir, "branch", "-D", branch);
