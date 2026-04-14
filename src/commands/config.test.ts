@@ -360,6 +360,38 @@ describe("config", () => {
       expect(liveRoots[0].branch).toBe("feature/b");
       expect(liveRoots[0].parent).toBe("main");
     });
+
+    test("split-triggering land: each new split sees the landed branch as tombstone", async () => {
+      // Tree: main -> feature/a -> feature/b, -> feature/c
+      // Land feature/a; splits into stacks b and c. Both must see feature/a
+      // as a merged root in their reconstructed tree.
+      await addBranch(repo.dir, "feature/a", "main");
+      await addBranch(repo.dir, "feature/b", "feature/a");
+      await addBranch(repo.dir, "feature/c", "feature/a");
+
+      await setBaseBranch(repo.dir, "my-stack", "main");
+      await setStackNode(repo.dir, "feature/a", "my-stack", "main");
+      await setStackNode(repo.dir, "feature/b", "my-stack", "feature/a");
+      await setStackNode(repo.dir, "feature/c", "my-stack", "feature/a");
+
+      const result = await configLandCleanup(repo.dir, "my-stack", "feature/a");
+
+      expect(result.splitInto).toHaveLength(2);
+      const stackNames = result.splitInto.map((s) => s.stackName);
+      expect(stackNames).toContain("b");
+      expect(stackNames).toContain("c");
+
+      // Each split stack's tree must include feature/a as a merged root
+      for (const name of stackNames) {
+        const tree = await getStackTree(repo.dir, name);
+        const tombstoneA = tree.roots.find((n) =>
+          n.branch === "feature/a" && n.merged === true
+        );
+        expect(tombstoneA).toBeDefined();
+        expect(tombstoneA!.parent).toBe("main");
+        expect(tombstoneA!.children).toEqual([]);
+      }
+    });
   });
 
   describe("configLandCleanup (deferred cleanup)", () => {
