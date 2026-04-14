@@ -58,7 +58,7 @@ export interface GridCell {
   parent: string | null;
   firstChild: string | null;
   connectorStyle: ConnectorStyle;
-  /** True for historically merged branches (stack-merged = true). */
+  /** True for historically merged (landed) branches. Source: stack-level tombstone (`stack.<name>.landed-branches`) or legacy branch-level `stack-merged` flag. */
   merged?: boolean;
 }
 
