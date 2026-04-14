@@ -35,6 +35,7 @@ src/
 ├── commands/
 │   ├── clean.ts                # Stale config detection and removal
 │   ├── config.ts               # Metadata mutations (library, not a CLI subcommand)
+│   ├── create.ts               # Branch creation: child / auto-init / auto-init + worktree
 │   ├── status.ts               # Stack state + PR info
 │   ├── restack.ts              # Per-branch topological rebase
 │   ├── nav.ts                  # PR navigation comment management
@@ -91,8 +92,9 @@ deno task compile:macos   # macOS (pbcopy clipboard support)
 deno task compile:linux   # Linux (xclip/wl-copy clipboard support)
 ```
 
-Subcommands: `status` (add `-i`/`--interactive` to launch the TUI), `restack`,
-`nav`, `verify-refs`, `import-discover`, `submit-plan`, `land`, `clean`.
+Subcommands: `status` (add `-i`/`--interactive` to launch the TUI), `create`,
+`restack`, `nav`, `verify-refs`, `import-discover`, `submit-plan`, `land`,
+`clean`.
 `commands/config.ts` is a library; import its functions, do not try to invoke it
 via `cli.ts`.
 
@@ -133,8 +135,9 @@ can be continued across process invocations.
 | --------------------------------- | ---------------------------------------------------------------- | ----------------------------------------------------------------------- |
 | `src/lib/stack.ts`                | Library only, not a CLI                                          | Imported by all other scripts                                           |
 | `src/lib/gh.ts`                   | Library only, not a CLI                                          | Imported by scripts needing GitHub data                                 |
-| `src/commands/clean.ts`           | Stale config detection and removal                               | `cli.ts clean [--confirm] [--json]`                                     |
+| `src/commands/clean.ts`           | Stale config detection and removal                               | `cli.ts clean [--force] [--json]`                                       |
 | `src/commands/config.ts`          | Library functions for metadata mutations                         | Imported by other commands                                              |
+| `src/commands/create.ts`          | Branch creation with optional worktree                           | `cli.ts create <branch> [flags]`                                        |
 | `src/commands/status.ts`          | Read stack state + PR info                                       | `cli.ts status [--json]`                                                |
 | `src/commands/restack.ts`         | Per-branch topological rebase                                    | `cli.ts restack [--dry-run] [--json] [--resume]`                        |
 | `src/commands/nav.ts`             | Navigation comments                                              | `cli.ts nav [--dry-run]`                                                |

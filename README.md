@@ -128,6 +128,12 @@ Add a new child branch off the current branch. The new branch becomes a child of
 the current branch in the stack tree. If you have staged changes, Claude offers
 to commit them.
 
+When run from the repo's default branch (e.g. `main`), `create` auto-inits a
+new stack so you do not need to run `init` first.
+
+Pass `--create-worktree <dir>` to eject the new branch into a git worktree at
+the given directory, keeping your current working tree clean.
+
 ### `/stacked-prs insert`
 
 Insert a new branch between a branch and its parent. Shows the tree and asks
@@ -314,6 +320,7 @@ deno run --allow-run=git,gh --allow-env --allow-read \
 | Subcommand                                    | Purpose                                                              |
 | --------------------------------------------- | -------------------------------------------------------------------- |
 | `cli.ts status [--json]`                      | Tree output (or JSON) with PR info and sync status                   |
+| `cli.ts create <branch> [--create-worktree]`  | Create a child branch; auto-inits stack when on default branch       |
 | `cli.ts restack [--json]`                     | Segment-based tree rebase; handles conflicts across segments         |
 | `cli.ts nav [--dry-run]`                      | Builds and executes navigation comment plans                         |
 | `cli.ts verify-refs`                          | Checks branch ancestry after rebase, outputs repair commands         |
