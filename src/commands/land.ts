@@ -1623,6 +1623,10 @@ export async function executeLandFromCli(
   return {
     ok: true,
     plan,
-    result: { plan, autoMergedBranches: [], split: [] },
+    result: {
+      plan,
+      autoMergedBranches: [...completed.autoMerged],
+      split: [],
+    },
   };
 }
