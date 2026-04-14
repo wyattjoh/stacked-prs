@@ -164,21 +164,36 @@ Discover and register an existing chain of branches/PRs as a stack.
 
 ### `create`
 
-Create a new child branch off the current branch.
+Create a new child branch off the current branch. Backed by
+`cli.ts create <branch>`.
 
-1. Verify current branch is in a stack
-2. Ask for new branch name
-3. **Before confirming**, apply the independent-branch rule from "Building
-   Review-Ready Stacks": confirm the new branch's intended scope is
-   self-contained and would not leave the current (parent) branch in a
-   CI-failing state. If the user's plan would violate the rule, flag it and
-   suggest a better split.
-4. **Present plan** (branch creation, config writes) and **confirm**
-5. `git checkout -b <new-branch>` from current branch
-6. Write git config:
-   - `git config branch.<new-branch>.stack-name <stack-name>`
-   - `git config branch.<new-branch>.stack-parent <current-branch>`
-7. If staged changes exist, offer to commit them
+**Before invoking**, apply the independent-branch rule from "Building
+Review-Ready Stacks": confirm the new branch's intended scope is
+self-contained and would not leave the current (parent) branch in a
+CI-failing state. If the user's plan would violate the rule, flag it
+and suggest a better split.
+
+Invoke the CLI:
+
+```bash
+deno run --allow-run=git,gh --allow-env --allow-read --allow-write \
+  ${CLAUDE_PLUGIN_ROOT}/src/cli.ts create <branch> \
+  [-m <message>] [--create-worktree <dir>] \
+  [--stack-name <name>] [--merge-strategy merge|squash] \
+  [--force] [--dry-run] [--json]
+```
+
+The CLI resolves the create case automatically:
+
+- **Child branch**: when the current branch is already in a stack.
+- **Auto-init from base**: when the current branch is the repo's
+  default branch. A new stack is registered (default name: the new
+  branch name; default merge strategy: `merge`).
+- **Auto-init + worktree**: same as auto-init, but the new branch
+  lives in a worktree at `<dir>/<branch>` and the current repo stays
+  on the base branch. Only valid from the base branch.
+
+Pass `--force` to skip the CLI's TTY confirmation prompt.
 
 ### `insert`
 
@@ -483,10 +498,10 @@ acts as the stack-level tombstone list for branches that have been landed and
 deleted. Entries there are expected and are not stale. The branch-level
 `branch.<name>.stack-merged = true` key is the legacy pre-migration form; when
 it appears on a live branch with a live `stack-name`, `clean` reports a
-`legacy-merged-flag` finding and `--confirm` removes it. See `CLAUDE.md` for the
+`legacy-merged-flag` finding and `--force` removes it. See `CLAUDE.md` for the
 full git-config schema.
 
-**Flags:** `--stack-name=<name>`, `--confirm`, `--json`
+**Flags:** `--stack-name=<name>`, `--force`, `--json`
 
 1. Run `cli.ts clean [--stack-name=<name>] --json` (read-only, no gate needed)
    to get the structured report.
@@ -495,7 +510,7 @@ full git-config schema.
 3. **Present plan:** show each finding with its kind, subject (branch or stack),
    details, and the config keys that would be removed.
 4. **Wait for confirmation.**
-5. Run `cli.ts clean [--stack-name=<name>] --confirm` to apply.
+5. Run `cli.ts clean [--stack-name=<name>] --force` to apply.
 6. Report the removed keys.
 
 ### `help`
@@ -625,7 +640,7 @@ command.
 - `deno run ... cli.ts nav --dry-run`
 - `deno run ... cli.ts verify-refs`
 - `deno run ... cli.ts restack --dry-run` (with or without `--json`)
-- `deno run ... cli.ts clean --json` (report-only; `--confirm` mutates)
+- `deno run ... cli.ts clean --json` (report-only; `--force` mutates)
 - `deno run ... cli.ts land --dry-run` (with or without `--json`)
 
 **If the plan changes mid-execution** (e.g., rebase conflicts), pause and
@@ -702,6 +717,21 @@ Outputs JSON with branch status, repair commands for stale branches, and a
 `duplicates` array listing commits whose patch-id appears in multiple branches.
 Exits with code 1 if any branches are stale or duplicates are found.
 
+### `create`
+
+```bash
+deno run --allow-run=git,gh --allow-env --allow-read --allow-write ${CLAUDE_PLUGIN_ROOT}/src/cli.ts create <branch> \
+  [-m <message>] [--create-worktree <dir>] \
+  [--stack-name <name>] [--merge-strategy merge|squash] \
+  [--force] [--dry-run] [--json]
+```
+
+Creates a new branch in the stack off the current branch. Auto-resolves
+between child-in-stack, auto-init, and auto-init-with-worktree based on
+the current branch's git config. Prints a plan and prompts on TTY
+unless `--force` is passed. `--dry-run` reports the plan without
+mutating anything.
+
 ### `import-discover`
 
 ```bash
@@ -742,14 +772,14 @@ failure (conflict or blocked).
 
 ```bash
 deno run --allow-run=git,gh --allow-env --allow-read ${CLAUDE_PLUGIN_ROOT}/src/cli.ts clean \
-  [--stack-name=<name>] [--confirm] [--json]
+  [--stack-name=<name>] [--force] [--json]
 ```
 
 Detects four classes of stale git config: orphaned branch entries (config
 references a deleted ref), stale stack-parent (parent ref does not exist), empty
 stacks (stack metadata with no member branches), and stale resume-state (resume
 marker but no rebase in progress). Default: print report and prompt to apply.
-Pass `--confirm` for non-interactive use. Pass `--json` for structured output.
+Pass `--force` for non-interactive use. Pass `--json` for structured output.
 
 ### Config operations
 
