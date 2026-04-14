@@ -6,7 +6,7 @@ import {
   getAllNodes,
   getMergeStrategy,
   getStackTree,
-  gitConfig,
+  runGitCommand,
   setBaseBranch,
   setStackNode,
 } from "../lib/stack.ts";
@@ -362,7 +362,7 @@ describe("config", () => {
   });
 
   describe("configLandCleanup (deferred cleanup)", () => {
-    test("sets stack-merged on the merged branch instead of removing it", async () => {
+    test("writes stack-level tombstone instead of branch-level stack-merged", async () => {
       await addBranch(repo.dir, "feature/a", "main");
       await addBranch(repo.dir, "feature/b", "feature/a");
       await setStackNode(repo.dir, "feature/a", "my-stack", "main");
@@ -371,19 +371,14 @@ describe("config", () => {
 
       await configLandCleanup(repo.dir, "my-stack", "feature/a");
 
-      // feature/a must still have its stack config keys
-      const stackName = await gitConfig(
+      // Tombstone is at the stack level, not branch level
+      const { stdout } = await runGitCommand(
         repo.dir,
-        "branch.feature/a.stack-name",
+        "config",
+        "--get-all",
+        "stack.my-stack.landed-branches",
       );
-      expect(stackName).toBe("my-stack");
-
-      // feature/a must be flagged as merged
-      const merged = await gitConfig(
-        repo.dir,
-        "branch.feature/a.stack-merged",
-      );
-      expect(merged).toBe("true");
+      expect(stdout).toBe("feature/a");
 
       // feature/b must have been reparented to main
       const tree = await getStackTree(repo.dir, "my-stack");

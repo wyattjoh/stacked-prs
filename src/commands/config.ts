@@ -1,4 +1,5 @@
 import {
+  addLandedBranch,
   getAllNodes,
   getMergeStrategy,
   getStackTree,
@@ -6,7 +7,6 @@ import {
   removeStackBranch,
   setBaseBranch,
   setMergeStrategy,
-  setStackMerged,
   setStackNode,
   type StackTree,
 } from "../lib/stack.ts";
@@ -213,8 +213,11 @@ export async function configLandCleanup(
     }
   }
 
-  // Mark the merged branch as historical instead of removing it
-  await setStackMerged(dir, mergedBranch);
+  // Mark the merged branch as historical in stack-level config, then drop
+  // its branch-level config so the tombstone synthesis surfaces it as a
+  // merged root in the tree.
+  await addLandedBranch(dir, stackName, mergedBranch);
+  await removeStackBranch(dir, mergedBranch);
 
   // Re-read the tree to see how many LIVE roots remain (exclude merged nodes)
   const treeAfter = await getStackTree(dir, stackName);
