@@ -5,7 +5,12 @@ import {
   createTestRepo,
   makeTempDir,
 } from "../lib/testdata/helpers.ts";
-import { setBaseBranch, setStackNode } from "../lib/stack.ts";
+import {
+  addLandedBranch,
+  addLandedPr,
+  setBaseBranch,
+  setStackNode,
+} from "../lib/stack.ts";
 import type { StackNode, StackTree } from "../lib/stack.ts";
 import { setMockDir, writeFixture } from "../lib/gh.ts";
 import { buildNavPlan, generateNavMarkdown } from "./nav.ts";
@@ -381,5 +386,42 @@ describe("buildNavPlan", () => {
     const plan = await buildNavPlan(repo.dir, "empty-stack", "o", "r");
 
     expect(plan).toHaveLength(0);
+  });
+
+  test("renders tombstoned (landed) branches using stored PR number", async () => {
+    await using repo = await createTestRepo();
+    await using mock = await makeMockDir();
+
+    // Live child branch still in the stack; tombstoned root has been deleted.
+    await addBranch(repo.dir, "feature/b", "main");
+    await setBaseBranch(repo.dir, "my-stack", "main");
+    await setStackNode(repo.dir, "feature/b", "my-stack", "main");
+    await addLandedBranch(repo.dir, "my-stack", "feature/a");
+    await addLandedPr(repo.dir, "my-stack", "feature/a", 101);
+
+    await writeFixture(
+      mock.path,
+      ["pr", "list", "--head", "feature/b", "--repo", "o/r"],
+      [{
+        number: 102,
+        url: "...",
+        title: "feat: b",
+        state: "OPEN",
+        isDraft: false,
+      }],
+    );
+    await writeFixture(
+      mock.path,
+      ["api", "repos/o/r/issues/102/comments"],
+      [],
+    );
+
+    const plan = await buildNavPlan(repo.dir, "my-stack", "o", "r");
+
+    expect(plan).toHaveLength(1);
+    expect(plan[0].prNumber).toBe(102);
+    // The merged root should appear in the body with strikethrough.
+    expect(plan[0].body).toContain("~~#101~~");
+    expect(plan[0].body).toContain("**#102 👈 this PR**");
   });
 });

@@ -11,6 +11,7 @@ const fakePlan = (): LandPlan => ({
   baseBranch: "main",
   case: "root-merged",
   mergedBranches: ["feat/a"],
+  landedPrNumbers: [],
   rebaseSteps: [
     { branch: "feat/b", oldParentSha: "aaa", newTarget: "origin/main" },
   ],

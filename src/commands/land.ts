@@ -42,6 +42,12 @@ export interface LandPlan {
   baseBranch: string;
   case: LandCase;
   mergedBranches: string[];
+  /**
+   * PR number per landed branch, captured at plan time. Persisted through
+   * resume state and written to `stack.<n>.landed-pr` at tombstone time so
+   * nav comments can still render merged PRs after the branch is deleted.
+   */
+  landedPrNumbers: Array<{ branch: string; prNumber: number }>;
   rebaseSteps: LandRebaseStep[];
   pushSteps: LandPushStep[];
   prUpdates: LandPrUpdate[];
@@ -187,6 +193,7 @@ import {
 import { gh } from "../lib/gh.ts";
 import {
   addLandedBranch,
+  addLandedPr,
   clearStackConfig,
   findNode,
   getAllNodes,
@@ -569,6 +576,12 @@ export async function planLand(
     .filter((n) => prStateByBranch.get(n.branch) === "MERGED")
     .map((n) => n.branch);
 
+  const landedPrNumbers: Array<{ branch: string; prNumber: number }> = [];
+  for (const branch of mergedBranches) {
+    const pr = prInfoByBranch.get(branch);
+    if (pr) landedPrNumbers.push({ branch, prNumber: pr.number });
+  }
+
   if (landCase === "all-merged") {
     // All branches are being deleted; check worktrees for all of them.
     const worktreesToRemove = await detectCleanWorktreeCollisions(
@@ -580,6 +593,7 @@ export async function planLand(
       baseBranch: tree.baseBranch,
       case: "all-merged",
       mergedBranches,
+      landedPrNumbers,
       rebaseSteps: [],
       pushSteps: [],
       prUpdates: [],
@@ -611,6 +625,7 @@ export async function planLand(
     baseBranch: tree.baseBranch,
     case: "root-merged",
     mergedBranches,
+    landedPrNumbers,
     rebaseSteps,
     pushSteps,
     prUpdates,
@@ -1113,6 +1128,9 @@ async function executeCaseA(
   // Delete the merged root and any auto-merged branches. Deletion failures
   // are best-effort: the stack has already landed at this point.
   const toDelete = [mergedRoot, ...state.autoMerged];
+  const prByBranch = new Map(
+    plan.landedPrNumbers.map((e) => [e.branch, e.prNumber]),
+  );
   await detachHeadFromDeleted(dir, toDelete);
   for (const branch of toDelete) {
     emit(hooks, { kind: "delete", branch }, "running");
@@ -1122,6 +1140,10 @@ async function executeCaseA(
     // addLandedBranch de-dupes, configLandCleanup already tombstoned
     // mergedRoot earlier.
     await addLandedBranch(dir, plan.stackName, branch);
+    const prNumber = prByBranch.get(branch);
+    if (prNumber !== undefined) {
+      await addLandedPr(dir, plan.stackName, branch, prNumber);
+    }
     if (branch !== mergedRoot) {
       await removeStackBranch(dir, branch);
     }
@@ -1637,6 +1659,9 @@ export async function executeLandFromCli(
 
   const mergedRoot = plan.branchesToDelete[0];
   const toDelete = [...plan.branchesToDelete, ...completed.autoMerged];
+  const prByBranch = new Map(
+    plan.landedPrNumbers.map((e) => [e.branch, e.prNumber]),
+  );
   await detachHeadFromDeleted(dir, toDelete);
   for (const branch of toDelete) {
     if (completed.deletedBranches.includes(branch)) continue;
@@ -1646,6 +1671,10 @@ export async function executeLandFromCli(
     // idempotent: addLandedBranch is multi-value but de-dupes, and
     // configLandCleanup already tombstoned mergedRoot earlier.
     await addLandedBranch(dir, stackName, branch);
+    const prNumber = prByBranch.get(branch);
+    if (prNumber !== undefined) {
+      await addLandedPr(dir, stackName, branch, prNumber);
+    }
     if (branch !== mergedRoot) {
       await removeStackBranch(dir, branch);
     }

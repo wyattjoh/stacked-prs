@@ -133,8 +133,20 @@ export function App(props: AppProps): React.ReactElement {
       dispatch({ type: "PR_LOAD_START", branch: b });
     }
 
+    // Tombstoned branches have no live ref; seed their PR state from the
+    // `stack.<n>.landed-pr` tombstones and skip the gh query for them.
+    const liveBranches: string[] = [];
+    for (const b of local.allBranches) {
+      const landed = local.landedPrByBranch.get(b);
+      if (landed) {
+        dispatch({ type: "PR_LOADED", branch: b, pr: landed });
+      } else {
+        liveBranches.push(b);
+      }
+    }
+
     await loadPrsProgressive({
-      branches: local.allBranches,
+      branches: liveBranches,
       concurrency: 8,
       signal: controller.signal,
       onLoaded: (branch, pr) => dispatch({ type: "PR_LOADED", branch, pr }),

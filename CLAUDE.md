@@ -155,6 +155,7 @@ stack.<stack-name>.merge-strategy  # "merge" or "squash"
 stack.<stack-name>.base-branch     # Base branch name, e.g. "main" or "master"
 stack.<stack-name>.resume-state    # Transient JSON for in-progress restack recovery
 stack.<stack-name>.landed-branches # Multi-value: branch names landed from this stack
+stack.<stack-name>.landed-pr       # Multi-value: "<branch>:<pr-number>" per landed branch, written at land time so nav comments can keep rendering merged PRs after the branch is deleted
 ```
 
 `stack-order` is not used in the tree model; topology is derived entirely from

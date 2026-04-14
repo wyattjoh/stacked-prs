@@ -5,7 +5,13 @@ import {
   createTestRepo,
   makeTempDir,
 } from "../../lib/testdata/helpers.ts";
-import { runGitCommand, setBaseBranch, setStackNode } from "../../lib/stack.ts";
+import {
+  addLandedBranch,
+  addLandedPr,
+  runGitCommand,
+  setBaseBranch,
+  setStackNode,
+} from "../../lib/stack.ts";
 import { setMockDir, writeFixture } from "../../lib/gh.ts";
 import { loadLocal, loadPrsProgressive } from "./loader.ts";
 
@@ -57,6 +63,28 @@ describe("loadLocal with merged nodes", () => {
     const result = await loadLocal(repo.dir);
     expect(result.syncByBranch.get("feature/a")).toBe("landed");
     expect(result.syncByBranch.get("feature/b")).toBe("up-to-date");
+  });
+
+  test("seeds landedPrByBranch for tombstoned (deleted) branches", async () => {
+    await using repo = await createTestRepo();
+    await addBranch(repo.dir, "feature/b", "main");
+    await setStackNode(repo.dir, "feature/b", "my-stack", "main");
+    await setBaseBranch(repo.dir, "my-stack", "main");
+    // Simulate a landed & deleted feature/a: tombstone + stored PR number,
+    // no live ref or branch-level config.
+    await addLandedBranch(repo.dir, "my-stack", "feature/a");
+    await addLandedPr(repo.dir, "my-stack", "feature/a", 101);
+
+    const result = await loadLocal(repo.dir);
+    expect(result.syncByBranch.get("feature/a")).toBe("landed");
+    expect(result.allBranches).toContain("feature/a");
+    const pr = result.landedPrByBranch.get("feature/a");
+    expect(pr).toBeDefined();
+    expect(pr!.number).toBe(101);
+    expect(pr!.state).toBe("MERGED");
+    expect(pr!.isDraft).toBe(false);
+    // Live branches are NOT in the landed map.
+    expect(result.landedPrByBranch.has("feature/b")).toBe(false);
   });
 });
 

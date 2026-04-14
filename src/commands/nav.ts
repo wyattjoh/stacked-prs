@@ -1,4 +1,4 @@
-import { getAllNodes, getStackTree } from "../lib/stack.ts";
+import { getAllNodes, getLandedPrs, getStackTree } from "../lib/stack.ts";
 import type { StackNode, StackTree } from "../lib/stack.ts";
 import { gh, selectBestPr } from "../lib/gh.ts";
 
@@ -96,9 +96,15 @@ export async function buildNavPlan(
   const tree = await getStackTree(dir, stackName);
   const nodes = getAllNodes(tree);
 
-  // Fetch PRs for all nodes in parallel
+  // Tombstoned (merged) nodes have no live ref, so `gh pr list --head` won't
+  // return them. Seed their PR numbers from `stack.<n>.landed-pr`, captured
+  // at land time. This keeps merged PRs in the nav as a historical record.
+  const landedPrs = await getLandedPrs(dir, stackName);
+
+  // Fetch PRs for live nodes in parallel; skip merged tombstones.
   const prResults = await Promise.all(
     nodes.map(async (node) => {
+      if (node.merged) return { node, pr: null as GhPr | null };
       const result = await gh(
         "pr",
         "list",
@@ -114,15 +120,21 @@ export async function buildNavPlan(
     }),
   );
 
-  // Build prMap from the results
+  // Build prMap from live results, then overlay tombstone PR numbers.
   const prMap = new Map<string, number>();
   for (const { node, pr } of prResults) {
     if (pr !== null) {
       prMap.set(node.branch, pr.number);
     }
   }
+  for (const node of nodes) {
+    if (!node.merged) continue;
+    const num = landedPrs.get(node.branch);
+    if (num !== undefined) prMap.set(node.branch, num);
+  }
 
-  // Filter to nodes with PRs
+  // Filter to live nodes with open PRs (tombstones are rendered via prMap
+  // but don't need their own nav comment written to them).
   const withPrs = prResults.filter(
     (r): r is { node: typeof r.node; pr: GhPr } => r.pr !== null,
   );

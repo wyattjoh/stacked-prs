@@ -500,12 +500,14 @@ Detect and remove stale stack/branch config entries (orphaned branches, missing
 parents, empty stacks, stale resume-state, legacy `stack-merged` flags on live
 branches).
 
-`clean` also understands `stack.<name>.landed-branches`: a multi-value key that
-acts as the stack-level tombstone list for branches that have been landed and
-deleted. Entries there are expected and are not stale. The branch-level
-`branch.<name>.stack-merged = true` key is the legacy pre-migration form; when
-it appears on a live branch with a live `stack-name`, `clean` reports a
-`legacy-merged-flag` finding and `--force` removes it. See `CLAUDE.md` for the
+`clean` also understands `stack.<name>.landed-branches` and
+`stack.<name>.landed-pr`: multi-value keys that act as the stack-level tombstone
+list for branches that have been landed and deleted (the latter records the PR
+number as `<branch>:<number>` so nav comments can keep showing merged PRs after
+the branch ref is gone). Entries there are expected and are not stale. The
+branch-level `branch.<name>.stack-merged = true` key is the legacy pre-migration
+form; when it appears on a live branch with a live `stack-name`, `clean` reports
+a `legacy-merged-flag` finding and `--force` removes it. See `CLAUDE.md` for the
 full git-config schema.
 
 **Flags:** `--stack-name=<name>`, `--force`, `--json`

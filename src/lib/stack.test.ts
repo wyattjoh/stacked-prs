@@ -3,11 +3,13 @@ import { expect } from "@std/expect";
 import { addBranch, createTestRepo, runGit } from "./testdata/helpers.ts";
 import {
   addLandedBranch,
+  addLandedPr,
   findNode,
   getAllNodes,
   getAllStackTrees,
   getBaseBranch,
   getLandedBranches,
+  getLandedPrs,
   getLeaves,
   getMergeStrategy,
   getPathTo,
@@ -871,6 +873,60 @@ describe("addLandedBranch", () => {
 
       expect(aResult).toEqual(["feature/x"]);
       expect(bResult).toEqual(["feature/y"]);
+    }
+  });
+});
+
+describe("addLandedPr / getLandedPrs", () => {
+  test("records and reads PR number per landed branch", async () => {
+    await using repo = await createTestRepo();
+    {
+      await setBaseBranch(repo.dir, "my-stack", "main");
+      await addLandedPr(repo.dir, "my-stack", "feature/a", 101);
+      await addLandedPr(repo.dir, "my-stack", "feature/b", 102);
+
+      const prs = await getLandedPrs(repo.dir, "my-stack");
+      expect(prs.get("feature/a")).toBe(101);
+      expect(prs.get("feature/b")).toBe(102);
+      expect(prs.size).toBe(2);
+    }
+  });
+
+  test("is idempotent: first PR number wins", async () => {
+    await using repo = await createTestRepo();
+    {
+      await setBaseBranch(repo.dir, "my-stack", "main");
+      await addLandedPr(repo.dir, "my-stack", "feature/a", 101);
+      await addLandedPr(repo.dir, "my-stack", "feature/a", 999);
+
+      const prs = await getLandedPrs(repo.dir, "my-stack");
+      expect(prs.get("feature/a")).toBe(101);
+      expect(prs.size).toBe(1);
+    }
+  });
+
+  test("returns empty map when no landed-pr entries exist", async () => {
+    await using repo = await createTestRepo();
+    {
+      await setBaseBranch(repo.dir, "my-stack", "main");
+      const prs = await getLandedPrs(repo.dir, "my-stack");
+      expect(prs.size).toBe(0);
+    }
+  });
+
+  test("survives branch deletion (lives under stack namespace)", async () => {
+    await using repo = await createTestRepo();
+    {
+      await addBranch(repo.dir, "feature/a", "main");
+      await setStackNode(repo.dir, "feature/a", "my-stack", "main");
+      await setBaseBranch(repo.dir, "my-stack", "main");
+
+      await addLandedPr(repo.dir, "my-stack", "feature/a", 101);
+      await runGit(repo.dir, "checkout", "main");
+      await runGit(repo.dir, "branch", "-D", "feature/a");
+
+      const prs = await getLandedPrs(repo.dir, "my-stack");
+      expect(prs.get("feature/a")).toBe(101);
     }
   });
 });

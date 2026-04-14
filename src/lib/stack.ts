@@ -278,6 +278,63 @@ export async function addLandedBranch(
   }
 }
 
+/**
+ * Read landed PR numbers for a stack as a branch -> PR number map.
+ *
+ * Stored under the multi-value key `stack.<name>.landed-pr` with values of
+ * the form `<branch>:<number>`. Branch names cannot contain `:` per git ref
+ * rules, so the delimiter is unambiguous. Values that fail to parse are
+ * silently skipped so a hand-edited config can't break the reader.
+ */
+export async function getLandedPrs(
+  dir: string,
+  stackName: string,
+): Promise<Map<string, number>> {
+  const { code, stdout } = await runGitCommand(
+    dir,
+    "config",
+    "--get-all",
+    `stack.${stackName}.landed-pr`,
+  );
+  const result = new Map<string, number>();
+  if (code !== 0 || !stdout) return result;
+  for (const line of stdout.split("\n")) {
+    const sep = line.indexOf(":");
+    if (sep === -1) continue;
+    const branch = line.slice(0, sep);
+    const num = Number(line.slice(sep + 1));
+    if (!branch || !Number.isFinite(num)) continue;
+    result.set(branch, num);
+  }
+  return result;
+}
+
+/**
+ * Record the PR number for a landed branch. Idempotent: a branch that
+ * already has a recorded number is left alone (the first number wins).
+ */
+export async function addLandedPr(
+  dir: string,
+  stackName: string,
+  branch: string,
+  prNumber: number,
+): Promise<void> {
+  const existing = await getLandedPrs(dir, stackName);
+  if (existing.has(branch)) return;
+  const { code, stderr } = await runGitCommand(
+    dir,
+    "config",
+    "--add",
+    `stack.${stackName}.landed-pr`,
+    `${branch}:${prNumber}`,
+  );
+  if (code !== 0) {
+    throw new Error(
+      `git config --add stack.${stackName}.landed-pr ${branch}:${prNumber} failed: ${stderr}`,
+    );
+  }
+}
+
 /** Get the base branch for a stack. Returns undefined if not set. */
 export async function getBaseBranch(
   dir: string,
@@ -316,17 +373,21 @@ export async function clearStackConfig(
       throw new Error(`git config --unset ${key} failed: ${stderr}`);
     }
   }
-  // landed-branches is multi-value; --unset-all is needed to remove all values.
-  const { code, stderr } = await runGitCommand(
-    dir,
-    "config",
-    "--unset-all",
+  // landed-branches and landed-pr are multi-value; --unset-all removes all.
+  const multiValueKeys = [
     `stack.${stackName}.landed-branches`,
-  );
-  if (code !== 0 && code !== 5) {
-    throw new Error(
-      `git config --unset-all stack.${stackName}.landed-branches failed: ${stderr}`,
+    `stack.${stackName}.landed-pr`,
+  ];
+  for (const key of multiValueKeys) {
+    const { code, stderr } = await runGitCommand(
+      dir,
+      "config",
+      "--unset-all",
+      key,
     );
+    if (code !== 0 && code !== 5) {
+      throw new Error(`git config --unset-all ${key} failed: ${stderr}`);
+    }
   }
 }
 
