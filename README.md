@@ -128,8 +128,8 @@ Add a new child branch off the current branch. The new branch becomes a child of
 the current branch in the stack tree. If you have staged changes, Claude offers
 to commit them.
 
-When run from the repo's default branch (e.g. `main`), `create` auto-inits a
-new stack so you do not need to run `init` first.
+When run from the repo's default branch (e.g. `main`), `create` auto-inits a new
+stack so you do not need to run `init` first.
 
 Pass `--create-worktree <dir>` to eject the new branch into a git worktree at
 the given directory, keeping your current working tree clean.

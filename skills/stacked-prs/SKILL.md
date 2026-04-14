@@ -168,10 +168,9 @@ Create a new child branch off the current branch. Backed by
 `cli.ts create <branch>`.
 
 **Before invoking**, apply the independent-branch rule from "Building
-Review-Ready Stacks": confirm the new branch's intended scope is
-self-contained and would not leave the current (parent) branch in a
-CI-failing state. If the user's plan would violate the rule, flag it
-and suggest a better split.
+Review-Ready Stacks": confirm the new branch's intended scope is self-contained
+and would not leave the current (parent) branch in a CI-failing state. If the
+user's plan would violate the rule, flag it and suggest a better split.
 
 Invoke the CLI:
 
@@ -186,12 +185,12 @@ deno run --allow-run=git,gh --allow-env --allow-read --allow-write \
 The CLI resolves the create case automatically:
 
 - **Child branch**: when the current branch is already in a stack.
-- **Auto-init from base**: when the current branch is the repo's
-  default branch. A new stack is registered (default name: the new
-  branch name; default merge strategy: `merge`).
-- **Auto-init + worktree**: same as auto-init, but the new branch
-  lives in a worktree at `<dir>/<branch>` and the current repo stays
-  on the base branch. Only valid from the base branch.
+- **Auto-init from base**: when the current branch is the repo's default branch.
+  A new stack is registered (default name: the new branch name; default merge
+  strategy: `merge`).
+- **Auto-init + worktree**: same as auto-init, but the new branch lives in a
+  worktree at `<dir>/<branch>` and the current repo stays on the base branch.
+  Only valid from the base branch.
 
 Pass `--force` to skip the CLI's TTY confirmation prompt.
 
@@ -726,11 +725,10 @@ deno run --allow-run=git,gh --allow-env --allow-read --allow-write ${CLAUDE_PLUG
   [--force] [--dry-run] [--json]
 ```
 
-Creates a new branch in the stack off the current branch. Auto-resolves
-between child-in-stack, auto-init, and auto-init-with-worktree based on
-the current branch's git config. Prints a plan and prompts on TTY
-unless `--force` is passed. `--dry-run` reports the plan without
-mutating anything.
+Creates a new branch in the stack off the current branch. Auto-resolves between
+child-in-stack, auto-init, and auto-init-with-worktree based on the current
+branch's git config. Prints a plan and prompts on TTY unless `--force` is
+passed. `--dry-run` reports the plan without mutating anything.
 
 ### `import-discover`
 

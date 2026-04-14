@@ -94,9 +94,8 @@ deno task compile:linux   # Linux (xclip/wl-copy clipboard support)
 
 Subcommands: `status` (add `-i`/`--interactive` to launch the TUI), `create`,
 `restack`, `nav`, `verify-refs`, `import-discover`, `submit-plan`, `land`,
-`clean`.
-`commands/config.ts` is a library; import its functions, do not try to invoke it
-via `cli.ts`.
+`clean`. `commands/config.ts` is a library; import its functions, do not try to
+invoke it via `cli.ts`.
 
 ## Architecture
 
