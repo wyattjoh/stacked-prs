@@ -6,6 +6,18 @@ export function setMockDir(dir: string | undefined): void {
   _mockDir = dir;
 }
 
+/**
+ * Optional call log. When set by tests, every `gh(...)` invocation
+ * appends its args (copied) to this array, regardless of whether a
+ * mock fixture is active. Pass `undefined` to disable.
+ */
+let _callLog: string[][] | undefined;
+
+/** Set a call log sink for testing. Pass undefined to disable. */
+export function setCallLog(log: string[][] | undefined): void {
+  _callLog = log;
+}
+
 /** Lazily read mock dir. Catches permission errors when --allow-env is missing. */
 function getMockDir(): string | undefined {
   if (_mockDir !== undefined) return _mockDir;
@@ -75,6 +87,8 @@ export async function gh(
     err.name = "AbortError";
     throw err;
   }
+
+  if (_callLog) _callLog.push([...args]);
 
   const mockDir = getMockDir();
 

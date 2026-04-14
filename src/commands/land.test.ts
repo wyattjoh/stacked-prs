@@ -29,7 +29,7 @@ import {
   setBaseBranch,
   setStackNode,
 } from "../lib/stack.ts";
-import { setMockDir, writeFixture } from "../lib/gh.ts";
+import { setCallLog, setMockDir, writeFixture } from "../lib/gh.ts";
 
 async function initStack(
   repo: TestRepo,
@@ -1404,6 +1404,8 @@ describe("executeLandFromCli auto-merged detection", () => {
         name: "widgets",
       });
 
+      const calls: string[][] = [];
+      setCallLog(calls);
       try {
         const result = await executeLandFromCli(
           env.dir,
@@ -1415,8 +1417,18 @@ describe("executeLandFromCli auto-merged detection", () => {
         expect(result.ok).toBe(true);
         expect(result.result?.autoMergedBranches).toContain("feat/b");
       } finally {
+        setCallLog(undefined);
         setMockDir(undefined);
       }
+
+      // Assert that `gh pr close 42 --comment <auto-merged text>` fired.
+      const closeCall = calls.find(
+        (c) => c[0] === "pr" && c[1] === "close" && c[2] === "42",
+      );
+      expect(closeCall).toBeDefined();
+      const commentIdx = closeCall!.indexOf("--comment");
+      expect(commentIdx).toBeGreaterThan(-1);
+      expect(closeCall![commentIdx + 1]).toContain("auto-merged");
 
       // feat/b must be deleted locally.
       const bProbe = await runGitCommand(
