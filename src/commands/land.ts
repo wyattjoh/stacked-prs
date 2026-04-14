@@ -1555,18 +1555,32 @@ export async function executeLandFromCli(
   }
 
   // Close PRs whose branches were auto-merged by patch-id. Mirrors the TUI
-  // executor's close phase so every PR state transition on a completed land
-  // is recorded in GitHub.
+  // executor's close phase so every PR state transition on a completed
+  // land is recorded in GitHub.
+  //
+  // Error model: the CLI path has no remote rollback (unlike executeLand,
+  // which restores base branches and reopens PRs on failure). Instead,
+  // every mutation is bracketed by writeLandResumeState writes, and a
+  // failure here rethrows so the caller can surface the error and the
+  // user can rerun with --resume to re-attempt the close.
   for (const update of plan.prUpdates) {
     if (!completed.autoMerged.includes(update.branch)) continue;
     if (completed.prClosed.includes(update.prNumber)) continue;
-    await gh(
-      "pr",
-      "close",
-      String(update.prNumber),
-      "--comment",
-      "auto-merged during stack land: every commit was already upstream",
-    );
+    try {
+      await gh(
+        "pr",
+        "close",
+        String(update.prNumber),
+        "--comment",
+        AUTO_MERGED_CLOSE_COMMENT,
+      );
+    } catch (err) {
+      throw new Error(
+        `Failed to close PR #${update.prNumber} for auto-merged branch ` +
+          `${update.branch}: ${(err as Error).message}. ` +
+          `Rerun with --resume to retry.`,
+      );
+    }
     completed.prClosed.push(update.prNumber);
     await writeLandResumeState(dir, stackName, completed);
   }
