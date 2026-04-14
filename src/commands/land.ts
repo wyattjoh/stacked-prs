@@ -1372,6 +1372,21 @@ export async function executeLandFromCli(
   const existingState = await readLandResumeState(dir, stackName);
   if (existingState && !Array.isArray(existingState.autoMerged)) {
     existingState.autoMerged = [];
+    // Pre-migration resume state: re-evaluate isBranchAutoMerged for
+    // every already-completed rebase so a --resume across the upgrade
+    // does not push an auto-merged branch as a real one. Requires the
+    // plan's rebaseSteps to still match the recorded completed set,
+    // which they will because the plan is serialized alongside them.
+    const stepByBranch = new Map(
+      (existingState.plan?.rebaseSteps ?? []).map((s) => [s.branch, s]),
+    );
+    for (const branch of existingState.completedRebases ?? []) {
+      const step = stepByBranch.get(branch);
+      if (!step) continue;
+      if (await isBranchAutoMerged(dir, branch, step.newTarget)) {
+        existingState.autoMerged.push(branch);
+      }
+    }
   }
 
   if (opts.resume && !existingState) {
