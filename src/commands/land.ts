@@ -99,6 +99,13 @@ export interface LandResumeState {
   navDone: boolean;
   configCleanupDone: boolean;
   deletedBranches: string[];
+  /**
+   * Branches detected as auto-merged by patch-id after rebase. These are
+   * excluded from push / pr-update and are included in the PR-close phase
+   * plus the delete loop. Added during the LOG-002 cleanup; older persisted
+   * states default to empty on load (see `loadResumeState`).
+   */
+  autoMerged: string[];
   conflictedBranch?: string;
 }
 
@@ -358,6 +365,27 @@ export async function fetchBase(
         `Check your network connection and origin remote.`,
     );
   }
+}
+
+/**
+ * True iff `branch` has zero unique commits beyond `origin/<baseBranch>`.
+ * Indicates the branch was auto-merged by patch-id during rebase onto the
+ * updated base. Used by both `executeLand` and `executeLandFromCli` to skip
+ * pushes / PR retargets and close + delete + tombstone the branch.
+ */
+export async function isBranchAutoMerged(
+  dir: string,
+  branch: string,
+  baseBranch: string,
+): Promise<boolean> {
+  const { code, stdout } = await runGitCommand(
+    dir,
+    "rev-list",
+    "--count",
+    `origin/${baseBranch}..${branch}`,
+  );
+  if (code !== 0) return false;
+  return stdout.trim() === "0";
 }
 
 /**
@@ -1320,6 +1348,9 @@ export async function executeLandFromCli(
   opts: { resume?: boolean },
 ): Promise<LandCliResult> {
   const existingState = await readLandResumeState(dir, stackName);
+  if (existingState && !Array.isArray(existingState.autoMerged)) {
+    existingState.autoMerged = [];
+  }
 
   if (opts.resume && !existingState) {
     throw new Error("No land in progress to resume");
@@ -1388,6 +1419,7 @@ export async function executeLandFromCli(
     navDone: false,
     configCleanupDone: false,
     deletedBranches: [],
+    autoMerged: [],
   };
 
   // Write initial resume state before any mutations

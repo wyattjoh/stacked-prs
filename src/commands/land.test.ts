@@ -538,6 +538,49 @@ describe("fetchBase", () => {
   });
 });
 
+describe("isBranchAutoMerged", () => {
+  it("returns true when branch has zero commits beyond origin/base", async () => {
+    const env = await createRepoWithOrigin();
+    try {
+      // feat/a shares its only commit with main (patch already upstream).
+      await runGit(env.dir, "checkout", "-b", "feat/a", "main");
+      await Deno.writeTextFile(`${env.dir}/x.txt`, "x\n");
+      await runGit(env.dir, "add", "x.txt");
+      await runGit(env.dir, "commit", "-m", "add x");
+      await runGit(env.dir, "push", "origin", "feat/a");
+
+      // Cherry-pick the same change onto main and push.
+      await runGit(env.dir, "checkout", "main");
+      await Deno.writeTextFile(`${env.dir}/x.txt`, "x\n");
+      await runGit(env.dir, "add", "x.txt");
+      await runGit(env.dir, "commit", "-m", "add x on main");
+      await runGit(env.dir, "push", "origin", "main");
+      await runGit(env.dir, "fetch", "origin", "main");
+
+      // Rebase feat/a onto origin/main drops its only commit.
+      await runGit(env.dir, "checkout", "feat/a");
+      await runGit(env.dir, "rebase", "origin/main");
+
+      const { isBranchAutoMerged } = await import("./land.ts");
+      expect(await isBranchAutoMerged(env.dir, "feat/a", "main")).toBe(true);
+    } finally {
+      await env.cleanup();
+    }
+  });
+
+  it("returns false when branch has unique commits", async () => {
+    const env = await createRepoWithOrigin();
+    try {
+      await addBranch(env.dir, "feat/a", "main");
+      await runGit(env.dir, "push", "origin", "feat/a");
+      const { isBranchAutoMerged } = await import("./land.ts");
+      expect(await isBranchAutoMerged(env.dir, "feat/a", "main")).toBe(false);
+    } finally {
+      await env.cleanup();
+    }
+  });
+});
+
 describe("planLand", () => {
   it("builds a root-merged plan for a linear stack", async () => {
     const repo = await createTestRepo();
