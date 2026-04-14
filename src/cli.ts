@@ -485,7 +485,7 @@ await new Command()
   .command("clean", "Detect and remove stale stack/branch config entries")
   .option("--stack-name <name:string>", "Limit to a single stack")
   .option(
-    "--confirm",
+    "--force",
     "Apply cleanups without prompting (for non-interactive use)",
   )
   .option("--json", "Output as JSON")
@@ -494,7 +494,7 @@ await new Command()
       stackName: options.stackName,
     });
 
-    if (options.json && !options.confirm) {
+    if (options.json && !options.force) {
       // Dry-run JSON: just the report.
       console.log(JSON.stringify(report, null, 2));
       return;
@@ -567,10 +567,10 @@ await new Command()
       }
     }
 
-    if (!options.confirm) {
+    if (!options.force) {
       if (!Deno.stdin.isTerminal()) {
         console.error(
-          "Cannot prompt in non-interactive mode. Pass --confirm to apply, or --json to inspect.",
+          "Cannot prompt in non-interactive mode. Pass --force to apply, or --json to inspect.",
         );
         Deno.exit(1);
       }
