@@ -1537,11 +1537,29 @@ export async function executeLandFromCli(
 
   for (const update of plan.prUpdates) {
     if (completed.prUpdated.includes(update.prNumber)) continue;
+    if (completed.autoMerged.includes(update.branch)) continue;
     await gh("pr", "edit", String(update.prNumber), "--base", update.newBase);
     if (update.flipToReady) {
       await gh("pr", "ready", String(update.prNumber));
     }
     completed.prUpdated.push(update.prNumber);
+    await writeLandResumeState(dir, stackName, completed);
+  }
+
+  // Close PRs whose branches were auto-merged by patch-id. Mirrors the TUI
+  // executor's close phase so every PR state transition on a completed land
+  // is recorded in GitHub.
+  for (const update of plan.prUpdates) {
+    if (!completed.autoMerged.includes(update.branch)) continue;
+    if (completed.prClosed.includes(update.prNumber)) continue;
+    await gh(
+      "pr",
+      "close",
+      String(update.prNumber),
+      "--comment",
+      "auto-merged during stack land: every commit was already upstream",
+    );
+    completed.prClosed.push(update.prNumber);
     await writeLandResumeState(dir, stackName, completed);
   }
 
