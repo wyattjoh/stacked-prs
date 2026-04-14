@@ -21,7 +21,6 @@ import {
   setBaseBranch,
   setMergeStrategy,
   setStackBranch,
-  setStackMerged,
   setStackNode,
   validateStackTree,
   walkDFS,
@@ -701,7 +700,7 @@ describe("getAllStackTrees", () => {
 });
 
 describe("getStackTree merged field", () => {
-  test("sets merged=true on nodes whose branch.<name>.stack-merged is 'true'", async () => {
+  test("backwards compat: reads branch-level stack-merged flag", async () => {
     const repo = await createTestRepo();
     try {
       await addBranch(repo.dir, "feature/a", "main");
@@ -709,7 +708,7 @@ describe("getStackTree merged field", () => {
       await setStackNode(repo.dir, "feature/a", "my-stack", "main");
       await setStackNode(repo.dir, "feature/b", "my-stack", "main");
       await setBaseBranch(repo.dir, "my-stack", "main");
-      // Mark feature/a as merged
+      // Old-format: write directly to branch-level config
       await runGitCommand(
         repo.dir,
         "config",
@@ -727,17 +726,28 @@ describe("getStackTree merged field", () => {
     }
   });
 
-  test("sets merged=true using setStackMerged helper", async () => {
+  test("stack-level tombstone does not duplicate when live config exists", async () => {
     const repo = await createTestRepo();
     try {
-      await addBranch(repo.dir, "feature/c", "main");
-      await setStackNode(repo.dir, "feature/c", "helper-stack", "main");
-      await setBaseBranch(repo.dir, "helper-stack", "main");
-      await setStackMerged(repo.dir, "feature/c");
+      await addBranch(repo.dir, "feature/a", "main");
+      await setStackNode(repo.dir, "feature/a", "my-stack", "main");
+      await setBaseBranch(repo.dir, "my-stack", "main");
+      // Write both old and new format
+      await runGitCommand(
+        repo.dir,
+        "config",
+        "branch.feature/a.stack-merged",
+        "true",
+      );
+      await addLandedBranch(repo.dir, "my-stack", "feature/a");
 
-      const tree = await getStackTree(repo.dir, "helper-stack");
-      const nodeC = tree.roots.find((n) => n.branch === "feature/c");
-      expect(nodeC?.merged).toBe(true);
+      const tree = await getStackTree(repo.dir, "my-stack");
+      // Should appear exactly once (live node with merged flag from branch-level)
+      const matching = getAllNodes(tree).filter(
+        (n) => n.branch === "feature/a",
+      );
+      expect(matching).toHaveLength(1);
+      expect(matching[0].merged).toBe(true);
     } finally {
       await repo.cleanup();
     }

@@ -245,18 +245,6 @@ export async function addLandedBranch(
   }
 }
 
-/**
- * @deprecated Use addLandedBranch. Branch-level stack-merged keys are
- * destroyed by `git branch -D`; stack-level landed-branches survive deletion.
- * See docs/superpowers/plans/2026-04-13-stack-level-tombstones.md.
- */
-export async function setStackMerged(
-  dir: string,
-  branch: string,
-): Promise<void> {
-  await gitConfigSet(dir, `branch.${branch}.stack-merged`, "true");
-}
-
 /** Get the base branch for a stack. Returns undefined if not set. */
 export async function getBaseBranch(
   dir: string,
