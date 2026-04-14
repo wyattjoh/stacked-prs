@@ -75,10 +75,29 @@ async function branchExists(dir: string, branch: string): Promise<boolean> {
   return code === 0;
 }
 
-async function currentBranch(dir: string): Promise<string> {
-  const { code, stdout } = await runGitCommand(dir, "branch", "--show-current");
-  if (code !== 0) return "";
-  return stdout;
+async function currentBranch(
+  dir: string,
+): Promise<
+  | { ok: true; branch: string; detached: boolean }
+  | { ok: false; message: string }
+> {
+  const { code, stdout, stderr } = await runGitCommand(
+    dir,
+    "branch",
+    "--show-current",
+  );
+  if (code !== 0) {
+    return { ok: false, message: (stderr || stdout).trim() };
+  }
+  if (!stdout) {
+    return { ok: true, branch: "", detached: true };
+  }
+  return { ok: true, branch: stdout, detached: false };
+}
+
+/** Escape a string for safe use as a literal match in a git `--get-regexp` pattern. */
+function escapeRegex(input: string): string {
+  return input.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 async function runGitOrFail(
@@ -153,15 +172,19 @@ async function addWorktree(
 }
 
 // rollbackNewBranch attempts to undo a checkout -b that succeeded before a
-// subsequent step failed. Best-effort: ignores failures so callers can return
-// their original error cleanly.
+// subsequent step failed. Reports whether the rollback was fully completed so
+// callers can surface a warning when it is only partial.
 async function rollbackNewBranch(
   dir: string,
   baseBranch: string,
   newBranch: string,
-): Promise<void> {
-  await runGitCommand(dir, "checkout", baseBranch);
-  await runGitCommand(dir, "branch", "-D", newBranch);
+): Promise<{ fullyRolledBack: boolean }> {
+  const checkout = await runGitCommand(dir, "checkout", baseBranch);
+  if (checkout.code !== 0) {
+    return { fullyRolledBack: false };
+  }
+  const del = await runGitCommand(dir, "branch", "-D", newBranch);
+  return { fullyRolledBack: del.code === 0 };
 }
 
 export async function planCreate(
@@ -186,8 +209,15 @@ export async function planCreate(
     };
   }
 
-  const current = await currentBranch(dir);
-  if (!current) {
+  const currentResult = await currentBranch(dir);
+  if (!currentResult.ok) {
+    return {
+      ok: false,
+      error: "git-failed",
+      message: currentResult.message,
+    };
+  }
+  if (currentResult.detached) {
     return {
       ok: false,
       error: "not-on-stack",
@@ -195,6 +225,7 @@ export async function planCreate(
         "not on a branch (detached HEAD); run `init` or switch to a stack branch",
     };
   }
+  const current = currentResult.branch;
 
   const currentStack = await gitConfig(
     dir,
@@ -280,7 +311,7 @@ export async function planCreate(
     dir,
     "config",
     "--get-regexp",
-    `^stack\\.${stackName.replace(/\./g, "\\.")}\\.`,
+    `^stack\\.${escapeRegex(stackName)}\\.`,
   );
   if (existingStack.code === 0 && existingStack.stdout) {
     return {
@@ -295,6 +326,19 @@ export async function planCreate(
   const worktreePath = worktreeCase
     ? join(opts.createWorktree!, opts.branch)
     : undefined;
+
+  if (worktreeCase && worktreePath) {
+    try {
+      await Deno.stat(worktreePath);
+      return {
+        ok: false,
+        error: "worktree-exists",
+        message: `worktree path already exists: ${worktreePath}`,
+      };
+    } catch {
+      // Does not exist — good.
+    }
+  }
 
   return {
     ok: true,
@@ -403,14 +447,28 @@ export async function executeCreate(
 
       const commit = await attemptCommit(dir, opts.message);
       if (!commit.ok) {
-        await rollbackNewBranch(dir, plan.baseBranch, plan.branch);
-        return { ok: false, error: commit.error, message: commit.message };
+        const rb = await rollbackNewBranch(dir, plan.baseBranch, plan.branch);
+        const suffix = rb.fullyRolledBack
+          ? ""
+          : ` (rollback incomplete; run \`cli.ts clean\` to tidy up)`;
+        return {
+          ok: false,
+          error: commit.error,
+          message: commit.message + suffix,
+        };
       }
 
       const back = await runGitOrFail(dir, "checkout", "-");
       if (!back.ok) {
-        await rollbackNewBranch(dir, plan.baseBranch, plan.branch);
-        return { ok: false, error: "git-failed", message: back.message };
+        const rb = await rollbackNewBranch(dir, plan.baseBranch, plan.branch);
+        const suffix = rb.fullyRolledBack
+          ? ""
+          : ` (rollback incomplete; run \`cli.ts clean\` to tidy up)`;
+        return {
+          ok: false,
+          error: "git-failed",
+          message: back.message + suffix,
+        };
       }
 
       const wtAdd = await addWorktree(
@@ -419,8 +477,15 @@ export async function executeCreate(
         plan.branch,
       );
       if (!wtAdd.ok) {
-        await rollbackNewBranch(dir, plan.baseBranch, plan.branch);
-        return { ok: false, error: wtAdd.error, message: wtAdd.message };
+        const rb = await rollbackNewBranch(dir, plan.baseBranch, plan.branch);
+        const suffix = rb.fullyRolledBack
+          ? ""
+          : ` (rollback incomplete; run \`cli.ts clean\` to tidy up)`;
+        return {
+          ok: false,
+          error: wtAdd.error,
+          message: wtAdd.message + suffix,
+        };
       }
     } else {
       const wtAdd = await addWorktree(

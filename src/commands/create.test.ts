@@ -277,6 +277,20 @@ describe("create — case 2 (auto-init in-repo)", () => {
     expect(result.ok).toBe(false);
     expect(result.error).toBe("nothing-staged");
   });
+
+  test("pre-check: rejects stack names with regex metacharacters that would collide", async () => {
+    // Write a stack named "foo"; then try to create with --stack-name "f.o"
+    // which previously would have regex-matched "foo".
+    await runGit(repo.dir, "config", "stack.foo.base-branch", "main");
+
+    const result = await create(repo.dir, {
+      branch: "feat/a",
+      stackName: "f.o",
+    });
+    // With regex escape, "f.o" is a distinct literal name and succeeds.
+    expect(result.ok).toBe(true);
+    expect(result.plan?.stackName).toBe("f.o");
+  });
 });
 
 describe("create — case 3 (auto-init worktree)", () => {
@@ -377,6 +391,27 @@ describe("create — case 3 (auto-init worktree)", () => {
     });
     expect(result.ok).toBe(false);
     expect(result.error).toBe("worktree-exists");
+  });
+
+  test("pre-check rejects existing worktree path before any git mutation", async () => {
+    await Deno.mkdir(`${worktreeRoot}/feat/a`, { recursive: true });
+
+    const result = await create(repo.dir, {
+      branch: "feat/a",
+      createWorktree: worktreeRoot,
+    });
+    expect(result.ok).toBe(false);
+    expect(result.error).toBe("worktree-exists");
+
+    // No new branch created.
+    const probe = await runGit(
+      repo.dir,
+      "rev-parse",
+      "--verify",
+      "--quiet",
+      "refs/heads/feat/a",
+    ).catch(() => "");
+    expect(probe).toBe("");
   });
 
   test("rejects -m when nothing is staged (leaves repo on base, no new branch)", async () => {
