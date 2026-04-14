@@ -1,5 +1,43 @@
 # Changelog
 
+## [1.4.0](https://github.com/wyattjoh/stacked-prs/compare/stacked-prs-v1.3.1...stacked-prs-v1.4.0) (2026-04-14)
+
+
+### Features
+
+* **clean:** flag legacy stack-merged on live branches ([2ff4bfb](https://github.com/wyattjoh/stacked-prs/commit/2ff4bfb5bf6428809549291b7146d037799d7909))
+* **cli:** wire up create subcommand with TTY prompt ([2150223](https://github.com/wyattjoh/stacked-prs/commit/2150223a35b3bf949a5fccc05bef4dc8b8b0b394))
+* **config:** propagate tombstones to split stacks and clean up original ([a29c38d](https://github.com/wyattjoh/stacked-prs/commit/a29c38df12e14e14e53dfeb6ec480344b2b493ee))
+* **config:** write stack-level tombstone in configLandCleanup ([03fb5f9](https://github.com/wyattjoh/stacked-prs/commit/03fb5f90243505e95e0a10a1ff03b215b86d6960))
+* **create:** implement case 1 (child in existing stack) ([ad15756](https://github.com/wyattjoh/stacked-prs/commit/ad15756f232a286e10a625e015903975956b994d))
+* **create:** implement case 2 (auto-init in-repo) ([6b59b0c](https://github.com/wyattjoh/stacked-prs/commit/6b59b0c827e711e57295a4e54884c0766ab7406e))
+* **create:** implement case 3 (auto-init worktree) ([59ae127](https://github.com/wyattjoh/stacked-prs/commit/59ae12773430c4fc5d6de17c0a71d8771e8a6540))
+* **create:** include executed commands in --dry-run output and SKILL flow ([ad03736](https://github.com/wyattjoh/stacked-prs/commit/ad03736d64903918bfc096cfe86603ccc8ff89b3))
+* **create:** scaffold command types and stub entry points ([0868555](https://github.com/wyattjoh/stacked-prs/commit/0868555914d43a988d5bfbc070c18348431f3544))
+* **land:** add isBranchAutoMerged helper and autoMerged resume field ([057be4b](https://github.com/wyattjoh/stacked-prs/commit/057be4b0e052aedab12746f3b2defd2148fa7020))
+* **land:** close PR and skip retarget for auto-merged CLI branches ([6f766d7](https://github.com/wyattjoh/stacked-prs/commit/6f766d70a2a41d95b6f9972675ce2dd75b9e0f92))
+* **land:** delete and tombstone auto-merged branches in CLI path ([9f2be30](https://github.com/wyattjoh/stacked-prs/commit/9f2be30d20e3552c396b3db83677cddfd73431d2))
+* **land:** detect auto-merged branches in CLI rebase loop ([a447d70](https://github.com/wyattjoh/stacked-prs/commit/a447d70a07c9de0140a91601209f15d359fb568c))
+* **land:** skip push for auto-merged branches in CLI path ([0a591c9](https://github.com/wyattjoh/stacked-prs/commit/0a591c916a13474dea959c44b53b964abb0b98c2))
+* **land:** surface auto-merged branches in CLI result ([fd7bcbc](https://github.com/wyattjoh/stacked-prs/commit/fd7bcbcaed804346d64bb1498f807915b6a27928))
+* **lib:** add detectDefaultBranch helper ([2e380e7](https://github.com/wyattjoh/stacked-prs/commit/2e380e7876def73ecc80b67f6c68b5b00b71947d))
+* **stack:** add addLandedBranch and getLandedBranches helpers ([26a8917](https://github.com/wyattjoh/stacked-prs/commit/26a8917e7600d93773b09606e0529d615fd97d36))
+* **stack:** reconstruct merged roots from stack-level tombstones in getStackTree ([ac6a741](https://github.com/wyattjoh/stacked-prs/commit/ac6a741ac9b26ba97dce95c70e619ed77dc86c93))
+
+
+### Bug Fixes
+
+* **land:** clear landed-branches config in all-merged cleanup paths ([e9c091f](https://github.com/wyattjoh/stacked-prs/commit/e9c091feb16ef70fa4b520393b18506192fbccf0))
+* **land:** close crash window between rebase complete and auto-merge flag ([ba1ca7f](https://github.com/wyattjoh/stacked-prs/commit/ba1ca7fd5ea1d0ce693b42db7d47ceb742a592cb))
+* **land:** match TUI auto-merged semantics against rebase target ([d6f8683](https://github.com/wyattjoh/stacked-prs/commit/d6f868395d3d687d1c1b955c3d30cd64f43f5d80))
+* **land:** re-check auto-merged on pre-migration resume state ([5cbf749](https://github.com/wyattjoh/stacked-prs/commit/5cbf7490b700909268fd092f1a02b75f32889943))
+* **land:** tombstone before delete and gate on branch -D exit ([36c0a7b](https://github.com/wyattjoh/stacked-prs/commit/36c0a7b239614c256aff7e14bb7f3145586e9cb7))
+* **land:** tombstone before delete in TUI executor ([2ae0154](https://github.com/wyattjoh/stacked-prs/commit/2ae0154e84b05969d2176d8a79ab3c26c9c29c3e))
+* **land:** tombstone deleted branches in CLI root-merged path ([16ded69](https://github.com/wyattjoh/stacked-prs/commit/16ded69cfdca110eabf5c6d999361d1aefd3d972))
+* **land:** tombstone every deleted branch in case A cleanup loop ([acb6401](https://github.com/wyattjoh/stacked-prs/commit/acb6401c09ec79430841a719109eb0c7cb2eaf5b))
+* **land:** wrap auto-merged PR close in try/catch with resume guidance ([e679183](https://github.com/wyattjoh/stacked-prs/commit/e6791835fce47bc092b913da41b073d912d2aff0))
+* **stack:** throw on addLandedBranch failure, expand tests and deprecation notice ([36375cd](https://github.com/wyattjoh/stacked-prs/commit/36375cd1e41da5d7a856b4a44f3db03e9afb22fd))
+
 ## [1.3.1](https://github.com/wyattjoh/stacked-prs/compare/stacked-prs-v1.3.0...stacked-prs-v1.3.1) (2026-04-13)
 
 
