@@ -12,6 +12,12 @@ import { discoverChain } from "./commands/import-discover.ts";
 import { computeSubmitPlan } from "./commands/submit-plan.ts";
 import { applyClean, detectStaleConfig } from "./commands/clean.ts";
 import {
+  create as createBranch,
+  type CreatePlan,
+  planCreate,
+} from "./commands/create.ts";
+import { type MergeStrategy } from "./lib/stack.ts";
+import {
   executeLandFromCli,
   type LandCliResult,
   planLand,
@@ -48,6 +54,22 @@ async function resolveStackName(
   }
 
   return stackName;
+}
+
+function renderCreatePlan(plan: CreatePlan): string {
+  const lines = [
+    `Plan: ${plan.case}`,
+    `  branch:         ${plan.branch}`,
+    `  parent:         ${plan.parent}`,
+    `  base branch:    ${plan.baseBranch}`,
+    `  stack name:     ${plan.stackName}`,
+    `  merge strategy: ${plan.mergeStrategy}`,
+    `  commit staged:  ${plan.willCommit ? "yes" : "no"}`,
+  ];
+  if (plan.worktreePath) {
+    lines.push(`  worktree:       ${plan.worktreePath}`);
+  }
+  return lines.join("\n");
 }
 
 const dir = Deno.cwd();
@@ -228,6 +250,103 @@ await new Command()
     } else {
       console.log(status.display);
     }
+  })
+  // --- create ---
+  .command("create <branch:string>", "Create a new branch in the stack")
+  .option(
+    "-m, --message <msg:string>",
+    "Commit staged changes onto the new branch",
+  )
+  .option(
+    "--create-worktree <dir:string>",
+    "Place the new branch in a worktree at <dir>/<branch> (base branch only)",
+  )
+  .option("--stack-name <name:string>", "Auto-init only: stack name")
+  .option(
+    "--merge-strategy <strategy:string>",
+    "Auto-init only: merge or squash",
+  )
+  .option("--force", "Skip the TTY confirmation prompt")
+  .option("--dry-run", "Print plan without touching git or config")
+  .option("--json", "Output as JSON")
+  .action(async (options, branch: string) => {
+    const mergeStrategy: MergeStrategy | undefined =
+      options.mergeStrategy === "merge" || options.mergeStrategy === "squash"
+        ? options.mergeStrategy
+        : undefined;
+    if (options.mergeStrategy !== undefined && mergeStrategy === undefined) {
+      console.error(
+        `invalid --merge-strategy: expected "merge" or "squash", got "${options.mergeStrategy}"`,
+      );
+      Deno.exit(1);
+    }
+
+    const baseOpts = {
+      branch,
+      message: options.message,
+      createWorktree: options.createWorktree,
+      stackName: options.stackName,
+      mergeStrategy,
+    };
+
+    if (options.dryRun) {
+      const result = await planCreate(dir, baseOpts);
+      if (options.json) {
+        console.log(
+          JSON.stringify(
+            {
+              ok: result.ok,
+              dryRun: true,
+              plan: result.plan,
+              error: result.error,
+              message: result.message,
+            },
+            null,
+            2,
+          ),
+        );
+      } else if (result.ok && result.plan) {
+        console.log(renderCreatePlan(result.plan));
+      } else {
+        console.error(`${result.error}: ${result.message ?? ""}`);
+      }
+      if (!result.ok) Deno.exit(1);
+      return;
+    }
+
+    const plan = await planCreate(dir, baseOpts);
+    if (!plan.ok || !plan.plan) {
+      if (options.json) {
+        console.log(JSON.stringify(plan, null, 2));
+      } else {
+        console.error(`${plan.error}: ${plan.message ?? ""}`);
+      }
+      Deno.exit(1);
+    }
+
+    if (!options.force && Deno.stdin.isTerminal()) {
+      console.log(renderCreatePlan(plan.plan));
+      const answer = prompt("Proceed? [y/N]");
+      if (answer?.trim().toLowerCase() !== "y") {
+        console.log("Aborted.");
+        return;
+      }
+    }
+
+    const result = await createBranch(dir, baseOpts);
+    if (options.json) {
+      console.log(JSON.stringify(result, null, 2));
+    } else if (result.ok && result.plan) {
+      const where = result.plan.worktreePath
+        ? ` (worktree: ${result.plan.worktreePath})`
+        : "";
+      console.log(
+        `Created ${result.plan.branch} (stack: ${result.plan.stackName}, parent: ${result.plan.parent})${where}`,
+      );
+    } else {
+      console.error(`${result.error}: ${result.message ?? ""}`);
+    }
+    if (!result.ok) Deno.exit(1);
   })
   // --- restack ---
   .command("restack", "Rebase the stack tree (no fetch, no push)")
