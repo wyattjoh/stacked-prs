@@ -652,6 +652,10 @@ async function unsetConfig(dir: string, key: string): Promise<void> {
   await runGitCommand(dir, "config", "--unset", key);
 }
 
+async function unsetAllConfig(dir: string, key: string): Promise<void> {
+  await runGitCommand(dir, "config", "--unset-all", key);
+}
+
 /**
  * If HEAD is currently a symbolic ref pointing to one of `branchesToDelete`,
  * detach it to the current commit SHA so the deletion can proceed. Has no
@@ -717,6 +721,7 @@ async function executeCaseBCleanup(
   await unsetConfig(dir, `stack.${plan.stackName}.merge-strategy`);
   await unsetConfig(dir, `stack.${plan.stackName}.base-branch`);
   await unsetConfig(dir, `stack.${plan.stackName}.resume-state`);
+  await unsetAllConfig(dir, `stack.${plan.stackName}.landed-branches`);
 
   await restoreHead(dir, plan, hooks);
 
@@ -1419,6 +1424,7 @@ export async function executeLandFromCli(
     await unsetConfig(dir, `stack.${stackName}.merge-strategy`);
     await unsetConfig(dir, `stack.${stackName}.base-branch`);
     await unsetConfig(dir, `stack.${stackName}.resume-state`);
+    await unsetAllConfig(dir, `stack.${stackName}.landed-branches`);
     await clearLandResumeState(dir, stackName);
     await restoreHead(dir, plan, {
       onProgress: () => {},

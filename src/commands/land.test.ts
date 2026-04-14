@@ -384,6 +384,14 @@ describe("executeLand case B (all-merged)", () => {
       );
       expect(baseProbe.code !== 0).toBe(true);
 
+      const landedProbe = await runGitCommand(
+        repo.dir,
+        "config",
+        "--get-all",
+        "stack.s.landed-branches",
+      );
+      expect(landedProbe.code !== 0).toBe(true);
+
       // Delete events fired leaves-first.
       const deletes = events
         .filter((e) => e.step.kind === "delete" && e.status === "ok")
