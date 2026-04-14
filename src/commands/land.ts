@@ -102,8 +102,8 @@ export interface LandResumeState {
   /**
    * Branches detected as auto-merged by patch-id after rebase. These are
    * excluded from push / pr-update and are included in the PR-close phase
-   * plus the delete loop. Added during the LOG-002 cleanup; older persisted
-   * states default to empty on load (see `loadResumeState`).
+   * plus the delete loop. Older persisted states that predate the
+   * `autoMerged` field default to empty on load.
    */
   autoMerged: string[];
   conflictedBranch?: string;
