@@ -1116,6 +1116,16 @@ async function executeCaseA(
   await detachHeadFromDeleted(dir, toDelete);
   for (const branch of toDelete) {
     emit(hooks, { kind: "delete", branch }, "running");
+
+    // Tombstone first so a crash between ref delete and config writes
+    // cannot silently drop the tombstone. Both writes are idempotent:
+    // addLandedBranch de-dupes, configLandCleanup already tombstoned
+    // mergedRoot earlier.
+    await addLandedBranch(dir, plan.stackName, branch);
+    if (branch !== mergedRoot) {
+      await removeStackBranch(dir, branch);
+    }
+
     const { code: existsCode } = await runGitCommand(
       dir,
       "rev-parse",
@@ -1131,10 +1141,6 @@ async function executeCaseA(
       emit(hooks, { kind: "delete", branch }, "failed", stderr);
       continue;
     }
-    // Record every deleted branch as a tombstone so the TUI retains history.
-    // Idempotent with the configLandCleanup write for mergedRoot.
-    await addLandedBranch(dir, plan.stackName, branch);
-    await removeStackBranch(dir, branch);
     emit(hooks, { kind: "delete", branch }, "ok");
   }
 
