@@ -368,29 +368,30 @@ export async function fetchBase(
 }
 
 /**
- * True iff `branch` has zero unique commits beyond `origin/<baseBranch>`.
- * Indicates the branch was auto-merged by patch-id against the upstream
- * base during rebase.
+ * True iff `branch` has zero unique commits beyond `target`. Used after
+ * rebasing `branch` onto `target` to detect patch-id drops: every commit
+ * was absorbed by the upstream (either the rebase target itself or a
+ * commit already reachable from it).
  *
- * Compares against `origin/<baseBranch>` specifically (not the rebased
- * parent branch as the inline TUI check does), so callers must have run
- * `fetchBase` first to guarantee `origin/<baseBranch>` resolves. Returns
- * `false` on any `rev-list` failure (missing branch, missing origin ref,
- * etc.) so a verification gap never causes a branch to be tombstoned.
+ * Returns `false` on any `rev-list` failure (missing branch, missing
+ * target ref, etc.) so a verification gap never causes a branch to be
+ * tombstoned incorrectly. Callers must ensure `target` resolves (e.g.
+ * `origin/<base>` requires a prior `fetchBase`).
  *
- * Used by `executeLandFromCli` to skip push / PR retarget and instead
- * close + delete + tombstone auto-merged branches.
+ * Used by `executeLand` and `executeLandFromCli` after each rebase step
+ * to skip push / PR retarget and instead close + delete + tombstone the
+ * branch.
  */
 export async function isBranchAutoMerged(
   dir: string,
   branch: string,
-  baseBranch: string,
+  target: string,
 ): Promise<boolean> {
   const { code, stdout } = await runGitCommand(
     dir,
     "rev-list",
     "--count",
-    `origin/${baseBranch}..${branch}`,
+    `${target}..${branch}`,
   );
   if (code !== 0) return false;
   return stdout === "0";
@@ -1515,7 +1516,7 @@ export async function executeLandFromCli(
     // during the upstream squash merge. Record them so the push and PR
     // retarget loops below skip these branches, and the cleanup loop
     // instead closes the PR, deletes the branch, and tombstones it.
-    if (await isBranchAutoMerged(dir, step.branch, plan.baseBranch)) {
+    if (await isBranchAutoMerged(dir, step.branch, step.newTarget)) {
       completed.autoMerged.push(step.branch);
     }
     await writeLandResumeState(dir, stackName, completed);

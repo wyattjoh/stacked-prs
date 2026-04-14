@@ -562,7 +562,9 @@ describe("isBranchAutoMerged", () => {
       await runGit(env.dir, "checkout", "feat/a");
       await runGit(env.dir, "rebase", "origin/main");
 
-      expect(await isBranchAutoMerged(env.dir, "feat/a", "main")).toBe(true);
+      expect(await isBranchAutoMerged(env.dir, "feat/a", "origin/main")).toBe(
+        true,
+      );
     } finally {
       await env.cleanup();
     }
