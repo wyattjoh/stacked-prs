@@ -260,3 +260,101 @@ describe("create — case 2 (auto-init in-repo)", () => {
     expect(log).toBe("add file");
   });
 });
+
+describe("create — case 3 (auto-init worktree)", () => {
+  let repo: TestRepo;
+  let worktreeRoot: string;
+
+  beforeEach(async () => {
+    repo = await createTestRepo();
+    worktreeRoot = await Deno.makeTempDir({ prefix: "stacked-prs-wt-" });
+  });
+
+  afterEach(async () => {
+    await repo.cleanup();
+    await Deno.remove(worktreeRoot, { recursive: true }).catch(() => {});
+  });
+
+  test("creates worktree without -m; main stays checked out", async () => {
+    const result = await create(repo.dir, {
+      branch: "feat/a",
+      createWorktree: worktreeRoot,
+    });
+    expect(result.ok).toBe(true);
+    expect(result.plan?.case).toBe("auto-init-worktree");
+    expect(result.plan?.worktreePath).toBe(`${worktreeRoot}/feat/a`);
+
+    expect(await runGit(repo.dir, "branch", "--show-current")).toBe("main");
+
+    const worktreeBranch = await runGit(
+      `${worktreeRoot}/feat/a`,
+      "branch",
+      "--show-current",
+    );
+    expect(worktreeBranch).toBe("feat/a");
+
+    expect(
+      await runGit(repo.dir, "config", "branch.feat/a.stack-name"),
+    ).toBe("feat/a");
+  });
+
+  test("creates worktree with -m; commit lands on new branch", async () => {
+    await Deno.writeTextFile(`${repo.dir}/staged.txt`, "hi\n");
+    await runGit(repo.dir, "add", "staged.txt");
+
+    const result = await create(repo.dir, {
+      branch: "feat/a",
+      message: "add staged",
+      createWorktree: worktreeRoot,
+    });
+    expect(result.ok).toBe(true);
+
+    expect(await runGit(repo.dir, "branch", "--show-current")).toBe("main");
+
+    const log = await runGit(
+      `${worktreeRoot}/feat/a`,
+      "log",
+      "--format=%s",
+      "-n",
+      "1",
+    );
+    expect(log).toBe("add staged");
+
+    // main never picked up the commit.
+    const mainLog = await runGit(
+      repo.dir,
+      "log",
+      "main",
+      "--format=%s",
+      "-n",
+      "1",
+    );
+    expect(mainLog).not.toBe("add staged");
+  });
+
+  test("supports branch names with slashes", async () => {
+    const result = await create(repo.dir, {
+      branch: "wyattjoh/feat/colors",
+      createWorktree: worktreeRoot,
+    });
+    expect(result.ok).toBe(true);
+    expect(result.plan?.worktreePath).toBe(
+      `${worktreeRoot}/wyattjoh/feat/colors`,
+    );
+
+    const stat = await Deno.stat(
+      `${worktreeRoot}/wyattjoh/feat/colors/README.md`,
+    );
+    expect(stat.isFile).toBe(true);
+  });
+
+  test("rejects when worktree target already exists", async () => {
+    await Deno.mkdir(`${worktreeRoot}/feat/a`, { recursive: true });
+    const result = await create(repo.dir, {
+      branch: "feat/a",
+      createWorktree: worktreeRoot,
+    });
+    expect(result.ok).toBe(false);
+    expect(result.error).toBe("worktree-exists");
+  });
+});

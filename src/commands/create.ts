@@ -216,6 +216,20 @@ export async function planCreate(
 
   const worktreeCase = opts.createWorktree !== undefined;
 
+  if (worktreeCase) {
+    const worktreePath = `${opts.createWorktree}/${opts.branch}`;
+    try {
+      await Deno.stat(worktreePath);
+      return {
+        ok: false,
+        error: "worktree-exists",
+        message: `worktree path already exists: ${worktreePath}`,
+      };
+    } catch {
+      // Does not exist — good.
+    }
+  }
+
   return {
     ok: true,
     plan: {
@@ -341,11 +355,89 @@ export async function executeCreate(
     return { ok: true, plan };
   }
 
-  // Case 3 added in the next task.
+  if (plan.case === "auto-init-worktree") {
+    if (!plan.worktreePath) {
+      return {
+        ok: false,
+        error: "git-failed",
+        message: "internal: auto-init-worktree plan missing worktreePath",
+      };
+    }
+
+    if (opts.message !== undefined) {
+      // Commit staged work on the new branch in the main worktree, then
+      // return to base and eject the new branch into its own worktree.
+      const checkout = await runGitOrFail(dir, "checkout", "-b", plan.branch);
+      if (!checkout.ok) {
+        return { ok: false, error: "git-failed", message: checkout.message };
+      }
+      const commit = await runGitCommand(dir, "commit", "-m", opts.message);
+      if (commit.code !== 0) {
+        const stderr = (commit.stderr || commit.stdout).toLowerCase();
+        if (
+          stderr.includes("nothing to commit") ||
+          stderr.includes("no changes added")
+        ) {
+          return {
+            ok: false,
+            error: "nothing-staged",
+            message: "nothing staged; stage changes before using -m",
+          };
+        }
+        return {
+          ok: false,
+          error: "git-failed",
+          message: (commit.stderr || commit.stdout).trim(),
+        };
+      }
+      const back = await runGitOrFail(dir, "checkout", "-");
+      if (!back.ok) {
+        return { ok: false, error: "git-failed", message: back.message };
+      }
+      const addWt = await runGitOrFail(
+        dir,
+        "worktree",
+        "add",
+        plan.worktreePath,
+        plan.branch,
+      );
+      if (!addWt.ok) {
+        return { ok: false, error: "git-failed", message: addWt.message };
+      }
+    } else {
+      const addWt = await runGitOrFail(
+        dir,
+        "worktree",
+        "add",
+        plan.worktreePath,
+        "-b",
+        plan.branch,
+      );
+      if (!addWt.ok) {
+        return { ok: false, error: "git-failed", message: addWt.message };
+      }
+    }
+
+    const writes: Array<[string, string]> = [
+      [`branch.${plan.branch}.stack-name`, plan.stackName],
+      [`branch.${plan.branch}.stack-parent`, plan.baseBranch],
+      [`stack.${plan.stackName}.base-branch`, plan.baseBranch],
+      [`stack.${plan.stackName}.merge-strategy`, plan.mergeStrategy],
+    ];
+    for (const [key, value] of writes) {
+      const r = await runGitOrFail(dir, "config", key, value);
+      if (!r.ok) {
+        return { ok: false, error: "git-failed", message: r.message };
+      }
+    }
+
+    return { ok: true, plan };
+  }
+
   return {
     ok: false,
     error: "git-failed",
-    message: `case ${plan.case} not yet implemented`,
+    message: `internal: unknown plan case ${plan.case}`,
   };
 }
 
