@@ -69,6 +69,11 @@ function renderCreatePlan(plan: CreatePlan): string {
   if (plan.worktreePath) {
     lines.push(`  worktree:       ${plan.worktreePath}`);
   }
+  lines.push("");
+  lines.push("Commands:");
+  for (const cmd of plan.commands) {
+    lines.push(`  ${cmd}`);
+  }
   return lines.join("\n");
 }
 

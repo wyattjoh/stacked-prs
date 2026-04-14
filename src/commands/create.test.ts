@@ -183,6 +183,23 @@ describe("create — case 1 (child in existing stack)", () => {
     expect(result.error).toBe("not-on-stack");
   });
 
+  test("plan includes commands for child case", async () => {
+    await using repo = await createTestRepo();
+    await setupStackOnFeatA(repo.dir);
+
+    const result = await planCreate(repo.dir, {
+      branch: "feat/b",
+      message: "hi",
+    });
+    expect(result.ok).toBe(true);
+    expect(result.plan?.commands).toEqual([
+      "git checkout -b feat/b",
+      "git commit -m hi",
+      "git config branch.feat/b.stack-name my-stack",
+      "git config branch.feat/b.stack-parent feat/a",
+    ]);
+  });
+
   test("dry-run does not mutate", async () => {
     await using repo = await createTestRepo();
     await setupStackOnFeatA(repo.dir);
@@ -295,6 +312,23 @@ describe("create — case 2 (auto-init in-repo)", () => {
     expect(result.error).toBe("nothing-staged");
   });
 
+  test("plan includes commands for auto-init case", async () => {
+    await using repo = await createTestRepo();
+    const result = await planCreate(repo.dir, {
+      branch: "feat/a",
+      stackName: "my-stack",
+      mergeStrategy: "squash",
+    });
+    expect(result.ok).toBe(true);
+    expect(result.plan?.commands).toEqual([
+      "git checkout -b feat/a",
+      "git config branch.feat/a.stack-name my-stack",
+      "git config branch.feat/a.stack-parent main",
+      "git config stack.my-stack.base-branch main",
+      "git config stack.my-stack.merge-strategy squash",
+    ]);
+  });
+
   test("pre-check: rejects stack names with regex metacharacters that would collide", async () => {
     await using repo = await createTestRepo();
 
@@ -393,6 +427,29 @@ describe("create — case 3 (auto-init worktree)", () => {
       `${wt.path}/wyattjoh/feat/colors/README.md`,
     );
     expect(stat.isFile).toBe(true);
+  });
+
+  test("plan includes commands for auto-init-worktree case with -m", async () => {
+    await using repo = await createTestRepo();
+    await using wt = await makeTempDir("stacked-prs-wt-");
+
+    const result = await planCreate(repo.dir, {
+      branch: "feat/a",
+      message: "init",
+      createWorktree: wt.path,
+    });
+    expect(result.ok).toBe(true);
+    const expectedPath = `${wt.path}/feat/a`;
+    expect(result.plan?.commands).toEqual([
+      "git checkout -b feat/a",
+      "git commit -m init",
+      "git checkout -",
+      `git worktree add ${expectedPath} feat/a`,
+      "git config branch.feat/a.stack-name feat/a",
+      "git config branch.feat/a.stack-parent main",
+      "git config stack.feat/a.base-branch main",
+      "git config stack.feat/a.merge-strategy merge",
+    ]);
   });
 
   test("rejects when worktree target already exists (non-empty dir)", async () => {

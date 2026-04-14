@@ -27,6 +27,8 @@ export interface CreatePlan {
   mergeStrategy: MergeStrategy;
   willCommit: boolean;
   worktreePath?: string;
+  /** The literal git commands that will execute in order. For display only. */
+  commands: string[];
 }
 
 export type CreateError =
@@ -187,6 +189,68 @@ async function rollbackNewBranch(
   return { fullyRolledBack: del.code === 0 };
 }
 
+function shellQuote(arg: string): string {
+  // Conservative: quote anything containing chars that would matter in a
+  // copy-paste shell invocation. Simple single-quote strategy with escape.
+  if (/^[A-Za-z0-9._/@:=+-]+$/.test(arg)) return arg;
+  return `'${arg.replace(/'/g, "'\\''")}'`;
+}
+
+function gitCmd(...args: string[]): string {
+  return ["git", ...args.map(shellQuote)].join(" ");
+}
+
+function commandsForPlan(
+  plan: Omit<CreatePlan, "commands">,
+  message: string | undefined,
+): string[] {
+  const cmds: string[] = [];
+
+  if (plan.case === "child" || plan.case === "auto-init") {
+    cmds.push(gitCmd("checkout", "-b", plan.branch));
+    if (message !== undefined) {
+      cmds.push(gitCmd("commit", "-m", message));
+    }
+  } else if (plan.case === "auto-init-worktree") {
+    if (message !== undefined) {
+      cmds.push(gitCmd("checkout", "-b", plan.branch));
+      cmds.push(gitCmd("commit", "-m", message));
+      cmds.push(gitCmd("checkout", "-"));
+      cmds.push(gitCmd("worktree", "add", plan.worktreePath!, plan.branch));
+    } else {
+      cmds.push(
+        gitCmd("worktree", "add", plan.worktreePath!, "-b", plan.branch),
+      );
+    }
+  }
+
+  cmds.push(
+    gitCmd("config", `branch.${plan.branch}.stack-name`, plan.stackName),
+  );
+  cmds.push(
+    gitCmd("config", `branch.${plan.branch}.stack-parent`, plan.parent),
+  );
+
+  if (plan.case !== "child") {
+    cmds.push(
+      gitCmd(
+        "config",
+        `stack.${plan.stackName}.base-branch`,
+        plan.baseBranch,
+      ),
+    );
+    cmds.push(
+      gitCmd(
+        "config",
+        `stack.${plan.stackName}.merge-strategy`,
+        plan.mergeStrategy,
+      ),
+    );
+  }
+
+  return cmds;
+}
+
 export async function planCreate(
   dir: string,
   opts: CreateBranchOptions,
@@ -267,16 +331,21 @@ export async function planCreate(
       };
     }
 
+    const childPlan: Omit<CreatePlan, "commands"> = {
+      case: "child",
+      branch: opts.branch,
+      parent: current,
+      baseBranch,
+      stackName: currentStack,
+      mergeStrategy: strategy,
+      willCommit: opts.message !== undefined,
+    };
+
     return {
       ok: true,
       plan: {
-        case: "child",
-        branch: opts.branch,
-        parent: current,
-        baseBranch,
-        stackName: currentStack,
-        mergeStrategy: strategy,
-        willCommit: opts.message !== undefined,
+        ...childPlan,
+        commands: commandsForPlan(childPlan, opts.message),
       },
     };
   }
@@ -340,17 +409,22 @@ export async function planCreate(
     }
   }
 
+  const partialPlan: Omit<CreatePlan, "commands"> = {
+    case: worktreeCase ? "auto-init-worktree" : "auto-init",
+    branch: opts.branch,
+    parent: defaultBranch,
+    baseBranch: defaultBranch,
+    stackName,
+    mergeStrategy,
+    willCommit: opts.message !== undefined,
+    worktreePath,
+  };
+
   return {
     ok: true,
     plan: {
-      case: worktreeCase ? "auto-init-worktree" : "auto-init",
-      branch: opts.branch,
-      parent: defaultBranch,
-      baseBranch: defaultBranch,
-      stackName,
-      mergeStrategy,
-      willCommit: opts.message !== undefined,
-      worktreePath,
+      ...partialPlan,
+      commands: commandsForPlan(partialPlan, opts.message),
     },
   };
 }

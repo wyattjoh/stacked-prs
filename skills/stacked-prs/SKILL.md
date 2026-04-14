@@ -164,7 +164,7 @@ Discover and register an existing chain of branches/PRs as a stack.
 
 ### `create`
 
-Create a new child branch off the current branch. Backed by
+Create a new branch in the stack off the current branch. Backed by
 `cli.ts create <branch>`.
 
 **Before invoking**, apply the independent-branch rule from "Building
@@ -172,15 +172,15 @@ Review-Ready Stacks": confirm the new branch's intended scope is self-contained
 and would not leave the current (parent) branch in a CI-failing state. If the
 user's plan would violate the rule, flag it and suggest a better split.
 
-Invoke the CLI:
-
-```bash
-deno run --allow-run=git,gh --allow-env --allow-read --allow-write \
-  ${CLAUDE_PLUGIN_ROOT}/src/cli.ts create <branch> \
-  [-m <message>] [--create-worktree <dir>] \
-  [--stack-name <name>] [--merge-strategy merge|squash] \
-  [--force] [--dry-run] [--json]
-```
+1. Run `cli.ts create <branch> --dry-run [flags]` to compute the plan. The
+   output lists the resolved case (child / auto-init / auto-init-worktree) and
+   the literal git commands that will run.
+2. **Present plan:** show the user the case, resolved parent / stack name /
+   merge strategy / worktree path (if any), and the exact commands the execution
+   step will run.
+3. **Wait for confirmation.**
+4. Run `cli.ts create <branch> --force [flags]` to apply. `--force` skips the
+   CLI's own TTY prompt since confirmation is already gated above.
 
 The CLI resolves the create case automatically:
 
@@ -192,7 +192,15 @@ The CLI resolves the create case automatically:
   worktree at `<dir>/<branch>` and the current repo stays on the base branch.
   Only valid from the base branch.
 
-Pass `--force` to skip the CLI's TTY confirmation prompt.
+Full invocation:
+
+```bash
+deno run --allow-run=git,gh --allow-env --allow-read --allow-write \
+  ${CLAUDE_PLUGIN_ROOT}/src/cli.ts create <branch> \
+  [-m <message>] [--create-worktree <dir>] \
+  [--stack-name <name>] [--merge-strategy merge|squash] \
+  [--force] [--dry-run] [--json]
+```
 
 ### `insert`
 
@@ -640,6 +648,7 @@ command.
 - `deno run ... cli.ts verify-refs`
 - `deno run ... cli.ts restack --dry-run` (with or without `--json`)
 - `deno run ... cli.ts clean --json` (report-only; `--force` mutates)
+- `deno run ... cli.ts create --dry-run` (with or without `--json`)
 - `deno run ... cli.ts land --dry-run` (with or without `--json`)
 
 **If the plan changes mid-execution** (e.g., rebase conflicts), pause and
@@ -727,8 +736,9 @@ deno run --allow-run=git,gh --allow-env --allow-read --allow-write ${CLAUDE_PLUG
 
 Creates a new branch in the stack off the current branch. Auto-resolves between
 child-in-stack, auto-init, and auto-init-with-worktree based on the current
-branch's git config. Prints a plan and prompts on TTY unless `--force` is
-passed. `--dry-run` reports the plan without mutating anything.
+branch's git config. Prints a plan (including the literal git commands that
+would run) and prompts on TTY unless `--force` is passed. `--dry-run` reports
+the plan without mutating anything.
 
 ### `import-discover`
 
