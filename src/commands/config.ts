@@ -1,10 +1,12 @@
 import {
   addLandedBranch,
   getAllNodes,
+  getLandedBranches,
   getMergeStrategy,
   getStackTree,
   type MergeStrategy,
   removeStackBranch,
+  runGitCommand,
   setBaseBranch,
   setMergeStrategy,
   setStackNode,
@@ -110,6 +112,16 @@ export async function configSplitStack(
     }
   }
 
+  // Copy tombstones from the original stack into every new split stack.
+  // Each split is a logical continuation of the pre-land stack and should
+  // display the same merge history.
+  const tombstones = await getLandedBranches(dir, stackName);
+  for (const split of splits) {
+    for (const branch of tombstones) {
+      await addLandedBranch(dir, split.stackName, branch);
+    }
+  }
+
   // Remove stack metadata only from live nodes (merged nodes stay in original stack)
   const liveNodes = [...nodeByBranch.values()].filter((n) => !n.merged);
   for (const node of liveNodes) {
@@ -124,7 +136,32 @@ export async function configSplitStack(
     }
   }
 
+  // Fully unset the original stack's config so it does not linger as an
+  // orphan that `clean` would detect as empty.
+  await unsetStackConfig(dir, stackName);
+
   return splits;
+}
+
+async function unsetStackConfig(
+  dir: string,
+  stackName: string,
+): Promise<void> {
+  const keys = [
+    `stack.${stackName}.base-branch`,
+    `stack.${stackName}.merge-strategy`,
+    `stack.${stackName}.resume-state`,
+  ];
+  for (const key of keys) {
+    await runGitCommand(dir, "config", "--unset", key);
+  }
+  // landed-branches is multi-value, use --unset-all
+  await runGitCommand(
+    dir,
+    "config",
+    "--unset-all",
+    `stack.${stackName}.landed-branches`,
+  );
 }
 
 export interface InsertBranchOpts {

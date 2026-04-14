@@ -6,6 +6,7 @@ import {
   getAllNodes,
   getMergeStrategy,
   getStackTree,
+  gitConfig,
   runGitCommand,
   setBaseBranch,
   setStackNode,
@@ -442,6 +443,46 @@ describe("config", () => {
         const nodes = getAllNodes(tree);
         expect(nodes[0].parent).toBe("main");
       }
+    });
+
+    test("copies tombstones to each new split stack", async () => {
+      // Tree: main -> feature/a (will be tombstoned) -> feature/b, -> feature/c
+      await addBranch(repo.dir, "feature/a", "main");
+      await addBranch(repo.dir, "feature/b", "feature/a");
+      await addBranch(repo.dir, "feature/c", "feature/a");
+
+      await setBaseBranch(repo.dir, "multi", "main");
+      await setStackNode(repo.dir, "feature/a", "multi", "main");
+      await setStackNode(repo.dir, "feature/b", "multi", "feature/a");
+      await setStackNode(repo.dir, "feature/c", "multi", "feature/a");
+
+      // Reparent feature/b and feature/c to main to simulate post-land state
+      await setStackNode(repo.dir, "feature/b", "multi", "main");
+      await setStackNode(repo.dir, "feature/c", "multi", "main");
+      // feature/a is tombstoned, no longer a live node
+      const { removeStackBranch, addLandedBranch, getLandedBranches } =
+        await import("../lib/stack.ts");
+      await removeStackBranch(repo.dir, "feature/a");
+      await addLandedBranch(repo.dir, "multi", "feature/a");
+
+      const result = await configSplitStack(repo.dir, "multi");
+
+      expect(result).toHaveLength(2);
+      const stackNames = result.map((s) => s.stackName);
+      expect(stackNames).toContain("b");
+      expect(stackNames).toContain("c");
+
+      // Each new split stack should have feature/a in its tombstones
+      for (const name of stackNames) {
+        const landed = await getLandedBranches(repo.dir, name);
+        expect(landed).toEqual(["feature/a"]);
+      }
+
+      // Original stack's config must be fully unset
+      const origLanded = await getLandedBranches(repo.dir, "multi");
+      expect(origLanded).toEqual([]);
+      const origBase = await gitConfig(repo.dir, "stack.multi.base-branch");
+      expect(origBase).toBeUndefined();
     });
   });
 });
