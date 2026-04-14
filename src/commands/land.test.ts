@@ -446,6 +446,79 @@ describe("executeLand case B (all-merged)", () => {
   });
 });
 
+describe("executeLand case A tombstone integration", () => {
+  it("preserves merged root as tombstone after executeLand", async () => {
+    const env = await createRepoWithOrigin();
+    try {
+      await addBranch(env.dir, "feat/a", "main");
+      await runGit(env.dir, "push", "origin", "feat/a");
+      await addBranch(env.dir, "feat/b", "feat/a");
+      await runGit(env.dir, "push", "origin", "feat/b");
+      await initStack(env, "s", [
+        ["feat/a", "main"],
+        ["feat/b", "feat/a"],
+      ]);
+
+      // Merge feat/a into main on origin so land can detect it as merged.
+      await runGit(env.dir, "checkout", "main");
+      await runGit(env.dir, "merge", "feat/a", "--no-ff", "-m", "Merge feat/a");
+      await runGit(env.dir, "push", "origin", "main");
+      await runGit(env.dir, "fetch", "origin", "main");
+
+      const prStates: PrStateByBranch = new Map([
+        ["feat/a", "MERGED"],
+        ["feat/b", "OPEN"],
+      ]);
+      const prInfo = new Map<string, PrInfo>([
+        ["feat/b", { number: 20, url: "", state: "OPEN", isDraft: true }],
+      ]);
+
+      const mockDir = await Deno.makeTempDir();
+      setMockDir(mockDir);
+      await writeFixture(mockDir, ["repo", "view"], {
+        owner: { login: "acme" },
+        name: "widgets",
+      });
+
+      try {
+        const plan = await planLand(env.dir, "s", prStates, prInfo);
+        await executeLand(env.dir, plan, {
+          onProgress: () => {},
+          freshPrStates: () => Promise.resolve(prStates),
+        });
+      } finally {
+        setMockDir(undefined);
+      }
+
+      // feat/a local branch must be gone.
+      const probe = await runGitCommand(
+        env.dir,
+        "rev-parse",
+        "--verify",
+        "refs/heads/feat/a",
+      );
+      expect(probe.code !== 0).toBe(true);
+
+      // getStackTree must reconstruct feat/a as a merged root tombstone.
+      const tree = await getStackTree(env.dir, "s");
+      const tombstone = tree.roots.find((n) =>
+        n.branch === "feat/a" && n.merged === true
+      );
+      expect(tombstone).toBeDefined();
+      expect(tombstone!.parent).toBe("main");
+      expect(tombstone!.children).toEqual([]);
+
+      // feat/b must be a live root reparented to main.
+      const liveB = tree.roots.find((n) => n.branch === "feat/b" && !n.merged);
+      expect(liveB).toBeDefined();
+      expect(liveB!.parent).toBe("main");
+    } finally {
+      await env.cleanup();
+      setMockDir(undefined);
+    }
+  });
+});
+
 describe("fetchBase", () => {
   it("throws a clear error when origin has no base branch", async () => {
     const repo = await createTestRepo();
