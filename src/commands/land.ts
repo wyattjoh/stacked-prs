@@ -201,6 +201,13 @@ import { topologicalOrder } from "./restack.ts";
 import { configLandCleanup } from "./config.ts";
 import { buildNavPlan, executeNavAction } from "./nav.ts";
 
+/**
+ * Comment posted by both `executeLand` and `executeLandFromCli` when
+ * closing a PR whose branch was auto-merged by patch-id during rebase.
+ */
+const AUTO_MERGED_CLOSE_COMMENT =
+  "auto-merged during stack land: every commit was already upstream";
+
 export async function isShallowRepository(dir: string): Promise<boolean> {
   const { code, stdout } = await runGitCommand(
     dir,
@@ -1193,7 +1200,7 @@ async function executeCaseAPrCloses(
         "close",
         String(update.prNumber),
         "--comment",
-        "auto-merged during stack land: every commit was already upstream",
+        AUTO_MERGED_CLOSE_COMMENT,
       );
       state.prClosed.add(update.prNumber);
       emit(hooks, { kind: "pr-close", branch: update.branch }, "ok");
