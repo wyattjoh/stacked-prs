@@ -463,7 +463,7 @@ Deno.test({
       stdout.cols = 50;
       stdout.rowsN = 18;
       stdout.emit("resize");
-      await new Promise((r) => setTimeout(r, 100));
+      await new Promise((r) => setTimeout(r, 500));
 
       const { stackMap, detailHeader } = regions(
         stripAnsi(latestFrame(stdout)),
