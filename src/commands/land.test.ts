@@ -341,6 +341,46 @@ describe("previewLandCleanup", () => {
   });
 });
 
+describe("tombstone survives branch deletion", () => {
+  it("landed branch appears in tree after git branch -D", async () => {
+    const repo = await createTestRepo();
+    try {
+      await addBranch(repo.dir, "feat/a", "main");
+      await addBranch(repo.dir, "feat/b", "feat/a");
+      await initStack(repo, "s", [["feat/a", "main"], ["feat/b", "feat/a"]]);
+
+      // Simulate what executeLand case A does:
+      // 1. configLandCleanup (writes tombstone, reparents children, removes merged branch config)
+      const { configLandCleanup } = await import("./config.ts");
+      await configLandCleanup(repo.dir, "s", "feat/a");
+
+      // 2. Delete the branch (destroys any remaining branch.<name>.* config)
+      await runGitCommand(repo.dir, "checkout", "main");
+      await runGitCommand(repo.dir, "branch", "-D", "feat/a");
+
+      // 3. Remove remaining branch config (mirrors removeStackBranch in executeLand)
+      const { removeStackBranch } = await import("../lib/stack.ts");
+      await removeStackBranch(repo.dir, "feat/a");
+
+      // Tree should still contain feat/a as a merged root
+      const tree = await getStackTree(repo.dir, "s");
+      const nodeA = tree.roots.find((n) => n.branch === "feat/a");
+      expect(nodeA).toBeDefined();
+      expect(nodeA!.merged).toBe(true);
+      expect(nodeA!.parent).toBe("main");
+      expect(nodeA!.children).toEqual([]);
+
+      // feat/b should be a live root reparented to main
+      const nodeB = tree.roots.find((n) => n.branch === "feat/b");
+      expect(nodeB).toBeDefined();
+      expect(nodeB!.merged).toBeUndefined();
+      expect(nodeB!.parent).toBe("main");
+    } finally {
+      await repo.cleanup();
+    }
+  });
+});
+
 describe("executeLand case B (all-merged)", () => {
   it("deletes every branch and clears stack config", async () => {
     const repo = await createTestRepo();
