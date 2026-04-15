@@ -225,7 +225,7 @@ insert <new-branch> --child <selected>`.
 4. Run `cli.ts insert <new-branch> --child <selected> --force` to apply.
 5. If the user has staged changes they want on the new branch, offer to commit
    them (the CLI itself just creates the branch).
-6. Suggest `sync --upstack-from=<new-branch>` once commits exist.
+6. Suggest `restack --upstack-from=<new-branch>` once commits exist.
 
 Full invocation:
 
@@ -255,7 +255,7 @@ Original branch keeps earlier commits; new branch above gets later commits.
    children will be reparented to the new upper branch).
 4. **Wait for confirmation.**
 5. Run `cli.ts split ... --force` to apply.
-6. Suggest `sync --upstack-from=<new-branch>` if the original had children.
+6. Suggest `restack --upstack-from=<new-branch>` if the original had children.
 
 #### `--by-file`
 
@@ -272,7 +272,8 @@ commit on the original.
 3. **Present plan:** extracted files, remainder files, parent/child rewiring.
 4. **Wait for confirmation.**
 5. Run `cli.ts split ... --force`.
-6. Suggest `sync --upstack-from=<original-branch>` if the original had children.
+6. Suggest `restack --upstack-from=<original-branch>` if the original had
+   children.
 
 Full invocation:
 
@@ -299,7 +300,7 @@ Merge a branch into its parent. Inverse of split. Backed by `cli.ts fold`.
 4. **Wait for confirmation.**
 5. Run `cli.ts fold ... --force` to apply. The CLI runs the merge, reparents
    children, removes the folded branch's stack metadata, and deletes the branch.
-6. Suggest `sync --upstack-from=<parent>` if children were reparented.
+6. Suggest `restack --upstack-from=<parent>` if children were reparented.
 
 Full invocation:
 
@@ -324,7 +325,7 @@ Detach a branch and reattach it as a child of a different parent. Backed by
 5. Run `cli.ts move ... --force` to apply. On conflict the CLI stops and reports
    `recovery.resolve` / `resume` / `abort` commands (same shape as `restack` /
    `sync`).
-6. Suggest `sync --upstack-from=<moved-branch>` for descendants.
+6. Suggest `restack --upstack-from=<moved-branch>` for descendants.
 
 Full invocation:
 
@@ -626,12 +627,12 @@ SYNC
     main* - A - B              main* - A' - B'
     (* = has new commits)
 
+    Flags: --upstack-from, --downstack-from, --only
+
   sync - Fetch, ff bases, prune merged PRs, restack, then push
 
     Before:                    After:
     origin/main* - A - B      origin/main* - A' - B' (pushed)
-
-    Flags: --upstack-from, --downstack-from, --only
 
 REVIEW
 
