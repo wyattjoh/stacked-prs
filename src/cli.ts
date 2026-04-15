@@ -1,5 +1,6 @@
 #!/usr/bin/env -S deno run --allow-run=git,gh --allow-env
 import { Command } from "@cliffy/command";
+import { Confirm } from "@cliffy/prompt";
 import pluginMeta from "../.claude-plugin/plugin.json" with { type: "json" };
 import { getStackTree, renderTree, runGitCommand } from "./lib/stack.ts";
 import { gh, listPrsForBranch, resolveRepo } from "./lib/gh.ts";
@@ -50,14 +51,14 @@ function logJson(value: unknown): void {
  * TTY (so `--force` is required in non-interactive mode). Returns true
  * when the user confirmed and the caller should proceed.
  */
-function confirmOrExit(opts: {
+async function confirmOrExit(opts: {
   force: boolean;
   prompt?: string;
   /** Printed before the prompt; omit when the plan was already rendered. */
   render?: () => void;
   /** Non-TTY error message. */
   nonInteractiveHint?: string;
-}): boolean {
+}): Promise<boolean> {
   if (opts.force) return true;
   if (!Deno.stdin.isTerminal()) {
     console.error(
@@ -67,8 +68,11 @@ function confirmOrExit(opts: {
     Deno.exit(1);
   }
   opts.render?.();
-  const answer = prompt(opts.prompt ?? "Proceed? [y/N]");
-  if (answer?.trim().toLowerCase() !== "y") {
+  const confirmed = await Confirm.prompt({
+    message: opts.prompt ?? "Proceed?",
+    default: false,
+  });
+  if (!confirmed) {
     console.log("Aborted.");
     return false;
   }
@@ -474,8 +478,11 @@ await new Command()
     // silently instead of erroring. Only prompt when interactive + !force.
     if (!options.force && Deno.stdin.isTerminal()) {
       console.log(renderCreatePlan(plan.plan));
-      const answer = prompt("Proceed? [y/N]");
-      if (answer?.trim().toLowerCase() !== "y") {
+      const confirmed = await Confirm.prompt({
+        message: "Proceed?",
+        default: false,
+      });
+      if (!confirmed) {
         console.log("Aborted.");
         return;
       }
@@ -706,12 +713,12 @@ await new Command()
     }
 
     if (
-      !confirmOrExit({
+      !(await confirmOrExit({
         force: options.force ?? false,
         prompt: `Apply ${report.findings.length} cleanup(s)? [y/N]`,
         nonInteractiveHint:
           "Cannot prompt in non-interactive mode. Pass --force to apply, or --json to inspect.",
-      })
+      }))
     ) {
       return;
     }
@@ -928,10 +935,10 @@ await new Command()
     }
 
     if (
-      !confirmOrExit({
+      !(await confirmOrExit({
         force: options.force ?? false,
         render: () => console.log(renderSubmitPlan(plan)),
-      })
+      }))
     ) {
       return;
     }
@@ -997,10 +1004,10 @@ await new Command()
     }
 
     if (
-      !confirmOrExit({
+      !(await confirmOrExit({
         force: options.force ?? false,
         render: () => console.log(renderSyncPlan(plan)),
-      })
+      }))
     ) {
       return;
     }
@@ -1082,10 +1089,10 @@ await new Command()
     }
 
     if (
-      !confirmOrExit({
+      !(await confirmOrExit({
         force: options.force ?? false,
         render: () => console.log(renderInitPlan(planResult.plan!)),
-      })
+      }))
     ) {
       return;
     }
@@ -1154,10 +1161,10 @@ await new Command()
     }
 
     if (
-      !confirmOrExit({
+      !(await confirmOrExit({
         force: options.force ?? false,
         render: () => console.log(renderImportPlan(planResult.plan!)),
-      })
+      }))
     ) {
       return;
     }
@@ -1220,10 +1227,10 @@ await new Command()
     }
 
     if (
-      !confirmOrExit({
+      !(await confirmOrExit({
         force: options.force ?? false,
         render: () => console.log(renderInsertPlan(planResult.plan!)),
-      })
+      }))
     ) {
       return;
     }
@@ -1304,10 +1311,10 @@ await new Command()
     }
 
     if (
-      !confirmOrExit({
+      !(await confirmOrExit({
         force: options.force ?? false,
         render: () => console.log(renderFoldPlan(planResult.plan!)),
-      })
+      }))
     ) {
       return;
     }
@@ -1372,10 +1379,10 @@ await new Command()
     }
 
     if (
-      !confirmOrExit({
+      !(await confirmOrExit({
         force: options.force ?? false,
         render: () => console.log(renderMovePlan(planResult.plan!)),
-      })
+      }))
     ) {
       return;
     }
@@ -1488,10 +1495,10 @@ await new Command()
     }
 
     if (
-      !confirmOrExit({
+      !(await confirmOrExit({
         force: options.force ?? false,
         render: () => console.log(renderSplitPlan(planResult.plan!)),
-      })
+      }))
     ) {
       return;
     }
