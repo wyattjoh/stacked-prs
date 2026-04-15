@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.8.0](https://github.com/wyattjoh/stacked-prs/compare/stacked-prs-v1.7.0...stacked-prs-v1.8.0) (2026-04-15)
+
+
+### Features
+
+* **cli:** harmonize command output style with sync conventions ([7947152](https://github.com/wyattjoh/stacked-prs/commit/794715273167ff24223f990725abb5082a51bf73))
+
 ## [1.7.0](https://github.com/wyattjoh/stacked-prs/compare/stacked-prs-v1.6.0...stacked-prs-v1.7.0) (2026-04-15)
 
 
