@@ -7,7 +7,7 @@ description: >-
   stack", "stack PRs", "stacked branches", "push to stack", "dependent PRs",
   "chained branches", "rebase my stack", "sync stack", "submit stack",
   "land stack", "import stack", "split branch", "fold branch".
-argument-hint: "[init|create|insert|split|fold|move|sync|restack|submit|status|pr|land|import|clean|help]"
+argument-hint: "[init|create|insert|split|fold|move|sync|restack|submit|status|pr|land|import|clean]"
 allowed-tools: >-
   Bash(git *), Bash(gh *), Bash(deno run *),
   Read, Grep, Glob, TodoWrite
@@ -237,7 +237,7 @@ deno run --allow-run=git,gh --allow-env --allow-read ${CLAUDE_PLUGIN_ROOT}/src/c
 ### `split`
 
 Split a branch's content into two branches. Backed by `cli.ts split`, which
-supports two modes via `--by-commit=<sha>` or `--by-file=<paths>`.
+supports two modes via `--by-commit <sha>` or `--by-file <paths>`.
 
 #### `--by-commit`
 
@@ -559,110 +559,6 @@ full git-config schema.
 4. **Wait for confirmation.**
 5. Run `cli.ts clean [--stack-name=<name>] --force` to apply.
 6. Report the removed keys.
-
-### `help`
-
-Display available commands with ASCII diagrams.
-
-**No confirmation needed** (read-only).
-
-Without arguments, print the full command list:
-
-```
-Stacked PRs - Manage tree-shaped branch stacks
-
-LIFECYCLE
-
-  init - Start a new stack from the current branch
-
-    Before:                    After:
-    main - A                   main - A (stack: my-stack)
-
-  create - Create a new child branch off the current branch
-
-    Before:                    After:
-    main - A                   main - A
-                                      └── B
-
-  import - Discover and register an existing branch chain
-
-    Before:                    After:
-    main - A - B               main - A - B (stack: imported)
-         └- C                       └- C
-
-STRUCTURE
-
-  insert - Insert a new branch between a branch and its parent
-
-    Before:                    After:
-    main - A - B               main - A - NEW - B
-
-  split --by-commit - New branch gets later commits
-
-    Before:                    After:
-    main - A[1,2,3]            main - A[1,2] - B[3]
-
-  split --by-file - Extract files into a new branch below
-
-    Before:                    After:
-    main - A{x,y}              main - NEW{x} - A{y}
-
-  fold - Merge a branch into its parent
-
-    Before:                    After:
-    main - A - B - C           main - AB - C
-
-  move - Detach a branch and reattach under a different parent
-
-    Before:                    After:
-    main - A - B               main - A
-              └- C                    ├- B
-                                      └- C
-
-SYNC
-
-  restack - Rebase the stack tree (no fetch, no push)
-
-    Before:                    After:
-    main* - A - B              main* - A' - B'
-    (* = has new commits)
-
-    Flags: --upstack-from, --downstack-from, --only
-
-  sync - Fetch, ff bases, prune merged PRs, restack, then push
-
-    Before:                    After:
-    origin/main* - A - B      origin/main* - A' - B' (pushed)
-
-REVIEW
-
-  status - Show the current stack tree with PR and sync info
-
-    Output:
-    feature/auth              PR #101 (open)     up-to-date
-    ├── feature/auth-api      PR #103 (open)     up-to-date
-    └── feature/auth-tests    PR #102 (draft)    behind-parent
-        └── feature/auth-ui   (no PR)            up-to-date
-
-  submit - Create/update PRs and navigation comments
-
-    Creates PRs with correct base branches and adds tree-shaped
-    navigation comments to each PR.
-
-LANDING
-
-  land - Clean up after a merged PR, auto-split if tree forks
-
-    Before:                    After (auto-split):
-    main - A - B               Stack: B          Stack: C
-              └- C               B                 C
-          (A merged)
-
-  help - Show this help (or help <command> for details)
-```
-
-With a command name (`/stacked-prs help create`), print detailed help for that
-command.
 
 ## Confirmation Gate Rules
 
