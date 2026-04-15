@@ -46,7 +46,13 @@ src/
 │   ├── submit.ts               # Executes submit plan: push + PR create/edit/ready + nav
 │   ├── sync.ts                 # Cross-stack fetch + restack + push
 │   ├── pr.ts                   # Branch-to-PR lookup
-│   └── land.ts                 # Land planning and execution (pure planLand + impure executeLand)
+│   ├── land.ts                 # Land planning and execution (pure planLand + impure executeLand)
+│   ├── init.ts                 # Register the current branch as a new stack (config writes)
+│   ├── import.ts               # Wrap import-discover with a one-shot config-write step
+│   ├── insert.ts               # Insert a new branch between a branch and its parent
+│   ├── fold.ts                 # Merge a branch into its parent and remove it from the stack
+│   ├── move.ts                 # Reparent a branch under a different parent + rebase --onto
+│   └── split.ts                # Split a branch --by-commit or --by-file into two branches
 └── tui/                        # Ink-based interactive view (status -i)
     ├── app.tsx
     ├── components/
@@ -97,9 +103,10 @@ deno task compile:linux   # Linux (xclip/wl-copy clipboard support)
 ```
 
 Subcommands: `status` (add `-i`/`--interactive` to launch the TUI), `create`,
-`restack`, `nav`, `verify-refs`, `import-discover`, `submit`, `sync`, `pr`,
-`land`, `clean`. `lib/config.ts` and `lib/submit-plan.ts` are libraries shared
-across commands; import their functions directly.
+`restack`, `nav`, `verify-refs`, `import-discover`, `init`, `import`, `insert`,
+`fold`, `move`, `split`, `submit`, `sync`, `pr`, `land`, `clean`.
+`lib/config.ts` and `lib/submit-plan.ts` are libraries shared across commands;
+import their functions directly.
 
 `submit` wraps `computeSubmitPlan` with an execution path: force-push, then
 `gh pr create|edit|ready` per branch, then apply nav comments. `sync` iterates
@@ -164,6 +171,12 @@ can be continued across process invocations.
 | `src/commands/sync.ts`            | Fetch + ff base + prune merged PRs + restack + push across all stacks | `cli.ts sync [--dry-run] [--force] [--json]`                            |
 | `src/commands/pr.ts`              | Branch-to-PR lookup                                                   | `cli.ts pr [--branch=<name>] [--print] [--json]`                        |
 | `src/commands/land.ts`            | Land planning and execution (pure planLand + impure executeLand)      | `cli.ts land [--dry-run] [--json] [--resume]`; also imported by the TUI |
+| `src/commands/init.ts`            | Register current branch as a new stack                                | `cli.ts init [flags]`                                                   |
+| `src/commands/import.ts`          | Wrap import-discover with a config-write step                         | `cli.ts import [flags]`                                                 |
+| `src/commands/insert.ts`          | Insert a new branch between a branch and its parent                   | `cli.ts insert <branch> [flags]`                                        |
+| `src/commands/fold.ts`            | Merge a branch into its parent and remove it from the stack           | `cli.ts fold [flags]`                                                   |
+| `src/commands/move.ts`            | Reparent a branch + `git rebase --onto`                               | `cli.ts move --new-parent <name> [flags]`                               |
+| `src/commands/split.ts`           | Split a branch (--by-commit / --by-file) into two                     | `cli.ts split --new-branch <name> [flags]`                              |
 | `src/tui/app.tsx`                 | Root Ink component, owns reducer + effects                            | Launched by `cli.ts status -i`                                          |
 
 ### Git config schema

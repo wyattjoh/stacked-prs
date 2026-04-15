@@ -8,8 +8,13 @@ import {
   setStackNode,
 } from "./stack.ts";
 import type { StackNode, StackTree } from "./stack.ts";
-import { writeFixture } from "./gh.ts";
-import { buildNavPlan, generateNavMarkdown } from "./nav.ts";
+import { writeErrorFixture, writeFixture } from "./gh.ts";
+import {
+  applyNavPlan,
+  buildNavPlan,
+  executeNavAction,
+  generateNavMarkdown,
+} from "./nav.ts";
 
 /** Build a minimal StackTree for unit tests (no git required). */
 function makeTree(
@@ -406,5 +411,42 @@ describe("buildNavPlan", () => {
     // The merged root should appear in the body with strikethrough.
     expect(plan[0].body).toContain("~~#101~~");
     expect(plan[0].body).toContain("**#102 👈 this PR**");
+  });
+});
+
+describe("executeNavAction failure modes", () => {
+  test("propagates gh failures from a create action", async () => {
+    await using mock = await makeMockDir();
+    await writeErrorFixture(
+      mock.path,
+      ["pr", "comment", "101", "--body", "hello"],
+      "API rate limit exceeded",
+    );
+
+    await expect(
+      executeNavAction("o", "r", {
+        action: "create",
+        prNumber: 101,
+        body: "hello",
+      }),
+    ).rejects.toThrow(/rate limit/i);
+  });
+
+  test("applyNavPlan stops at first failing action", async () => {
+    await using mock = await makeMockDir();
+    // First succeeds (empty fixture), second fails.
+    await writeFixture(mock.path, ["pr", "comment", "101", "--body", "a"], "");
+    await writeErrorFixture(
+      mock.path,
+      ["pr", "comment", "102", "--body", "b"],
+      "auth required",
+    );
+
+    await expect(
+      applyNavPlan("o", "r", [
+        { action: "create", prNumber: 101, body: "a" },
+        { action: "create", prNumber: 102, body: "b" },
+      ]),
+    ).rejects.toThrow(/auth required/i);
   });
 });

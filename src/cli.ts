@@ -29,6 +29,12 @@ import {
   type LandCliResult,
   planLand,
 } from "./commands/land.ts";
+import { fold, type FoldPlan, type FoldStrategy } from "./commands/fold.ts";
+import { move, type MovePlan } from "./commands/move.ts";
+import { insert, type InsertPlan } from "./commands/insert.ts";
+import { split, type SplitPlan } from "./commands/split.ts";
+import { init as initStack, type InitPlan } from "./commands/init.ts";
+import { type ImportPlan, importStack } from "./commands/import.ts";
 import { getAllNodes } from "./lib/stack.ts";
 import { assignColors, detectTheme, readColorOverrides } from "./lib/colors.ts";
 import { ansiColor } from "./lib/ansi.ts";
@@ -114,6 +120,109 @@ function renderCreatePlan(plan: CreatePlan): string {
   for (const cmd of plan.commands) {
     lines.push(`    ${cmd}`);
   }
+  return lines.join("\n");
+}
+
+function renderCommands(commands: string[]): string[] {
+  const out: string[] = ["  Commands:"];
+  for (const cmd of commands) out.push(`    ${cmd}`);
+  return out;
+}
+
+function renderInitPlan(plan: InitPlan): string {
+  const lines = [
+    `Stack: ${plan.stackName} (base: ${plan.baseBranch})`,
+    `  → Init from ${plan.branch}  onto ${plan.baseBranch}`,
+    `    ↳ merge strategy: ${plan.mergeStrategy}`,
+    "",
+    ...renderCommands(plan.commands),
+  ];
+  return lines.join("\n");
+}
+
+function renderImportPlan(plan: ImportPlan): string {
+  const lines = [
+    `Stack: ${plan.stackName} (base: ${plan.baseBranch})`,
+    `  → Import ${plan.entries.length} branch(es)`,
+    `    ↳ merge strategy: ${plan.mergeStrategy}`,
+  ];
+  for (const e of plan.entries) {
+    lines.push(`    - ${e.branch}  parent ${e.parent}`);
+  }
+  if (plan.warnings.length > 0) {
+    lines.push("");
+    lines.push("  Warnings:");
+    for (const w of plan.warnings) lines.push(`    ⚠ ${w}`);
+  }
+  lines.push("");
+  lines.push(...renderCommands(plan.commands));
+  return lines.join("\n");
+}
+
+function renderInsertPlan(plan: InsertPlan): string {
+  const lines = [
+    `Stack: ${plan.stackName} (base: ${plan.baseBranch})`,
+    `  → Insert ${plan.branch}  between ${plan.parent} and ${plan.child}`,
+    "",
+    ...renderCommands(plan.commands),
+  ];
+  return lines.join("\n");
+}
+
+function renderFoldPlan(plan: FoldPlan): string {
+  const lines = [
+    `Stack: ${plan.stackName} (base: ${plan.baseBranch})`,
+    `  → Fold ${plan.branch}  into ${plan.parent}  (${plan.strategy})`,
+  ];
+  if (plan.children.length > 0) {
+    lines.push("    Reparent:");
+    for (const c of plan.children) {
+      lines.push(`      ↳ ${c}  onto ${plan.parent}`);
+    }
+  }
+  lines.push("");
+  lines.push(...renderCommands(plan.commands));
+  return lines.join("\n");
+}
+
+function renderMovePlan(plan: MovePlan): string {
+  const lines = [
+    `Stack: ${plan.stackName} (base: ${plan.baseBranch})`,
+    `  → Move ${plan.branch}  from ${plan.oldParent}  onto ${plan.newParent}`,
+  ];
+  if (plan.reparentedChildren.length > 0) {
+    lines.push("    Reparent:");
+    for (const c of plan.reparentedChildren) {
+      lines.push(`      ↳ ${c}  onto ${plan.oldParent}`);
+    }
+  }
+  lines.push("");
+  lines.push(...renderCommands(plan.commands));
+  return lines.join("\n");
+}
+
+function renderSplitPlan(plan: SplitPlan): string {
+  const lines = [
+    `Stack: ${plan.stackName} (base: ${plan.baseBranch})`,
+    `  → Split ${plan.branch}  (${plan.mode})  new: ${plan.newBranch}`,
+  ];
+  if (plan.mode === "by-commit") {
+    lines.push(`    Keep on ${plan.branch}:`);
+    for (const s of plan.keep) lines.push(`      ↳ ${s.slice(0, 8)}`);
+    lines.push(`    Move to ${plan.newBranch}:`);
+    for (const s of plan.moved) lines.push(`      ↳ ${s.slice(0, 8)}`);
+    if (plan.reparentedChildren.length > 0) {
+      lines.push("    Reparent:");
+      for (const c of plan.reparentedChildren) {
+        lines.push(`      ↳ ${c}  onto ${plan.newBranch}`);
+      }
+    }
+  } else {
+    lines.push(`    Extract into ${plan.newBranch}:`);
+    for (const f of plan.keep) lines.push(`      ↳ ${f}`);
+  }
+  lines.push("");
+  lines.push(...renderCommands(plan.commands));
   return lines.join("\n");
 }
 
@@ -923,6 +1032,479 @@ await new Command()
       }
     }
 
+    if (!result.ok) Deno.exit(1);
+  })
+  // --- init ---
+  .command("init", "Initialize the current branch as a new stack")
+  .option("--branch <name:string>", "Branch to register (default: current)")
+  .option("--stack-name <name:string>", "Stack name (default: branch name)")
+  .option(
+    "--merge-strategy <strategy:string>",
+    "merge or squash (default: merge)",
+  )
+  .option("--base-branch <name:string>", "Base branch (default: auto-detect)")
+  .option("--force", "Skip the TTY confirmation prompt")
+  .option("--dry-run", "Print plan without touching config")
+  .option("--json", "Output as JSON")
+  .action(async (options) => {
+    const mergeStrategy: MergeStrategy | undefined =
+      options.mergeStrategy === "merge" || options.mergeStrategy === "squash"
+        ? options.mergeStrategy
+        : undefined;
+    if (options.mergeStrategy !== undefined && mergeStrategy === undefined) {
+      console.error(
+        `invalid --merge-strategy: expected "merge" or "squash"`,
+      );
+      Deno.exit(1);
+    }
+
+    const baseOpts = {
+      branch: options.branch,
+      stackName: options.stackName,
+      mergeStrategy,
+      baseBranch: options.baseBranch,
+    };
+
+    const planResult = await initStack(dir, { ...baseOpts, dryRun: true });
+    if (!planResult.ok || !planResult.plan) {
+      if (options.json) {
+        logJson(planResult);
+      } else {
+        console.error(`${planResult.error}: ${planResult.message ?? ""}`);
+      }
+      Deno.exit(1);
+    }
+
+    if (options.dryRun) {
+      if (options.json) logJson(planResult);
+      else console.log(renderInitPlan(planResult.plan));
+      return;
+    }
+
+    if (
+      !confirmOrExit({
+        force: options.force ?? false,
+        render: () => console.log(renderInitPlan(planResult.plan!)),
+      })
+    ) {
+      return;
+    }
+
+    const result = await initStack(dir, baseOpts);
+    if (options.json) logJson(result);
+    else if (result.ok && result.plan) {
+      console.log(
+        `Initialized stack ${result.plan.stackName} on ${result.plan.branch} (base: ${result.plan.baseBranch}).`,
+      );
+    } else {
+      console.error(`${result.error}: ${result.message ?? ""}`);
+    }
+    if (!result.ok) Deno.exit(1);
+  })
+  // --- import ---
+  .command(
+    "import",
+    "Discover and register an existing branch chain as a stack",
+  )
+  .option("--branch <name:string>", "Starting branch (default: current)")
+  .option(
+    "--stack-name <name:string>",
+    "Stack name (default: root branch name)",
+  )
+  .option(
+    "--merge-strategy <strategy:string>",
+    "merge or squash (default: merge)",
+  )
+  .option("--owner <owner:string>", "GitHub repo owner")
+  .option("--repo <repo:string>", "GitHub repo name")
+  .option("--force", "Skip the TTY confirmation prompt")
+  .option("--dry-run", "Print plan without touching config")
+  .option("--json", "Output as JSON")
+  .action(async (options) => {
+    const mergeStrategy: MergeStrategy | undefined =
+      options.mergeStrategy === "merge" || options.mergeStrategy === "squash"
+        ? options.mergeStrategy
+        : undefined;
+    if (options.mergeStrategy !== undefined && mergeStrategy === undefined) {
+      console.error(
+        `invalid --merge-strategy: expected "merge" or "squash"`,
+      );
+      Deno.exit(1);
+    }
+
+    const baseOpts = {
+      branch: options.branch,
+      stackName: options.stackName,
+      mergeStrategy,
+      owner: options.owner,
+      repo: options.repo,
+    };
+
+    const planResult = await importStack(dir, { ...baseOpts, dryRun: true });
+    if (!planResult.ok || !planResult.plan) {
+      if (options.json) logJson(planResult);
+      else console.error(`${planResult.error}: ${planResult.message ?? ""}`);
+      Deno.exit(1);
+    }
+
+    if (options.dryRun) {
+      if (options.json) logJson(planResult);
+      else console.log(renderImportPlan(planResult.plan));
+      return;
+    }
+
+    if (
+      !confirmOrExit({
+        force: options.force ?? false,
+        render: () => console.log(renderImportPlan(planResult.plan!)),
+      })
+    ) {
+      return;
+    }
+
+    const result = await importStack(dir, baseOpts);
+    if (options.json) logJson(result);
+    else if (result.ok && result.plan) {
+      console.log(
+        `Imported ${result.plan.entries.length} branch(es) into stack ${result.plan.stackName}.`,
+      );
+    } else {
+      console.error(`${result.error}: ${result.message ?? ""}`);
+    }
+    if (!result.ok) Deno.exit(1);
+  })
+  // --- insert ---
+  .command(
+    "insert <branch:string>",
+    "Insert a new branch between a branch and its parent",
+  )
+  .option(
+    "--stack-name <name:string>",
+    "Stack name (auto-detected from current branch)",
+  )
+  .option(
+    "--child <name:string>",
+    "Branch that will be reparented under the new branch (default: current)",
+  )
+  .option("--force", "Skip the TTY confirmation prompt")
+  .option("--dry-run", "Print plan without touching git or config")
+  .option("--json", "Output as JSON")
+  .action(async (options, newBranch: string) => {
+    const stackName = await resolveStackName(dir, options.stackName);
+    let child = options.child;
+    if (!child) {
+      const { code, stdout } = await runGitCommand(
+        dir,
+        "branch",
+        "--show-current",
+      );
+      if (code !== 0 || !stdout) {
+        console.error("Could not detect child branch. Pass --child.");
+        Deno.exit(1);
+      }
+      child = stdout;
+    }
+
+    const baseOpts = { stackName, child, branch: newBranch };
+    const planResult = await insert(dir, { ...baseOpts, dryRun: true });
+    if (!planResult.ok || !planResult.plan) {
+      if (options.json) logJson(planResult);
+      else console.error(`${planResult.error}: ${planResult.message ?? ""}`);
+      Deno.exit(1);
+    }
+
+    if (options.dryRun) {
+      if (options.json) logJson(planResult);
+      else console.log(renderInsertPlan(planResult.plan));
+      return;
+    }
+
+    if (
+      !confirmOrExit({
+        force: options.force ?? false,
+        render: () => console.log(renderInsertPlan(planResult.plan!)),
+      })
+    ) {
+      return;
+    }
+
+    const result = await insert(dir, baseOpts);
+    if (options.json) logJson(result);
+    else if (result.ok && result.plan) {
+      console.log(
+        `Inserted ${result.plan.branch} between ${result.plan.parent} and ${result.plan.child}.`,
+      );
+    } else {
+      console.error(`${result.error}: ${result.message ?? ""}`);
+    }
+    if (!result.ok) Deno.exit(1);
+  })
+  // --- fold ---
+  .command(
+    "fold",
+    "Merge a branch into its parent and remove it from the stack",
+  )
+  .option("--stack-name <name:string>", "Stack name (auto-detected)")
+  .option(
+    "--branch <name:string>",
+    "Branch to fold into its parent (default: current)",
+  )
+  .option(
+    "--strategy <strategy:string>",
+    "ff (fast-forward) or squash (default: ff)",
+  )
+  .option("--message <msg:string>", "Commit message for --strategy=squash")
+  .option("--force", "Skip the TTY confirmation prompt")
+  .option("--dry-run", "Print plan without executing")
+  .option("--json", "Output as JSON")
+  .action(async (options) => {
+    const stackName = await resolveStackName(dir, options.stackName);
+    let branch = options.branch;
+    if (!branch) {
+      const { code, stdout } = await runGitCommand(
+        dir,
+        "branch",
+        "--show-current",
+      );
+      if (code !== 0 || !stdout) {
+        console.error("Could not detect branch. Pass --branch.");
+        Deno.exit(1);
+      }
+      branch = stdout;
+    }
+    const strategy: FoldStrategy = options.strategy === "squash"
+      ? "squash"
+      : "ff";
+    if (
+      options.strategy !== undefined &&
+      options.strategy !== "ff" &&
+      options.strategy !== "squash"
+    ) {
+      console.error(`invalid --strategy: expected "ff" or "squash"`);
+      Deno.exit(1);
+    }
+
+    const baseOpts = {
+      stackName,
+      branch,
+      strategy,
+      squashMessage: options.message,
+    };
+    const planResult = await fold(dir, { ...baseOpts, dryRun: true });
+    if (!planResult.ok || !planResult.plan) {
+      if (options.json) logJson(planResult);
+      else console.error(`${planResult.error}: ${planResult.message ?? ""}`);
+      Deno.exit(1);
+    }
+
+    if (options.dryRun) {
+      if (options.json) logJson(planResult);
+      else console.log(renderFoldPlan(planResult.plan));
+      return;
+    }
+
+    if (
+      !confirmOrExit({
+        force: options.force ?? false,
+        render: () => console.log(renderFoldPlan(planResult.plan!)),
+      })
+    ) {
+      return;
+    }
+
+    const result = await fold(dir, baseOpts);
+    if (options.json) logJson(result);
+    else if (result.ok && result.plan) {
+      console.log(
+        `Folded ${result.plan.branch} into ${result.plan.parent}.`,
+      );
+    } else {
+      console.error(`${result.error}: ${result.message ?? ""}`);
+    }
+    if (!result.ok) Deno.exit(1);
+  })
+  // --- move ---
+  .command(
+    "move",
+    "Detach a branch and reattach it as a child of a different parent",
+  )
+  .option("--stack-name <name:string>", "Stack name (auto-detected)")
+  .option(
+    "--branch <name:string>",
+    "Branch to move (default: current)",
+  )
+  .option("--new-parent <name:string>", "New parent branch", { required: true })
+  .option("--force", "Skip the TTY confirmation prompt")
+  .option("--dry-run", "Print plan without executing")
+  .option("--json", "Output as JSON")
+  .action(async (options) => {
+    const stackName = await resolveStackName(dir, options.stackName);
+    let branch = options.branch;
+    if (!branch) {
+      const { code, stdout } = await runGitCommand(
+        dir,
+        "branch",
+        "--show-current",
+      );
+      if (code !== 0 || !stdout) {
+        console.error("Could not detect branch. Pass --branch.");
+        Deno.exit(1);
+      }
+      branch = stdout;
+    }
+
+    const baseOpts = {
+      stackName,
+      branch,
+      newParent: options.newParent,
+    };
+    const planResult = await move(dir, { ...baseOpts, dryRun: true });
+    if (!planResult.ok || !planResult.plan) {
+      if (options.json) logJson(planResult);
+      else console.error(`${planResult.error}: ${planResult.message ?? ""}`);
+      Deno.exit(1);
+    }
+
+    if (options.dryRun) {
+      if (options.json) logJson(planResult);
+      else console.log(renderMovePlan(planResult.plan));
+      return;
+    }
+
+    if (
+      !confirmOrExit({
+        force: options.force ?? false,
+        render: () => console.log(renderMovePlan(planResult.plan!)),
+      })
+    ) {
+      return;
+    }
+
+    const result = await move(dir, baseOpts);
+    if (options.json) logJson(result);
+    else if (result.ok && result.plan) {
+      console.log(
+        `Moved ${result.plan.branch} from ${result.plan.oldParent} onto ${result.plan.newParent}.`,
+      );
+    } else if (result.error === "conflict") {
+      console.error(
+        `\nConflict during rebase of ${result.plan?.branch ?? "move"}`,
+      );
+      console.error("\nTo resolve:");
+      console.error(`  ${result.recovery?.resolve}`);
+      console.error(`  Then: ${result.recovery?.resume}`);
+      console.error(`  Or abort: ${result.recovery?.abort}`);
+    } else {
+      console.error(`${result.error}: ${result.message ?? ""}`);
+    }
+    if (!result.ok) Deno.exit(1);
+  })
+  // --- split ---
+  .command(
+    "split",
+    "Split a branch into two: --by-commit or --by-file",
+  )
+  .option("--stack-name <name:string>", "Stack name (auto-detected)")
+  .option(
+    "--branch <name:string>",
+    "Branch to split (default: current)",
+  )
+  .option("--new-branch <name:string>", "Name for the newly created branch", {
+    required: true,
+  })
+  .option(
+    "--by-commit <sha:string>",
+    "Split mode: last SHA to keep on original",
+  )
+  .option(
+    "--by-file <files:string>",
+    "Split mode: comma-separated files to extract into a new lower branch",
+  )
+  .option(
+    "--extract-message <msg:string>",
+    "Commit message for --by-file extract commit",
+  )
+  .option(
+    "--remainder-message <msg:string>",
+    "Commit message for --by-file remainder commit",
+  )
+  .option("--force", "Skip the TTY confirmation prompt")
+  .option("--dry-run", "Print plan without executing")
+  .option("--json", "Output as JSON")
+  .action(async (options) => {
+    const stackName = await resolveStackName(dir, options.stackName);
+    let branch = options.branch;
+    if (!branch) {
+      const { code, stdout } = await runGitCommand(
+        dir,
+        "branch",
+        "--show-current",
+      );
+      if (code !== 0 || !stdout) {
+        console.error("Could not detect branch. Pass --branch.");
+        Deno.exit(1);
+      }
+      branch = stdout;
+    }
+
+    if (options.byCommit && options.byFile) {
+      console.error("Pass exactly one of --by-commit or --by-file, not both.");
+      Deno.exit(1);
+    }
+    if (!options.byCommit && !options.byFile) {
+      console.error("Pass exactly one of --by-commit or --by-file.");
+      Deno.exit(1);
+    }
+
+    const baseOpts = options.byCommit
+      ? {
+        mode: "by-commit" as const,
+        stackName,
+        branch,
+        at: options.byCommit,
+        newBranch: options.newBranch,
+      }
+      : {
+        mode: "by-file" as const,
+        stackName,
+        branch,
+        files: options.byFile!.split(",").map((s) => s.trim()).filter(Boolean),
+        newBranch: options.newBranch,
+        extractMessage: options.extractMessage ?? "extract",
+        remainderMessage: options.remainderMessage ?? "remainder",
+      };
+
+    const planResult = await split(dir, { ...baseOpts, dryRun: true });
+    if (!planResult.ok || !planResult.plan) {
+      if (options.json) logJson(planResult);
+      else console.error(`${planResult.error}: ${planResult.message ?? ""}`);
+      Deno.exit(1);
+    }
+
+    if (options.dryRun) {
+      if (options.json) logJson(planResult);
+      else console.log(renderSplitPlan(planResult.plan));
+      return;
+    }
+
+    if (
+      !confirmOrExit({
+        force: options.force ?? false,
+        render: () => console.log(renderSplitPlan(planResult.plan!)),
+      })
+    ) {
+      return;
+    }
+
+    const result = await split(dir, baseOpts);
+    if (options.json) logJson(result);
+    else if (result.ok && result.plan) {
+      console.log(
+        `Split ${result.plan.branch} (${result.plan.mode}); new branch: ${result.plan.newBranch}.`,
+      );
+    } else {
+      console.error(`${result.error}: ${result.message ?? ""}`);
+    }
     if (!result.ok) Deno.exit(1);
   })
   .parse(Deno.args);

@@ -6,8 +6,8 @@ import {
   makeMockDir,
   makeTempDir,
 } from "../lib/testdata/helpers.ts";
-import { setBaseBranch, setStackNode } from "../lib/stack.ts";
-import { setCallLog, writeFixture } from "../lib/gh.ts";
+import { runGitCommand, setBaseBranch, setStackNode } from "../lib/stack.ts";
+import { setCallLog, writeErrorFixture, writeFixture } from "../lib/gh.ts";
 import { computeSubmitPlan } from "../lib/submit-plan.ts";
 import { executeSubmit, renderSubmitPlan } from "./submit.ts";
 
@@ -103,6 +103,141 @@ describe("executeSubmit", () => {
     // Root branch is ready-for-review (parent === base), child is draft.
     expect(createCalls[0]).not.toContain("--draft");
     expect(createCalls[1]).toContain("--draft");
+
+    await bare[Symbol.asyncDispose]();
+  });
+
+  test("retargets PR base when parent changes", async () => {
+    await using repo = await createTestRepo();
+    await using mock = await makeMockDir();
+    await using log = makeCallLog();
+    await addBranch(repo.dir, "feat/a", "main");
+    await addBranch(repo.dir, "feat/b", "feat/a");
+    await setBaseBranch(repo.dir, "my-stack", "main");
+    await setStackNode(repo.dir, "feat/a", "my-stack", "main");
+    await setStackNode(repo.dir, "feat/b", "my-stack", "feat/a");
+
+    // Existing PR for feat/b has a stale baseRefName (still "main").
+    await writeFixture(
+      mock.path,
+      ["pr", "list", "--head", "feat/a", "--repo", "o/r"],
+      [{
+        number: 101,
+        url: "https://github.com/o/r/pull/101",
+        title: "a",
+        state: "OPEN",
+        isDraft: false,
+        baseRefName: "main",
+      }],
+    );
+    await writeFixture(
+      mock.path,
+      ["pr", "list", "--head", "feat/b", "--repo", "o/r"],
+      [{
+        number: 102,
+        url: "https://github.com/o/r/pull/102",
+        title: "b",
+        state: "OPEN",
+        isDraft: true,
+        baseRefName: "main", // stale — should be feat/a after submit
+      }],
+    );
+
+    const bare = await makeTempDir("bare-");
+    await runGitCommand(repo.dir, "init", "--bare", "-q", bare.path);
+    await runGitCommand(repo.dir, "remote", "add", "origin", bare.path);
+
+    const plan = await computeSubmitPlan(repo.dir, "my-stack", "o", "r");
+    const result = await executeSubmit(repo.dir, plan, "o", "r");
+    expect(result.ok).toBe(true);
+    expect(result.prsBaseUpdated).toEqual([
+      { branch: "feat/b", number: 102, newBase: "feat/a" },
+    ]);
+    const editCalls = log.calls.filter((c) => c[0] === "pr" && c[1] === "edit");
+    expect(editCalls[0]).toEqual([
+      "pr",
+      "edit",
+      "102",
+      "--repo",
+      "o/r",
+      "--base",
+      "feat/a",
+    ]);
+
+    await bare[Symbol.asyncDispose]();
+  });
+
+  test("flips root PR from draft to ready when parent is base", async () => {
+    await using repo = await createTestRepo();
+    await using mock = await makeMockDir();
+    await using log = makeCallLog();
+    await addBranch(repo.dir, "feat/a", "main");
+    await setBaseBranch(repo.dir, "my-stack", "main");
+    await setStackNode(repo.dir, "feat/a", "my-stack", "main");
+
+    // Existing draft PR on root; desiredDraft=false so it should flip to ready.
+    await writeFixture(
+      mock.path,
+      ["pr", "list", "--head", "feat/a", "--repo", "o/r"],
+      [{
+        number: 101,
+        url: "https://github.com/o/r/pull/101",
+        title: "a",
+        state: "OPEN",
+        isDraft: true,
+        baseRefName: "main",
+      }],
+    );
+
+    const bare = await makeTempDir("bare-");
+    await runGitCommand(repo.dir, "init", "--bare", "-q", bare.path);
+    await runGitCommand(repo.dir, "remote", "add", "origin", bare.path);
+
+    const plan = await computeSubmitPlan(repo.dir, "my-stack", "o", "r");
+    const result = await executeSubmit(repo.dir, plan, "o", "r");
+    expect(result.ok).toBe(true);
+    expect(result.draftTransitions).toEqual([
+      { branch: "feat/a", number: 101, to: "ready" },
+    ]);
+    const readyCalls = log.calls.filter((c) =>
+      c[0] === "pr" && c[1] === "ready"
+    );
+    expect(readyCalls[0]).not.toContain("--undo");
+
+    await bare[Symbol.asyncDispose]();
+  });
+
+  test("surfaces gh create failures as thrown errors", async () => {
+    await using repo = await createTestRepo();
+    await using mock = await makeMockDir();
+    await addBranch(repo.dir, "feat/a", "main");
+    await setBaseBranch(repo.dir, "my-stack", "main");
+    await setStackNode(repo.dir, "feat/a", "my-stack", "main");
+
+    await writeErrorFixture(
+      mock.path,
+      [
+        "pr",
+        "create",
+        "--repo",
+        "o/r",
+        "--base",
+        "main",
+        "--head",
+        "feat/a",
+        "--fill",
+      ],
+      "API rate limit exceeded for installation 12345",
+    );
+
+    const bare = await makeTempDir("bare-");
+    await runGitCommand(repo.dir, "init", "--bare", "-q", bare.path);
+    await runGitCommand(repo.dir, "remote", "add", "origin", bare.path);
+
+    const plan = await computeSubmitPlan(repo.dir, "my-stack", "o", "r");
+    await expect(executeSubmit(repo.dir, plan, "o", "r")).rejects.toThrow(
+      /rate limit/i,
+    );
 
     await bare[Symbol.asyncDispose]();
   });

@@ -94,6 +94,15 @@ export async function gh(
 
   if (mockDir) {
     const key = fixtureKey(args);
+    // An `.error` sibling file simulates a `gh` failure for failure-mode tests.
+    // Contents are surfaced verbatim as the Error message.
+    let errorMsg: string | undefined;
+    try {
+      errorMsg = await Deno.readTextFile(`${mockDir}/${key}.error`);
+    } catch {
+      // No error fixture; fall through to the json lookup.
+    }
+    if (errorMsg !== undefined) throw new Error(errorMsg);
     const path = `${mockDir}/${key}.json`;
     try {
       return await Deno.readTextFile(path);
@@ -235,4 +244,18 @@ export async function writeFixture(
 ): Promise<void> {
   const key = fixtureKey(args);
   await Deno.writeTextFile(`${mockDir}/${key}.json`, JSON.stringify(data));
+}
+
+/**
+ * Write an error fixture so a matching `gh(...)` call throws with the given
+ * message. Used by failure-mode tests (rate limit, auth failure, transient
+ * network errors, etc.).
+ */
+export async function writeErrorFixture(
+  mockDir: string,
+  args: string[],
+  message: string,
+): Promise<void> {
+  const key = fixtureKey(args);
+  await Deno.writeTextFile(`${mockDir}/${key}.error`, message);
 }

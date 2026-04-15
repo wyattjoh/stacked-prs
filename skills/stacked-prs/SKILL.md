@@ -123,44 +123,52 @@ stack membership) and suggest the most appropriate action.
 
 ### `init`
 
-Start a new stack from the current branch.
+Start a new stack from the current branch. Backed by `cli.ts init`.
 
-1. Verify current branch is not `main`/`master`
-2. **Guard:** check if current branch already has stack metadata
-   (`git config branch.<name>.stack-name`). If it does, report "Branch is
-   already part of stack '<name>'" and suggest `status` instead
-3. Ask for stack name (default: current branch name)
-4. Ask for merge strategy: "merge" (recommended for stacks) or "squash"
-5. **Present plan** (config entries to write) and **wait for confirmation**
-6. Write git config:
-   - `git config branch.<name>.stack-name <stack-name>`
-   - `git config branch.<name>.stack-parent main`
-   - `git config stack.<stack-name>.merge-strategy <strategy>`
-   - `git config stack.<stack-name>.base-branch main`
-7. Report stack created
+1. Run
+   `cli.ts init --dry-run [--stack-name <name>] [--merge-strategy
+   merge|squash]`
+   to compute the plan (the CLI guards against running on the base branch,
+   against a branch already in a stack, and against a stack-name collision).
+2. **Present plan:** stack name, merge strategy, base branch, and the exact
+   config writes.
+3. **Wait for confirmation.**
+4. Run `cli.ts init --force [...same flags]` to apply. `--force` skips the CLI's
+   own TTY prompt since confirmation is already gated above.
+
+Full invocation:
+
+```bash
+deno run --allow-run=git,gh --allow-env --allow-read ${CLAUDE_PLUGIN_ROOT}/src/cli.ts init \
+  [--branch <name>] [--stack-name <name>] [--merge-strategy merge|squash] \
+  [--base-branch <name>] [--force] [--dry-run] [--json]
+```
 
 ### `import`
 
-Discover and register an existing chain of branches/PRs as a stack.
+Discover and register an existing chain of branches/PRs as a stack. Backed by
+`cli.ts import`, which wraps `import-discover` with a config-write step.
 
-1. **Guard:** check if current branch already has stack metadata
-   (`git config branch.<name>.stack-name`). If it does, report "Branch is
-   already part of stack '<name>'" and suggest `status` instead
-2. Run
-   `cli.ts import-discover [--branch=<name>] [--owner=<owner> --repo=<repo>]`
-3. **Guard:** if `branches` array is empty, report "No branch chain found
-   between this branch and main" and stop
-4. If there are `warnings` (e.g., PR base mismatches), present them to the user
-   for awareness
-5. Present discovered tree for confirmation
-6. Ask for stack name and merge strategy
-7. **Present plan** (all config writes + optional nav updates) and **confirm**
-8. Write git config for all branches:
-   - For each branch: `git config branch.<name>.stack-name <stack>`
-     `git config branch.<name>.stack-parent <parent>`
-   - `git config stack.<stack>.merge-strategy <strategy>`
-   - `git config stack.<stack>.base-branch <base-branch>`
-9. Offer to run `submit` to add nav comments to existing PRs
+1. Run
+   `cli.ts import --dry-run [--stack-name <name>] [--merge-strategy
+   merge|squash]`
+   to compute the plan (calls `import-discover` under the hood and guards
+   against already-in-stack branches + stack-name collisions).
+2. **Present plan:** every discovered branch and its parent, the chosen stack
+   name and merge strategy, plus any PR-base-mismatch warnings surfaced by the
+   discoverer.
+3. **Wait for confirmation.**
+4. Run `cli.ts import --force [...same flags]` to apply.
+5. Offer to run `submit` to add nav comments to the now-imported PRs.
+
+Full invocation:
+
+```bash
+deno run --allow-run=git,gh --allow-env --allow-read ${CLAUDE_PLUGIN_ROOT}/src/cli.ts import \
+  [--branch <name>] [--stack-name <name>] [--merge-strategy merge|squash] \
+  [--owner <owner> --repo <repo>] \
+  [--force] [--dry-run] [--json]
+```
 
 ### `create`
 
@@ -204,127 +212,127 @@ deno run --allow-run=git,gh --allow-env --allow-read --allow-write \
 
 ### `insert`
 
-Insert a new branch between a branch and its parent.
+Insert a new branch between a branch and its parent. Backed by
+`cli.ts
+insert <new-branch> --child <selected>`.
 
-1. Run `cli.ts status --stack-name=<name> --json` to read the stack tree
-2. Display the tree, ask which branch to insert before (the new branch will
-   become a child of that branch's current parent, and the selected branch gets
-   reparented to the new branch) and ask for the new branch name
-3. **Present plan:**
-   - New branch created from the parent of the selected branch
-   - Selected branch gets reparented to the new branch
-4. **Wait for confirmation**
-5. `git checkout -b <new-branch> <parent-of-selected>`
-6. Write git config to insert the branch:
-   - `git config branch.<new-branch>.stack-name <stack>`
-   - `git config branch.<new-branch>.stack-parent <parent-of-selected>`
-   - `git config branch.<selected-branch>.stack-parent <new-branch>`
-7. If staged changes exist, offer to commit them
-8. Suggest `sync --upstack-from=<new-branch>` after committing work to align git
-   history
+1. Run `cli.ts status --stack-name=<name> --json` to display the tree and help
+   the user pick the child to insert before.
+2. Run `cli.ts insert <new-branch> --child <selected> --dry-run` to compute the
+   plan (branch created off the child's current parent; child reparented under
+   the new branch).
+3. **Present plan** and **wait for confirmation.**
+4. Run `cli.ts insert <new-branch> --child <selected> --force` to apply.
+5. If the user has staged changes they want on the new branch, offer to commit
+   them (the CLI itself just creates the branch).
+6. Suggest `sync --upstack-from=<new-branch>` once commits exist.
+
+Full invocation:
+
+```bash
+deno run --allow-run=git,gh --allow-env --allow-read ${CLAUDE_PLUGIN_ROOT}/src/cli.ts insert <branch> \
+  [--stack-name <name>] [--child <name>] [--force] [--dry-run] [--json]
+```
 
 ### `split`
 
-Split a branch's content into two branches.
+Split a branch's content into two branches. Backed by `cli.ts split`, which
+supports two modes via `--by-commit=<sha>` or `--by-file=<paths>`.
 
 #### `--by-commit`
 
 Original branch keeps earlier commits; new branch above gets later commits.
 
-1. Run `cli.ts status --stack-name=<name> --json`, identify current branch
-2. Run `git log --oneline <parent>..<current-branch>` to list commits
-3. **Guard:** if there is only one commit, report "Branch has only one commit,
-   nothing to split" and stop
-4. Display numbered commit list (oldest first), ask: "Split after which commit?"
-5. Ask for new branch name (for the upper portion)
-6. **Present plan:**
-   - Original branch keeps commits 1..N
-   - New branch gets commits N+1..end
-   - New branch inserted above original; original's children stay with original
-7. **Wait for confirmation**
-8. Save current tip: `tip=$(git rev-parse HEAD)`
-9. Reset original branch: `git reset --hard <commit-N>`
-10. Create new branch: `git checkout -b <new-branch> <tip>`
-11. Write git config to register new-branch above original:
-    - `git config branch.<new-branch>.stack-name <stack>`
-    - `git config branch.<new-branch>.stack-parent <original-branch>`
-    - Reparent each child of original-branch:
-      `git config branch.<child>.stack-parent <new-branch>`
-12. Suggest `sync --upstack-from=<new-branch>` if there are children
+1. Run `cli.ts status --stack-name=<name> --json` and
+   `git log --oneline <parent>..<current-branch>` to help the user pick the last
+   SHA to keep on the original branch.
+2. Run
+   `cli.ts split --branch <current> --new-branch <upper> --by-commit
+   <sha> --dry-run`
+   (the CLI guards against single-commit branches, branch-name collisions, and
+   splits at the tip).
+3. **Present plan:** kept SHAs, moved SHAs, reparented children (original's
+   children will be reparented to the new upper branch).
+4. **Wait for confirmation.**
+5. Run `cli.ts split ... --force` to apply.
+6. Suggest `sync --upstack-from=<new-branch>` if the original had children.
 
 #### `--by-file`
 
-Extract files matching a pathspec into a new branch inserted **below** the
-original. Note: this is inherently lossy with commit history. Ask user for new
-commit messages.
+Extract files into a new branch inserted **below** the original. This is
+inherently lossy with commit history — the CLI collapses the extracted portion
+into a single commit on the new lower branch, and the remainder into a single
+commit on the original.
 
-1. Run `cli.ts status --stack-name=<name> --json`, identify current branch
-2. Run `git diff --name-only <parent>..<current-branch>` to list changed files
-3. **Guard:** if no changed files are found, report "Branch has no file changes
-   relative to its parent" and stop
-4. Ask for pathspec or file list to extract
-5. Ask for new branch name (goes below the original)
-6. **Present plan:**
-   - New branch (below) gets only matched file changes
-   - Original branch keeps everything else
-   - New branch inserted before the original (between original and its parent)
-7. **Wait for confirmation**
-8. Checkout parent: `git checkout <parent-branch>`
-9. Create extraction branch: `git checkout -b <new-branch>`
-10. `git checkout <original-branch> -- <matched-files>` then commit
-11. Back on original: `git checkout <original-branch>`
-12. `git reset --soft <parent>` then re-commit excluding extracted files
-13. Write git config to register new-branch below original (between original and
-    its parent):
-    - `git config branch.<new-branch>.stack-name <stack>`
-    - `git config branch.<new-branch>.stack-parent <parent-of-original>`
-    - `git config branch.<original-branch>.stack-parent <new-branch>`
-14. Suggest `sync --upstack-from=<original-branch>` if needed
+1. Run `git diff --name-only <parent>..<current>` to help the user choose the
+   file list.
+2. Run
+   `cli.ts split --branch <current> --new-branch <lower> --by-file
+   <f1,f2,...> --extract-message <msg> --remainder-message <msg> --dry-run`.
+3. **Present plan:** extracted files, remainder files, parent/child rewiring.
+4. **Wait for confirmation.**
+5. Run `cli.ts split ... --force`.
+6. Suggest `sync --upstack-from=<original-branch>` if the original had children.
+
+Full invocation:
+
+```bash
+deno run --allow-run=git,gh --allow-env --allow-read ${CLAUDE_PLUGIN_ROOT}/src/cli.ts split \
+  [--stack-name <name>] [--branch <name>] --new-branch <name> \
+  (--by-commit <sha> | --by-file <f1,f2,...>) \
+  [--extract-message <msg>] [--remainder-message <msg>] \
+  [--force] [--dry-run] [--json]
+```
 
 ### `fold`
 
-Merge a branch into its parent. Inverse of split.
+Merge a branch into its parent. Inverse of split. Backed by `cli.ts fold`.
 
-1. Run `cli.ts status --stack-name=<name> --json`, identify current branch
-2. **Guard:** if the stack has only one branch, report "Cannot fold the only
-   branch in the stack" and stop
-3. Verify parent is a stack member (not the base branch)
-4. **Present plan:**
-   - Commits from current branch appended to parent
-   - Children of current branch reparented to parent
-   - Current branch removed from stack and deleted
-5. **Wait for confirmation**
-6. Identify parent and children of current branch
-7. `git checkout <parent-branch>`
-8. Ask user: preserve individual commits or squash?
-   - FF: `git merge --ff-only <current-branch>`
-   - Squash: `git merge --squash <current-branch> && git commit`
-9. Write git config to fold the branch:
-   - For each child of the folded branch:
-     `git config branch.<child>.stack-parent <parent-branch>`
-   - `git config --unset branch.<folded-branch>.stack-name`
-   - `git config --unset branch.<folded-branch>.stack-parent`
-10. `git branch -d <folded-branch>`
-11. Suggest `sync --upstack-from=<parent-branch>` if there were children
+1. Decide the strategy: `ff` (preserve commits) or `squash` (collapse into a
+   single commit on the parent).
+2. Run `cli.ts fold --branch <current> --strategy <ff|squash> --dry-run` (the
+   CLI guards against folding the only branch, folding a root whose parent is
+   the base branch, and against ff when the branch has diverged from its
+   parent).
+3. **Present plan:** parent, children to reparent, strategy, and the exact
+   merge/commit/config/branch-delete commands.
+4. **Wait for confirmation.**
+5. Run `cli.ts fold ... --force` to apply. The CLI runs the merge, reparents
+   children, removes the folded branch's stack metadata, and deletes the branch.
+6. Suggest `sync --upstack-from=<parent>` if children were reparented.
+
+Full invocation:
+
+```bash
+deno run --allow-run=git,gh --allow-env --allow-read ${CLAUDE_PLUGIN_ROOT}/src/cli.ts fold \
+  [--stack-name <name>] [--branch <name>] [--strategy ff|squash] \
+  [--message <msg>] [--force] [--dry-run] [--json]
+```
 
 ### `move`
 
-Detach a branch and reattach it as a child of a different parent.
+Detach a branch and reattach it as a child of a different parent. Backed by
+`cli.ts move`.
 
-1. Run `cli.ts status --stack-name=<name> --json`, display the tree
-2. Ask which branch to move and which branch to use as the new parent
-3. **No-op check:** if the branch's current parent already equals the target
-   parent, report "Branch is already a child of <target-parent>" and stop
-4. **Present plan:**
-   - Branch detaches (its children reparent to its former parent)
-   - Branch reattaches as a child of the new parent
-5. **Wait for confirmation**
-6. Write git config to move the branch:
-   - For each child of the moved branch:
-     `git config branch.<child>.stack-parent <old-parent>`
-   - `git config branch.<moved-branch>.stack-parent <new-parent>`
-7. `git rebase --onto <new-parent> <old-parent> <moved-branch>`
-8. Suggest `sync --upstack-from=<moved-branch>` for descendants
+1. Run `cli.ts status --stack-name=<name> --json` and help the user pick the
+   branch to move and its new parent.
+2. Run `cli.ts move --branch <branch> --new-parent <parent> --dry-run` (the CLI
+   guards against no-ops, cycle creation, and non-stack new parents).
+3. **Present plan:** the moved branch's old and new parent, any children being
+   reparented back to the old parent, and the `git rebase --onto` call.
+4. **Wait for confirmation.**
+5. Run `cli.ts move ... --force` to apply. On conflict the CLI stops and reports
+   `recovery.resolve` / `resume` / `abort` commands (same shape as `restack` /
+   `sync`).
+6. Suggest `sync --upstack-from=<moved-branch>` for descendants.
+
+Full invocation:
+
+```bash
+deno run --allow-run=git,gh --allow-env --allow-read ${CLAUDE_PLUGIN_ROOT}/src/cli.ts move \
+  [--stack-name <name>] [--branch <name>] --new-parent <name> \
+  [--force] [--dry-run] [--json]
+```
 
 ### `sync`
 
@@ -679,6 +687,12 @@ command.
 - `deno run ... cli.ts land --dry-run` (with or without `--json`)
 - `deno run ... cli.ts submit --dry-run` (with or without `--json`)
 - `deno run ... cli.ts sync --dry-run` (with or without `--json`)
+- `deno run ... cli.ts init --dry-run` (with or without `--json`)
+- `deno run ... cli.ts import --dry-run` (with or without `--json`)
+- `deno run ... cli.ts insert ... --dry-run` (with or without `--json`)
+- `deno run ... cli.ts fold ... --dry-run` (with or without `--json`)
+- `deno run ... cli.ts move ... --dry-run` (with or without `--json`)
+- `deno run ... cli.ts split ... --dry-run` (with or without `--json`)
 - `deno run ... cli.ts pr` (read-only PR lookup; also opens the browser, which
   is a local action, not a repo mutation)
 
@@ -855,12 +869,99 @@ stacks (stack metadata with no member branches), and stale resume-state (resume
 marker but no rebase in progress). Default: print report and prompt to apply.
 Pass `--force` for non-interactive use. Pass `--json` for structured output.
 
+### `init`
+
+```bash
+deno run --allow-run=git,gh --allow-env --allow-read ${CLAUDE_PLUGIN_ROOT}/src/cli.ts init \
+  [--branch <name>] [--stack-name <name>] [--merge-strategy merge|squash] \
+  [--base-branch <name>] [--force] [--dry-run] [--json]
+```
+
+Initializes the current branch (or `--branch`) as the root of a new stack. The
+CLI guards against running on the base branch, against a branch already in a
+stack, and against a stack-name collision. Same three-mode shape as submit:
+`--dry-run`, interactive default, `--force`.
+
+### `import`
+
+```bash
+deno run --allow-run=git,gh --allow-env --allow-read ${CLAUDE_PLUGIN_ROOT}/src/cli.ts import \
+  [--branch <name>] [--stack-name <name>] [--merge-strategy merge|squash] \
+  [--owner <owner> --repo <repo>] [--force] [--dry-run] [--json]
+```
+
+Wraps `import-discover` with a config-write step. Flattens the discovered tree
+into `(branch, parent)` pairs and writes all four config keys per branch in a
+single run. Guards against any discovered branch already being in a stack, and
+against stack-name collisions. Warnings from the discovery phase (e.g. PR base
+mismatches) are surfaced in the plan.
+
+### `insert`
+
+```bash
+deno run --allow-run=git,gh --allow-env --allow-read ${CLAUDE_PLUGIN_ROOT}/src/cli.ts insert <branch> \
+  [--stack-name <name>] [--child <name>] [--force] [--dry-run] [--json]
+```
+
+Creates `<branch>` off the parent of `--child` (default: current branch) and
+reparents the child under the new branch. Config-only plus the branch creation;
+no rebase happens because the inserted branch starts empty.
+
+### `fold`
+
+```bash
+deno run --allow-run=git,gh --allow-env --allow-read ${CLAUDE_PLUGIN_ROOT}/src/cli.ts fold \
+  [--stack-name <name>] [--branch <name>] [--strategy ff|squash] \
+  [--message <msg>] [--force] [--dry-run] [--json]
+```
+
+Merges `--branch` (default: current) into its parent, reparents its children
+onto the parent, removes the folded branch's stack metadata, and deletes the
+branch ref. `--strategy=ff` requires a fast-forward; `--strategy=squash`
+collapses the branch into a single commit on the parent.
+
+### `move`
+
+```bash
+deno run --allow-run=git,gh --allow-env --allow-read ${CLAUDE_PLUGIN_ROOT}/src/cli.ts move \
+  [--stack-name <name>] [--branch <name>] --new-parent <name> \
+  [--force] [--dry-run] [--json]
+```
+
+Reparents `--branch` under `--new-parent`, reparents its direct children back to
+its previous parent, and runs
+`git rebase --onto <new-parent> <old-parent>
+<branch>`. On conflict the CLI
+stops and returns recovery commands matching the `restack` / `sync` shape.
+
+### `split`
+
+```bash
+deno run --allow-run=git,gh --allow-env --allow-read ${CLAUDE_PLUGIN_ROOT}/src/cli.ts split \
+  [--stack-name <name>] [--branch <name>] --new-branch <name> \
+  (--by-commit <sha> | --by-file <f1,f2,...>) \
+  [--extract-message <msg>] [--remainder-message <msg>] \
+  [--force] [--dry-run] [--json]
+```
+
+Two modes:
+
+- `--by-commit <sha>`: keep commits up to `<sha>` on the original branch, move
+  the remaining commits onto a new upper branch, and reparent the original's
+  children under the new branch.
+- `--by-file <paths>`: extract the listed file changes into a new lower branch
+  inserted between the original and its parent. Lossy: each side collapses to a
+  single commit with `--extract-message` and `--remainder-message`.
+
 ### Config operations
 
 Config operations (set-branch, remove-branch, set-strategy, get, validate,
-land-cleanup, insert-branch, fold-branch, move-branch, split-stack) are library
-functions in `src/commands/config.ts`, not CLI subcommands. They are called
-internally by the other subcommands and are not invoked directly.
+land-cleanup) are library functions in `src/lib/config.ts`, not CLI subcommands.
+They are called internally by the other subcommands and are not invoked
+directly. The branch-structure primitives (`configInsertBranch`,
+`configFoldBranch`, `configMoveBranch`, `configSplitStack`) are the underlying
+config mutations used by `insert`, `fold`, `move`, and the auto-split path of
+`land`.
 
 ## References
 
