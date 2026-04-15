@@ -195,24 +195,28 @@ await new Command()
       Deno.addSignalListener("SIGINT", onSignal);
       Deno.addSignalListener("SIGTERM", onSignal);
 
-      // Ink depends on signal-exit@3, which registers process.on(sig, ...)
-      // handlers and, on signal delivery, forwards the signal by calling
-      // process.kill(process.pid, sig) after running cleanup. In Deno that
-      // process.kill call requires unrestricted --allow-run and prompts on
-      // quit even though our Deno.addSignalListener path already handles the
-      // exit cleanly. signal-exit skips the forward if it sees another
-      // process.on listener on the signal (see `listeners.length ===
-      // emitter.count` in signal-exit/index.js), so we register no-op
-      // listeners via node-compat's process.on. Our Deno.addSignalListener
-      // handlers still do the real cleanup and Deno.exit.
-      const noopSignal = () => {};
-      for (const sig of ["SIGINT", "SIGTERM", "SIGHUP"] as const) {
-        try {
-          process.on(sig, noopSignal);
-        } catch {
-          // platform doesn't support this signal; fine.
+      // Ink depends on signal-exit@3, which on signal delivery calls
+      // process.kill(process.pid, sig) after running cleanup to propagate the
+      // original signal. In Deno that self-kill routes through
+      // node:process.kill, requires unrestricted --allow-run, and prompts
+      // even though our Deno.addSignalListener path above already handles the
+      // exit. Swallow the self-directed re-raise; forward everything else.
+      type ProcessKill = (pid: number, sig?: string | number) => boolean;
+      const origKill = (process.kill as ProcessKill).bind(process);
+      const selfKillSignals = new Set(["SIGINT", "SIGTERM", "SIGHUP"]);
+      (process as unknown as { kill: ProcessKill }).kill = (
+        pid: number,
+        sig?: string | number,
+      ) => {
+        if (
+          pid === process.pid &&
+          typeof sig === "string" &&
+          selfKillSignals.has(sig)
+        ) {
+          return true;
         }
-      }
+        return origKill(pid, sig);
+      };
 
       try {
         const { waitUntilExit } = render(
@@ -227,13 +231,7 @@ await new Command()
         } catch {
           // ignore
         }
-        for (const sig of ["SIGINT", "SIGTERM", "SIGHUP"] as const) {
-          try {
-            process.off(sig, noopSignal);
-          } catch {
-            // ignore
-          }
-        }
+        (process as unknown as { kill: ProcessKill }).kill = origKill;
         try {
           Deno.removeSignalListener("SIGWINCH", onResize);
         } catch {
