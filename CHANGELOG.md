@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.7.0](https://github.com/wyattjoh/stacked-prs/compare/stacked-prs-v1.6.0...stacked-prs-v1.7.0) (2026-04-15)
+
+
+### Features
+
+* **sync:** execute prune, fast-forward, and push across all stacks ([1334399](https://github.com/wyattjoh/stacked-prs/commit/133439938532e6cc0b8ff26e907c95fc45f4706f))
+* **sync:** plan merged-PR pruning, base fast-forward, and reparenting ([04392cc](https://github.com/wyattjoh/stacked-prs/commit/04392ccef5e80343f1df3dd442d1a1684e80b68f))
+
+
+### Bug Fixes
+
+* **submit:** detect local/remote SHA divergence in submit plan ([cc58d12](https://github.com/wyattjoh/stacked-prs/commit/cc58d12a7445477290a8383ebfa50d7c22349fd8))
+* **tui:** swallow signal-exit self-kill to avoid Deno run prompt ([fe7b9a6](https://github.com/wyattjoh/stacked-prs/commit/fe7b9a61330ba4f06d40690d4ceb23d20f12458a))
+
 ## [1.6.0](https://github.com/wyattjoh/stacked-prs/compare/stacked-prs-v1.5.0...stacked-prs-v1.6.0) (2026-04-14)
 
 
