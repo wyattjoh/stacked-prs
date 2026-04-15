@@ -29,7 +29,7 @@ jobs:
         run: deno check src/cli.ts
 
       - name: Run tests
-        run: deno test --allow-run=git,gh --allow-env --allow-read --allow-write
+        run: deno task test
 
   validate-plugin:
     runs-on: ubuntu-latest
