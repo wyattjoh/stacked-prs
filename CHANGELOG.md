@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.9.0](https://github.com/wyattjoh/stacked-prs/compare/stacked-prs-v1.8.0...stacked-prs-v1.9.0) (2026-04-15)
+
+
+### Features
+
+* **cli:** add init/import/insert/fold/move/split subcommands ([1081c08](https://github.com/wyattjoh/stacked-prs/commit/1081c08775142cd5908a26b039193453c5963c6a))
+
 ## [1.8.0](https://github.com/wyattjoh/stacked-prs/compare/stacked-prs-v1.7.0...stacked-prs-v1.8.0) (2026-04-15)
 
 
