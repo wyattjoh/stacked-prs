@@ -1,7 +1,6 @@
 import { runGitCommand } from "../lib/stack.ts";
 import { gh } from "../lib/gh.ts";
-import { applyNavPlan } from "../lib/nav.ts";
-import type { NavAction } from "../lib/nav.ts";
+import { applyNavPlan, buildNavPlan } from "../lib/nav.ts";
 import type { SubmitPlan } from "../lib/submit-plan.ts";
 
 export interface SubmitExecutionResult {
@@ -141,12 +140,12 @@ export async function executeSubmit(
     }
   }
 
-  const navActions: NavAction[] = plan.navComments.map((nav) => ({
-    action: nav.action,
-    prNumber: nav.prNumber,
-    body: nav.body,
-    ...(nav.commentId !== undefined ? { commentId: nav.commentId } : {}),
-  }));
+  // Recompute nav actions against the live PR set. `plan.navComments` was
+  // built before any `gh pr create` ran, so branches whose PRs we just opened
+  // were absent from that initial plan. Rebuilding here picks them up and
+  // also folds in any base/draft transitions that shift which branches are
+  // reachable in the nav markdown.
+  const navActions = await buildNavPlan(dir, plan.stackName, owner, repo);
   result.navCommentsApplied += await applyNavPlan(owner, repo, navActions);
 
   return result;
