@@ -844,7 +844,7 @@ await new Command()
   // --- sync ---
   .command(
     "sync",
-    "Fetch origin and restack+push every stack (applies to all stacks)",
+    "Fetch origin, fast-forward local base branches, prune merged PRs, and restack + push every stack.",
   )
   .option("--dry-run", "Print the plan without executing")
   .option("--force", "Execute without the interactive confirmation prompt")

@@ -163,13 +163,22 @@ the specified new parent.
 
 ### `/stacked-prs sync`
 
-Fetch each stack's base from origin and restack + force-push **every stack** in
-the repo. Mirrors `gt sync`.
+Bring **every stack** in the repo back in line with origin. Mirrors `gt sync`.
+In one pass `sync`:
+
+1. Fetches every base branch (for example, `main`).
+2. Fast-forwards each local base branch when safe, warning and skipping any that
+   have diverged.
+3. Detects merged PRs across every stack, deletes those branches locally,
+   reparents their children, retargets the children's PR bases on GitHub, and
+   refreshes navigation comments.
+4. Restacks the surviving branches and force-pushes with `--force-with-lease`.
 
 ```
 /stacked-prs sync --dry-run       # preview plan across all stacks
 /stacked-prs sync                 # prompts [y/N] before executing
 /stacked-prs sync --force         # execute without prompting
+/stacked-prs sync --json          # structured output
 ```
 
 The CLI stops at the first conflict or push failure and reports which stack
@@ -337,19 +346,19 @@ deno run --allow-run=git,gh --allow-env --allow-read \
   src/cli.ts <subcommand> [flags]
 ```
 
-| Subcommand                                    | Purpose                                                              |
-| --------------------------------------------- | -------------------------------------------------------------------- |
-| `cli.ts status [--json]`                      | Tree output (or JSON) with PR info and sync status                   |
-| `cli.ts create <branch> [--create-worktree]`  | Create a child branch; auto-inits stack when on default branch       |
-| `cli.ts restack [--json]`                     | Segment-based tree rebase; handles conflicts across segments         |
-| `cli.ts nav [--dry-run]`                      | Builds and executes navigation comment plans                         |
-| `cli.ts verify-refs`                          | Checks branch ancestry after rebase, outputs repair commands         |
-| `cli.ts import-discover`                      | Discovers branch trees between a branch and main                     |
-| `cli.ts submit-plan`                          | Computes the full submit plan (PRs to create/update, nav changes)    |
-| `cli.ts submit [--dry-run] [--force]`         | Run the submit plan: push + PR create/edit + draft flips + nav       |
-| `cli.ts sync [--dry-run] [--force]`           | Fetch + restack + push across **every** stack in the repo            |
-| `cli.ts pr [--branch=<name>] [--print]`       | Open the branch's PR in the browser via `gh pr view --web`           |
-| `cli.ts land [--dry-run] [--json] [--resume]` | Land a merged PR; plan only with `--dry-run`, resume after conflicts |
+| Subcommand                                    | Purpose                                                                |
+| --------------------------------------------- | ---------------------------------------------------------------------- |
+| `cli.ts status [--json]`                      | Tree output (or JSON) with PR info and sync status                     |
+| `cli.ts create <branch> [--create-worktree]`  | Create a child branch; auto-inits stack when on default branch         |
+| `cli.ts restack [--json]`                     | Segment-based tree rebase; handles conflicts across segments           |
+| `cli.ts nav [--dry-run]`                      | Builds and executes navigation comment plans                           |
+| `cli.ts verify-refs`                          | Checks branch ancestry after rebase, outputs repair commands           |
+| `cli.ts import-discover`                      | Discovers branch trees between a branch and main                       |
+| `cli.ts submit-plan`                          | Computes the full submit plan (PRs to create/update, nav changes)      |
+| `cli.ts submit [--dry-run] [--force]`         | Run the submit plan: push + PR create/edit + draft flips + nav         |
+| `cli.ts sync [--dry-run] [--force]`           | Fetch + ff bases + prune merged PRs + restack + push across all stacks |
+| `cli.ts pr [--branch=<name>] [--print]`       | Open the branch's PR in the browser via `gh pr view --web`             |
+| `cli.ts land [--dry-run] [--json] [--resume]` | Land a merged PR; plan only with `--dry-run`, resume after conflicts   |
 
 `--stack-name` auto-detects from the current branch's git config when omitted.
 `--owner` and `--repo` auto-detect from `gh repo view` when omitted.

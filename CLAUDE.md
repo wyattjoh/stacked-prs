@@ -29,6 +29,7 @@ src/
 │   ├── stack.ts                # Core library: types, git config read/write, tree traversal
 │   ├── gh.ts                   # GitHub CLI wrapper with test fixture support (GH_MOCK_DIR)
 │   ├── worktrees.ts            # Pre-flight worktree safety reader (git worktree list + status)
+│   ├── cleanup.ts              # Shared cleanup primitives: snapshot capture, merged-branch preview, config reparent/tombstone
 │   ├── colors.ts               # Per-stack color assignment (shared by TUI and clean output)
 │   ├── ansi.ts                 # ANSI escape code helpers
 │   └── testdata/helpers.ts     # Test utilities (createTestRepo, addBranch, commitFile)
@@ -102,13 +103,16 @@ functions, do not try to invoke it via `cli.ts`.
 
 `submit` wraps `submit-plan` with an execution path: force-push, then
 `gh pr create|edit|ready` per branch, then apply nav comments. `sync` iterates
-every stack returned by `getAllStackTrees` and composes fetch + `restack` +
-force-push per stack, stopping at the first failure. `pr` is a thin lookup over
-`gh pr list` that delegates browser-opening to `gh pr view --web`. Both `submit`
-and `sync` share a tri-modal CLI shape: `--dry-run` prints the plan only,
-default (no flags) prompts `[y/N]`, and `--force` executes without prompting.
-This matches the SKILL.md confirmation-gate philosophy: Claude uses `--dry-run`
-to inspect, then `--force` after approval.
+every stack returned by `getAllStackTrees`: it fetches every base once,
+fast-forwards local base branches when safe (warning on divergence), prunes
+branches whose PRs merged on GitHub (reparenting children and retargeting their
+PR bases), then composes `restack` + force-push per stack. It stops at the first
+failure. `pr` is a thin lookup over `gh pr list` that delegates browser-opening
+to `gh pr view --web`. Both `submit` and `sync` share a tri-modal CLI shape:
+`--dry-run` prints the plan only, default (no flags) prompts `[y/N]`, and
+`--force` executes without prompting. This matches the SKILL.md
+confirmation-gate philosophy: Claude uses `--dry-run` to inspect, then `--force`
+after approval.
 
 ## Architecture
 
@@ -143,24 +147,24 @@ can be continued across process invocations.
 
 ### Script roles
 
-| File                              | Role                                                             | Invoked as                                                              |
-| --------------------------------- | ---------------------------------------------------------------- | ----------------------------------------------------------------------- |
-| `src/lib/stack.ts`                | Library only, not a CLI                                          | Imported by all other scripts                                           |
-| `src/lib/gh.ts`                   | Library only, not a CLI                                          | Imported by scripts needing GitHub data                                 |
-| `src/commands/clean.ts`           | Stale config detection and removal                               | `cli.ts clean [--force] [--json]`                                       |
-| `src/commands/config.ts`          | Library functions for metadata mutations                         | Imported by other commands                                              |
-| `src/commands/create.ts`          | Branch creation with optional worktree                           | `cli.ts create <branch> [flags]`                                        |
-| `src/commands/status.ts`          | Read stack state + PR info                                       | `cli.ts status [--json]`                                                |
-| `src/commands/restack.ts`         | Per-branch topological rebase                                    | `cli.ts restack [--dry-run] [--json] [--resume]`                        |
-| `src/commands/nav.ts`             | Navigation comments                                              | `cli.ts nav [--dry-run]`                                                |
-| `src/commands/verify-refs.ts`     | Post-rebase verification                                         | `cli.ts verify-refs`                                                    |
-| `src/commands/import-discover.ts` | Branch tree detection                                            | `cli.ts import-discover`                                                |
-| `src/commands/submit-plan.ts`     | Submit planning                                                  | `cli.ts submit-plan`                                                    |
-| `src/commands/submit.ts`          | Execute submit plan (push + gh ops + nav)                        | `cli.ts submit [--dry-run] [--force] [--json]`                          |
-| `src/commands/sync.ts`            | Cross-stack fetch + restack + push                               | `cli.ts sync [--dry-run] [--force] [--json]`                            |
-| `src/commands/pr.ts`              | Branch-to-PR lookup                                              | `cli.ts pr [--branch=<name>] [--print] [--json]`                        |
-| `src/commands/land.ts`            | Land planning and execution (pure planLand + impure executeLand) | `cli.ts land [--dry-run] [--json] [--resume]`; also imported by the TUI |
-| `src/tui/app.tsx`                 | Root Ink component, owns reducer + effects                       | Launched by `cli.ts status -i`                                          |
+| File                              | Role                                                                  | Invoked as                                                              |
+| --------------------------------- | --------------------------------------------------------------------- | ----------------------------------------------------------------------- |
+| `src/lib/stack.ts`                | Library only, not a CLI                                               | Imported by all other scripts                                           |
+| `src/lib/gh.ts`                   | Library only, not a CLI                                               | Imported by scripts needing GitHub data                                 |
+| `src/commands/clean.ts`           | Stale config detection and removal                                    | `cli.ts clean [--force] [--json]`                                       |
+| `src/commands/config.ts`          | Library functions for metadata mutations                              | Imported by other commands                                              |
+| `src/commands/create.ts`          | Branch creation with optional worktree                                | `cli.ts create <branch> [flags]`                                        |
+| `src/commands/status.ts`          | Read stack state + PR info                                            | `cli.ts status [--json]`                                                |
+| `src/commands/restack.ts`         | Per-branch topological rebase                                         | `cli.ts restack [--dry-run] [--json] [--resume]`                        |
+| `src/commands/nav.ts`             | Navigation comments                                                   | `cli.ts nav [--dry-run]`                                                |
+| `src/commands/verify-refs.ts`     | Post-rebase verification                                              | `cli.ts verify-refs`                                                    |
+| `src/commands/import-discover.ts` | Branch tree detection                                                 | `cli.ts import-discover`                                                |
+| `src/commands/submit-plan.ts`     | Submit planning                                                       | `cli.ts submit-plan`                                                    |
+| `src/commands/submit.ts`          | Execute submit plan (push + gh ops + nav)                             | `cli.ts submit [--dry-run] [--force] [--json]`                          |
+| `src/commands/sync.ts`            | Fetch + ff base + prune merged PRs + restack + push across all stacks | `cli.ts sync [--dry-run] [--force] [--json]`                            |
+| `src/commands/pr.ts`              | Branch-to-PR lookup                                                   | `cli.ts pr [--branch=<name>] [--print] [--json]`                        |
+| `src/commands/land.ts`            | Land planning and execution (pure planLand + impure executeLand)      | `cli.ts land [--dry-run] [--json] [--resume]`; also imported by the TUI |
+| `src/tui/app.tsx`                 | Root Ink component, owns reducer + effects                            | Launched by `cli.ts status -i`                                          |
 
 ### Git config schema
 

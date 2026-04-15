@@ -328,9 +328,17 @@ Detach a branch and reattach it as a child of a different parent.
 
 ### `sync`
 
-Fetch each stack's base from origin, restack every stack in the repo, and
-force-push the rebased branches. Mirrors `gt sync`: applies to **every** stack,
-not just the one containing the current branch.
+Bring every stack in the repo back in line with origin. Mirrors `gt sync`:
+applies to **every** stack, not just the one containing the current branch. In
+one pass the CLI:
+
+- Fetches every base branch referenced by any stack (for example, `main`).
+- Fast-forwards each local base branch when safe, warning and skipping any base
+  that has diverged from origin.
+- Detects PRs that merged on GitHub, deletes those branches locally, reparents
+  their children onto the next surviving ancestor, retargets the children's PR
+  bases via `gh`, and updates navigation comments.
+- Restacks the surviving branches and force-pushes with `--force-with-lease`.
 
 Backed by `cli.ts sync`, which has three modes:
 
@@ -339,31 +347,39 @@ Backed by `cli.ts sync`, which has three modes:
 - `--force`: execute without the prompt (non-interactive or trusted automation).
 
 1. Run `cli.ts sync --dry-run --json` to inspect the plan. Parse the returned
-   `stacks[]` array: each entry has `stackName`, `baseBranch`, `rebases[]`,
-   `branchesToPush[]`, and `isNoOp`.
+   `stacks[]` array (each entry has `stackName`, `baseBranch`, `rebases[]`,
+   `branchesToPush[]`, `prunes[]`, and `isNoOp`) plus top-level
+   `baseFastForwards[]` with
+   `{ baseBranch, action: "ff" | "skip-diverged", ... }` entries.
 2. **No-op check:** if `plan.isNoOp` is true, report "All stacks are already
-   synced with origin" and stop (the CLI still fetches base branches in this
-   path so the user's origin refs stay current).
+   synced with origin" and stop. The CLI still fetches base branches in this
+   path so the user's origin refs stay current.
 3. For each non-no-op stack, run `cli.ts verify-refs --stack-name=<name>`
    (read-only). If any stack reports duplicate patches or structural drift that
    the per-branch rebase cannot fix, stop and ask the user to resolve manually.
 4. Collect every branch with status `planned` across all stacks. Run
    `checkWorktreeSafety` on the union. If any dirty worktrees are returned,
    present them with cleanup commands and stop.
-5. **Present the full plan** grouped by stack: base branches to fetch, each
-   stack's rebase list (old-parent → new-target), and the branches to force-push
-   per stack.
+5. **Present the full plan** grouped by section:
+   - Base branches to fetch and fast-forward, plus any bases flagged
+     `skip-diverged` (call out the warning; the CLI will continue past them).
+   - Merged PRs to prune per stack (branch to delete, PR number, children being
+     reparented, PR bases to retarget on GitHub).
+   - Each stack's rebase list (old-parent to new-target) and branches to
+     force-push.
 6. **Wait for confirmation.**
-7. Run `cli.ts sync --force` to execute. The CLI fetches each base once, then
-   for each stack runs `restack` and `git push --force-with-lease`. On the first
-   conflict or push failure it stops and reports `failedAt: <stackName>`.
+7. Run `cli.ts sync --force` to execute. Execution order per stack is: prune
+   merged branches (with PR base retargets and nav updates), restack survivors,
+   then `git push --force-with-lease`. On the first conflict or push failure it
+   stops and reports `failedAt: <stackName>`.
    - If a conflict: resolve the files in the stack that failed, then run
      `cli.ts restack --stack-name=<failed> --resume`. Re-run `cli.ts sync` to
      finish the remaining stacks.
 8. Run `cli.ts verify-refs --stack-name=<name>` per synced stack as a
    post-flight check. If it is not clean on any stack, print the report and ask
    the user to inspect.
-9. Report per-stack results.
+9. Report per-stack results: fast-forwarded bases, pruned branches, pushed
+   branches.
 
 ### `restack`
 
@@ -599,7 +615,7 @@ SYNC
     main* - A - B              main* - A' - B'
     (* = has new commits)
 
-  sync - Fetch main, restack, then push
+  sync - Fetch, ff bases, prune merged PRs, restack, then push
 
     Before:                    After:
     origin/main* - A - B      origin/main* - A' - B' (pushed)
@@ -801,13 +817,16 @@ deno run --allow-run=git,gh --allow-env --allow-read ${CLAUDE_PLUGIN_ROOT}/src/c
 ```
 
 Applies to **every** stack in the repo. Fetches each distinct base branch from
-origin once, then for each stack runs `restack` and force-pushes the rebased
-branches. Stops at the first conflict or push failure; the returned JSON
-(`--json`) records `failedAt: <stackName>` so the caller can resume that stack
-with `cli.ts restack --stack-name=<failed> --resume` and then re-run
-`cli.ts
-sync` for the rest. Same three-mode shape as submit: `--dry-run`,
-interactive default, `--force`.
+origin once, fast-forwards each local base branch when safe (warning and
+continuing past any that have diverged), prunes branches whose PRs merged
+(deleting the branch locally, reparenting its children, retargeting their PR
+bases on GitHub, and refreshing nav comments), then for each surviving stack
+runs `restack` and force-pushes with `--force-with-lease`. Stops at the first
+conflict or push failure; the returned JSON (`--json`) records
+`failedAt: <stackName>` so the caller can resume that stack with
+`cli.ts restack --stack-name=<failed> --resume` and then re-run `cli.ts sync`
+for the rest. Same three-mode shape as submit: `--dry-run`, interactive default,
+`--force`.
 
 ### `pr`
 
