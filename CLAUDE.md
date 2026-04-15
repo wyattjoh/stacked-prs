@@ -354,3 +354,13 @@ When making changes, update:
    modify the workflow.
 3. **This file** if you change the architecture, add scripts, or modify the git
    config schema.
+
+## Commit types for skill changes
+
+The `skills/` tree ships as part of the published plugin, so its contents are
+user-facing artifacts, not repo documentation. Commits that add, remove, or
+change `skills/**` files must use `feat:` (new behavior, new trigger phrases,
+new referenced runbooks) or `fix:` (corrections to incorrect instructions,
+broken flag syntax, removed-but-still-documented commands) so release-please
+produces a version bump. Reserve `docs:` for files that are not shipped, such as
+`README.md`, this `CLAUDE.md`, or in-repo developer notes.
