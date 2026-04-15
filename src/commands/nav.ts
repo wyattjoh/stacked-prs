@@ -86,14 +86,69 @@ interface GhComment {
   body: string;
 }
 
+export interface BuildNavPlanOptions {
+  /** Branches to omit from the nav plan (e.g. merged branches about to land). */
+  excludeBranches?: string[];
+  /**
+   * Per-branch parent overrides. Applied before rendering so the nav markdown
+   * reflects the post-reparent tree shape.
+   */
+  reparented?: Record<string, string>;
+}
+
+/**
+ * Rebuild the stack tree with the given exclude/reparent overrides applied.
+ * Returns a fresh tree; the input is not mutated.
+ */
+function applyNavOverrides(
+  tree: StackTree,
+  opts: BuildNavPlanOptions | undefined,
+): StackTree {
+  const excluded = new Set(opts?.excludeBranches ?? []);
+  const reparented = opts?.reparented ?? {};
+  if (excluded.size === 0 && Object.keys(reparented).length === 0) {
+    return tree;
+  }
+
+  const all = getAllNodes(tree).filter((n) => !excluded.has(n.branch));
+  const byBranch = new Map<string, StackNode>();
+  for (const n of all) {
+    const parent = reparented[n.branch] ?? n.parent;
+    byBranch.set(n.branch, {
+      ...n,
+      parent,
+      children: [],
+    });
+  }
+  const roots: StackNode[] = [];
+  for (const node of byBranch.values()) {
+    const parentNode = byBranch.get(node.parent);
+    if (parentNode) {
+      parentNode.children.push(node);
+    } else {
+      roots.push(node);
+    }
+  }
+  // Sort children alphabetically to match getStackTree semantics.
+  const sort = (n: StackNode): void => {
+    n.children.sort((a, b) => a.branch.localeCompare(b.branch));
+    for (const c of n.children) sort(c);
+  };
+  roots.sort((a, b) => a.branch.localeCompare(b.branch));
+  for (const r of roots) sort(r);
+  return { ...tree, roots };
+}
+
 /** Build a plan of nav comment actions without executing writes. */
 export async function buildNavPlan(
   dir: string,
   stackName: string,
   owner: string,
   repo: string,
+  options?: BuildNavPlanOptions,
 ): Promise<NavAction[]> {
-  const tree = await getStackTree(dir, stackName);
+  const rawTree = await getStackTree(dir, stackName);
+  const tree = applyNavOverrides(rawTree, options);
   const nodes = getAllNodes(tree);
 
   // Tombstoned (merged) nodes have no live ref, so `gh pr list --head` won't

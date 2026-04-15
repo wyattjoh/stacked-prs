@@ -64,6 +64,20 @@ export interface RestackOptions {
   resume?: boolean;
   /** Bypass the worktree safety precheck. Used by tests that set up dirty state on purpose. */
   skipWorktreeCheck?: boolean;
+  /**
+   * Branches to drop from the walk entirely (typically because they were
+   * merged upstream and are about to be removed from the stack). Descendants
+   * of an excluded branch are NOT excluded automatically; callers that also
+   * want to reparent them should pair this with `reparented`.
+   */
+  excludeBranches?: string[];
+  /**
+   * Per-branch parent overrides, applied during planning. A node with a
+   * reparented entry is treated as if its parent were the override value,
+   * which affects rebase target resolution and the oldParentSha snapshot.
+   * Used by `sync` to retarget children of merged branches.
+   */
+  reparented?: Record<string, string>;
 }
 
 interface ResumeState {
@@ -176,14 +190,23 @@ function filterNodes(
 }
 
 /**
- * Resolve the rebase target for a node. Root nodes (parent === base branch)
- * target `origin/<base>`; non-root nodes target the parent branch name.
+ * Resolve the rebase target given an effective parent branch name. Root
+ * nodes (parent === base branch) target `origin/<base>`; non-root nodes
+ * target the parent branch name.
  */
-function resolveTarget(node: StackNode, tree: StackTree): string {
-  if (node.parent === tree.baseBranch) {
+function resolveTargetFor(parent: string, tree: StackTree): string {
+  if (parent === tree.baseBranch) {
     return `origin/${tree.baseBranch}`;
   }
-  return node.parent;
+  return parent;
+}
+
+/** Effective parent for a node under the current options (reparent overrides). */
+function effectiveParent(
+  node: StackNode,
+  reparented: Record<string, string> | undefined,
+): string {
+  return reparented?.[node.branch] ?? node.parent;
 }
 
 /**
@@ -247,16 +270,22 @@ export async function planRestack(
     );
   }
 
-  const nodes = filterNodes(tree, opts);
+  const excluded = new Set(opts.excludeBranches ?? []);
+  const reparented = opts.reparented;
+  const nodes = filterNodes(tree, opts).filter((n) => !excluded.has(n.branch));
 
   // Snapshot every in-scope node's parent SHA before any mutation. The
   // boundary ref is the node's tree parent (another stack branch, or the base
   // branch for a root node). Using the branch name rather than `origin/<base>`
   // captures commits that were on the parent at plan time regardless of
-  // whether origin has advanced further.
+  // whether origin has advanced further. When `reparented` overrides a node's
+  // parent, the override is snapshotted instead: the caller has declared this
+  // branch will stack on that parent from now on, so boundary semantics shift
+  // accordingly.
   const oldParentSha = new Map<string, string>();
   for (const node of nodes) {
-    const sha = await revParse(dir, node.parent);
+    const parent = effectiveParent(node, reparented);
+    const sha = await revParse(dir, parent);
     oldParentSha.set(node.branch, sha);
   }
 
@@ -267,7 +296,8 @@ export async function planRestack(
   const plannedBranches = new Set<string>();
   const rebases: RebasePlan[] = [];
   for (const node of nodes) {
-    const target = resolveTarget(node, tree);
+    const parent = effectiveParent(node, reparented);
+    const target = resolveTargetFor(parent, tree);
     const branchSha = await revParse(dir, node.branch);
 
     // For the ancestor check we need the target ref to actually resolve.
@@ -277,7 +307,7 @@ export async function planRestack(
     let targetRef = target;
     const targetResolve = await runGitCommand(dir, "rev-parse", targetRef);
     if (targetResolve.code !== 0) {
-      targetRef = node.parent;
+      targetRef = parent;
     }
     const targetSha = await revParse(dir, targetRef);
 
@@ -291,9 +321,12 @@ export async function planRestack(
     );
     const locallyClean = isAncestorResult.code === 0;
 
-    // Cascade: if this node's tree parent is planned, this node must also be
-    // planned even if it's locally clean, because the parent will move.
-    const parentPlanned = plannedBranches.has(node.parent);
+    // Cascade: if this node's effective parent is planned, this node must
+    // also be planned even if it's locally clean, because the parent will
+    // move. For a reparented node, the "effective parent" may be outside
+    // the stack (e.g. the base branch), in which case the has() check is a
+    // natural no-op.
+    const parentPlanned = plannedBranches.has(parent);
     const status: RebaseStatus = locallyClean && !parentPlanned
       ? "skipped-clean"
       : "planned";

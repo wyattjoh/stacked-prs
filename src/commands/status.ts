@@ -42,7 +42,7 @@ async function getCurrentBranch(dir: string): Promise<string> {
   return stdout;
 }
 
-async function queryPr(
+export async function queryPr(
   branch: string,
   owner?: string,
   repo?: string,
