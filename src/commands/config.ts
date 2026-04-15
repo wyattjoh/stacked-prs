@@ -12,6 +12,7 @@ import {
   setStackNode,
   type StackTree,
 } from "../lib/stack.ts";
+import { configBranchCleanup } from "../lib/cleanup.ts";
 
 export interface SetBranchOpts {
   branch: string;
@@ -219,21 +220,7 @@ export async function configLandCleanup(
   mergedBranch: string,
 ): Promise<LandCleanupResult> {
   const tree = await getStackTree(dir, stackName);
-  const mergedNode = getAllNodes(tree).find((n) => n.branch === mergedBranch);
-  const baseBranch = tree.baseBranch;
-
-  // Reparent direct children of the merged branch to the base branch
-  if (mergedNode) {
-    for (const child of mergedNode.children) {
-      await setStackNode(dir, child.branch, stackName, baseBranch);
-    }
-  }
-
-  // Mark the merged branch as historical in stack-level config, then drop
-  // its branch-level config so the tombstone synthesis surfaces it as a
-  // merged root in the tree.
-  await addLandedBranch(dir, stackName, mergedBranch);
-  await removeStackBranch(dir, mergedBranch);
+  await configBranchCleanup(dir, stackName, mergedBranch, tree.baseBranch);
 
   // Re-read the tree to see how many LIVE roots remain (exclude merged nodes)
   const treeAfter = await getStackTree(dir, stackName);

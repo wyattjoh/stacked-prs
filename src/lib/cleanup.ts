@@ -1,8 +1,12 @@
 import {
+  addLandedBranch,
   findNode,
   getAllNodes,
+  getStackTree,
+  removeStackBranch,
   revParse,
   runGitCommand,
+  setStackNode,
   type StackTree,
 } from "./stack.ts";
 import { findWorktreeCollisions, type WorktreeCollision } from "./worktrees.ts";
@@ -155,4 +159,37 @@ export function previewBranchCleanup(
   }
 
   return { remainingRoots, splits };
+}
+
+export interface BranchCleanupResult {
+  removed: string;
+  splitInto: Array<{ stackName: string; branches: string[] }>;
+}
+
+/**
+ * Generic per-branch cleanup used by both `land` and `sync`. Reparents every
+ * direct child of `mergedBranch` to `newParentForChildren`, tombstones the
+ * branch by adding it to `landed-branches` and dropping its branch-level
+ * config. The caller is responsible for detecting multi-root splits if that
+ * matters (today only `land` does, via the configSplitStack path).
+ */
+export async function configBranchCleanup(
+  dir: string,
+  stackName: string,
+  mergedBranch: string,
+  newParentForChildren: string,
+): Promise<BranchCleanupResult> {
+  const tree = await getStackTree(dir, stackName);
+  const mergedNode = getAllNodes(tree).find((n) => n.branch === mergedBranch);
+
+  if (mergedNode) {
+    for (const child of mergedNode.children) {
+      await setStackNode(dir, child.branch, stackName, newParentForChildren);
+    }
+  }
+
+  await addLandedBranch(dir, stackName, mergedBranch);
+  await removeStackBranch(dir, mergedBranch);
+
+  return { removed: mergedBranch, splitInto: [] };
 }
