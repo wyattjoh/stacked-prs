@@ -100,22 +100,19 @@ async function resolveStackName(
 }
 
 function renderCreatePlan(plan: CreatePlan): string {
-  const lines = [
-    `Plan: ${plan.case}`,
-    `  branch:         ${plan.branch}`,
-    `  parent:         ${plan.parent}`,
-    `  base branch:    ${plan.baseBranch}`,
-    `  stack name:     ${plan.stackName}`,
-    `  merge strategy: ${plan.mergeStrategy}`,
-    `  commit staged:  ${plan.willCommit ? "yes" : "no"}`,
-  ];
+  const lines: string[] = [];
+  lines.push(`Stack: ${plan.stackName} (base: ${plan.baseBranch})`);
+  lines.push(`  → Create ${plan.branch} onto ${plan.parent}`);
+  lines.push(`    ↳ case: ${plan.case}`);
+  lines.push(`    ↳ merge strategy: ${plan.mergeStrategy}`);
+  if (plan.willCommit) lines.push(`    ↳ commit staged changes`);
   if (plan.worktreePath) {
-    lines.push(`  worktree:       ${plan.worktreePath}`);
+    lines.push(`    ↳ worktree: ${plan.worktreePath}`);
   }
   lines.push("");
-  lines.push("Commands:");
+  lines.push("  Commands:");
   for (const cmd of plan.commands) {
-    lines.push(`  ${cmd}`);
+    lines.push(`    ${cmd}`);
   }
   return lines.join("\n");
 }
@@ -379,12 +376,12 @@ await new Command()
     if (options.json) {
       logJson(result);
     } else if (result.ok && result.plan) {
-      const where = result.plan.worktreePath
-        ? ` (worktree: ${result.plan.worktreePath})`
-        : "";
       console.log(
-        `Created ${result.plan.branch} (stack: ${result.plan.stackName}, parent: ${result.plan.parent})${where}`,
+        `Created ${result.plan.branch} onto ${result.plan.parent} (stack: ${result.plan.stackName}).`,
       );
+      if (result.plan.worktreePath) {
+        console.log(`  ↳ worktree: ${result.plan.worktreePath}`);
+      }
     } else {
       console.error(`${result.error}: ${result.message ?? ""}`);
     }
@@ -435,10 +432,15 @@ await new Command()
           : "⊘";
         statusIcons.set(r.branch, icon);
       }
+      console.log(`Stack: ${stackName} (base: ${tree.baseBranch})`);
       console.log(renderTree(tree, { statusIcons }));
 
       if (!result.ok && result.error === "conflict") {
-        console.error("\nConflict detected. To resolve:");
+        const conflictBranch = result.rebases.find((r) =>
+          r.status === "conflict"
+        )?.branch ?? "unknown";
+        console.error(`\nConflict during rebase of ${conflictBranch}`);
+        console.error("\nTo resolve:");
         console.error(`  ${result.recovery?.resolve}`);
         console.error(`  Then: ${result.recovery?.resume}`);
         console.error(`  Or abort: ${result.recovery?.abort}`);
@@ -466,13 +468,19 @@ await new Command()
       return;
     }
 
+    if (plan.length === 0) {
+      console.log("All nav comments are up to date. Nothing to do.");
+      return;
+    }
+
+    console.log(`Nav comments (${plan.length}):`);
     for (const action of plan) {
       await executeNavAction(owner, repo, action);
       if (action.action === "create") {
-        console.log(`Created nav comment on PR #${action.prNumber}`);
+        console.log(`  ✓ #${action.prNumber} created`);
       } else {
         console.log(
-          `Updated nav comment on PR #${action.prNumber} (comment ${action.commentId})`,
+          `  ✓ #${action.prNumber} updated (comment ${action.commentId})`,
         );
       }
     }
@@ -570,7 +578,7 @@ await new Command()
       };
 
       console.log(
-        `Found ${report.findings.length} stale config entry/entries:\n`,
+        `Stale config (${report.findings.length} entry/entries):`,
       );
       for (const f of report.findings) {
         const subject = f.branch ?? f.stackName ?? "?";
@@ -578,14 +586,13 @@ await new Command()
         // identity is always visible. Stack-level findings already use the
         // stack name as the subject, so the parenthetical would just repeat.
         const stackTag = f.branch && f.stackName
-          ? `  (stack: ${colorize(f.stackName, f.stackName)})`
+          ? ` (stack: ${colorize(f.stackName, f.stackName)})`
           : "";
         console.log(
-          `  [${f.kind}] ${colorize(f.stackName, subject)}${stackTag}`,
+          `  ⚠ ${colorize(f.stackName, subject)}${stackTag} — ${f.kind}`,
         );
-        console.log(`    ${f.details}`);
-        console.log(`    keys: ${f.configKeys.join(", ")}`);
-        console.log("");
+        console.log(`    ↳ ${f.details}`);
+        console.log(`    ↳ keys: ${f.configKeys.join(", ")}`);
       }
     }
 
@@ -605,9 +612,9 @@ await new Command()
     if (options.json) {
       logJson({ ...report, applied: applyResult });
     } else {
-      console.log(`Removed ${applyResult.removed.length} config key(s):`);
+      console.log(`Removed ${applyResult.removed.length} config key(s).`);
       for (const key of applyResult.removed) {
-        console.log(`  ${key}`);
+        console.log(`  ✓ ${key}`);
       }
     }
   })
@@ -662,20 +669,34 @@ await new Command()
       if (options.json) {
         logJson(plan);
       } else {
-        console.log("Land plan for stack:", stackName);
-        console.log("Case:", plan.case);
-        console.log(
-          "Merged branches:",
-          plan.mergedBranches.join(", ") || "none",
-        );
-        console.log(
-          "Branches to rebase:",
-          plan.rebaseSteps.map((s) => s.branch).join(", ") || "none",
-        );
-        console.log(
-          "Branches to delete:",
-          plan.branchesToDelete.join(", ") || "none",
-        );
+        const lines: string[] = [];
+        lines.push(`Stack: ${stackName} (base: ${plan.baseBranch})`);
+        lines.push(`  case: ${plan.case}`);
+        if (plan.mergedBranches.length > 0) {
+          lines.push("");
+          lines.push("  Merged:");
+          for (const b of plan.mergedBranches) lines.push(`    ${b}`);
+        }
+        if (plan.rebaseSteps.length > 0) {
+          lines.push("");
+          lines.push("  Rebase:");
+          for (const s of plan.rebaseSteps) {
+            lines.push(`    → ${s.branch}  onto ${s.newTarget}`);
+          }
+        }
+        if (plan.branchesToDelete.length > 0) {
+          lines.push("");
+          lines.push("  Delete:");
+          for (const b of plan.branchesToDelete) lines.push(`    - ${b}`);
+        }
+        if (
+          plan.mergedBranches.length === 0 &&
+          plan.rebaseSteps.length === 0 &&
+          plan.branchesToDelete.length === 0
+        ) {
+          lines.push("  Nothing to do.");
+        }
+        console.log(lines.join("\n"));
       }
       return;
     }
@@ -692,11 +713,12 @@ await new Command()
       logJson(result);
     } else {
       if (result.ok) {
-        console.log(`Stack "${stackName}" landed successfully.`);
+        console.log(`Landed stack ${stackName}.`);
         if (result.result?.split && result.result.split.length > 0) {
           console.log(
-            "Split into stacks:",
-            result.result.split.map((s) => s.stackName).join(", "),
+            `  ↳ split into: ${
+              result.result.split.map((s) => s.stackName).join(", ")
+            }`,
           );
         }
       } else if (result.error === "conflict") {
@@ -716,7 +738,7 @@ await new Command()
         console.error(`  Then: ${result.recovery?.resume}`);
         console.error(`  Or abort: ${result.recovery?.abort}`);
       } else {
-        console.error("Land failed:", result.error);
+        console.error(`Land failed: ${result.error}`);
       }
     }
 
@@ -791,9 +813,7 @@ await new Command()
       if (options.json) {
         logJson({ ok: true, isNoOp: true });
       } else {
-        console.log(
-          "All PRs are up to date with correct bases, draft state, and nav comments.",
-        );
+        console.log("All PRs are up to date. Nothing to do.");
       }
       return;
     }
@@ -813,14 +833,18 @@ await new Command()
       logJson(result);
     } else if (result.ok) {
       console.log(
-        `Pushed ${result.pushedBranches.length} branch(es). ` +
-          `Created ${result.prsCreated.length} PR(s), ` +
-          `updated ${result.prsBaseUpdated.length} base(s), ` +
-          `flipped ${result.draftTransitions.length} draft state(s), ` +
-          `applied ${result.navCommentsApplied} nav comment(s).`,
+        `Submitted ${stackName}. ` +
+          `Pushed ${result.pushedBranches.length}, ` +
+          `created ${result.prsCreated.length} PR(s), ` +
+          `retargeted ${result.prsBaseUpdated.length}, ` +
+          `flipped ${result.draftTransitions.length} draft(s), ` +
+          `${result.navCommentsApplied} nav comment(s).`,
       );
-      for (const pr of result.prsCreated) {
-        console.log(`  ${pr.branch} -> ${pr.url}`);
+      if (result.prsCreated.length > 0) {
+        console.log("  Created PRs:");
+        for (const pr of result.prsCreated) {
+          console.log(`    ✓ ${pr.branch} → ${pr.url}`);
+        }
       }
     } else {
       console.error(`Submit failed: ${result.error}`);
@@ -852,7 +876,9 @@ await new Command()
       if (options.json) {
         logJson({ ok: true, isNoOp: true });
       } else {
-        console.log("All stacks are already synced with origin.");
+        console.log(
+          "All stacks are already synced with origin. Nothing to do.",
+        );
       }
       // Still fetch, so the user's origin refs are up to date even on a no-op.
       for (const base of plan.baseBranches) {
@@ -882,13 +908,13 @@ await new Command()
       );
       for (const s of result.stacks) {
         if (s.pushed && s.pushed.length > 0) {
-          console.log(`  ${s.stackName}: pushed ${s.pushed.join(", ")}`);
+          console.log(`  ✓ ${s.stackName}: pushed ${s.pushed.join(", ")}`);
         }
       }
     } else {
-      console.error(`Sync failed at stack: ${result.failedAt}`);
+      console.error(`Sync failed at stack ${result.failedAt}.`);
       const failed = result.stacks.find((s) => !s.ok);
-      if (failed?.error) console.error(`  ${failed.error}`);
+      if (failed?.error) console.error(`  ✗ ${failed.error}`);
       if (failed?.restack?.error === "conflict" && failed.restack.recovery) {
         console.error("\nTo resolve:");
         console.error(`  ${failed.restack.recovery.resolve}`);
