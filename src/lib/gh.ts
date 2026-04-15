@@ -175,6 +175,21 @@ export async function resolveRepo(
   return { owner: parsed.owner.login, repo: parsed.name };
 }
 
+/**
+ * Same as `resolveRepo` but returns null instead of throwing when the repo
+ * cannot be resolved (e.g. no gh auth, no remote, etc.). Convenience for
+ * code paths that degrade gracefully without owner/repo info.
+ */
+export async function resolveRepoOrNone(): Promise<
+  { owner: string; repo: string } | null
+> {
+  try {
+    return await resolveRepo();
+  } catch {
+    return null;
+  }
+}
+
 /** Write a fixture file for tests. */
 export async function writeFixture(
   mockDir: string,

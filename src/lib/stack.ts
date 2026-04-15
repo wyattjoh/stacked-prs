@@ -112,6 +112,62 @@ export async function revParse(dir: string, ref: string): Promise<string> {
   return stdout;
 }
 
+export interface ResumeStore<T> {
+  read(): Promise<T | null>;
+  write(state: T): Promise<void>;
+  clear(): Promise<void>;
+}
+
+/**
+ * Build a JSON-backed resume-state store against `stack.<stackName>.<key>`.
+ * Reads return null if the key is absent or fails to parse; writes overwrite;
+ * clear removes the key (swallowing "key absent" exit codes).
+ */
+export function resumeStore<T>(
+  dir: string,
+  stackName: string,
+  key: string,
+): ResumeStore<T> {
+  const configKey = `stack.${stackName}.${key}`;
+  return {
+    async read() {
+      const { code, stdout } = await runGitCommand(dir, "config", configKey);
+      if (code !== 0) return null;
+      try {
+        return JSON.parse(stdout) as T;
+      } catch {
+        return null;
+      }
+    },
+    async write(state: T) {
+      await runGitCommand(dir, "config", configKey, JSON.stringify(state));
+    },
+    async clear() {
+      await runGitCommand(dir, "config", "--unset", configKey);
+    },
+  };
+}
+
+/**
+ * Resolve a ref to its SHA, or return null if it does not exist. Uses
+ * `git rev-parse --verify --quiet` so a missing ref is an expected outcome,
+ * not an error. Shared probe for sync, submit-plan, restack, etc.
+ */
+export async function tryResolveRef(
+  dir: string,
+  ref: string,
+): Promise<string | null> {
+  const { code, stdout } = await runGitCommand(
+    dir,
+    "rev-parse",
+    "--verify",
+    "--quiet",
+    ref,
+  );
+  if (code !== 0) return null;
+  return stdout || null;
+}
+
 /** Return the list of unmerged (conflict) file paths in `dir`. */
 export async function getConflictFiles(dir: string): Promise<string[]> {
   const { stdout } = await runGitCommand(

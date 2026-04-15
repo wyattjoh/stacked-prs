@@ -1,18 +1,14 @@
 import { describe, it as test } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import {
-  addBranch,
-  createTestRepo,
-  makeTempDir,
-} from "../lib/testdata/helpers.ts";
+import { addBranch, createTestRepo, makeTempDir } from "./testdata/helpers.ts";
 import {
   addLandedBranch,
   addLandedPr,
   setBaseBranch,
   setStackNode,
-} from "../lib/stack.ts";
-import type { StackNode, StackTree } from "../lib/stack.ts";
-import { setMockDir, writeFixture } from "../lib/gh.ts";
+} from "./stack.ts";
+import type { StackNode, StackTree } from "./stack.ts";
+import { setMockDir, writeFixture } from "./gh.ts";
 import { buildNavPlan, generateNavMarkdown } from "./nav.ts";
 
 /** Acquire a temp mock dir, register it, and reset on disposal. */

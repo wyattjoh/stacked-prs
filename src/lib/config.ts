@@ -12,7 +12,7 @@ import {
   setStackNode,
   type StackTree,
 } from "./stack.ts";
-import { configBranchCleanup } from "./cleanup.ts";
+import { configBranchCleanup, reparentAndRemove } from "./cleanup.ts";
 
 export interface SetBranchOpts {
   branch: string;
@@ -176,15 +176,8 @@ export async function configFoldBranch(
     throw new Error(`Branch ${branch} not found in stack ${stackName}`);
   }
 
-  // Reparent all children of the folded branch to the folded branch's parent
-  for (const child of node.children) {
-    await setStackNode(dir, child.branch, stackName, node.parent);
-  }
-
-  // Remove the folded branch
-  await removeStackBranch(dir, branch);
-
-  return { removed: branch };
+  const { removed } = await reparentAndRemove(dir, stackName, branch);
+  return { removed };
 }
 
 export interface MoveBranchOpts {

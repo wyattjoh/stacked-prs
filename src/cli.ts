@@ -6,7 +6,7 @@ import { gh, resolveRepo, selectBestPr } from "./lib/gh.ts";
 import { prStateFrom } from "./commands/land.ts";
 import { getStackStatus } from "./commands/status.ts";
 import { restack } from "./commands/restack.ts";
-import { buildNavPlan, executeNavAction } from "./commands/nav.ts";
+import { buildNavPlan, executeNavAction } from "./lib/nav.ts";
 import { verifyRefs } from "./commands/verify-refs.ts";
 import { discoverChain } from "./commands/import-discover.ts";
 import { applyClean, detectStaleConfig } from "./commands/clean.ts";

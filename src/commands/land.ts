@@ -1,6 +1,6 @@
 import type { DirtyWorktree } from "../lib/worktrees.ts";
 import type { SplitInfo } from "../lib/config.ts";
-import type { NavAction } from "./nav.ts";
+import type { NavAction } from "../lib/nav.ts";
 import type { PrInfo } from "./status.ts";
 
 export type LandCase = "root-merged" | "all-merged";
@@ -203,7 +203,7 @@ import {
   listInProgressOperations,
   type WorktreeCollision,
 } from "../lib/worktrees.ts";
-import { gh } from "../lib/gh.ts";
+import { gh, resolveRepo } from "../lib/gh.ts";
 import {
   addLandedBranch,
   addLandedPr,
@@ -212,12 +212,14 @@ import {
   getConflictFiles,
   getStackTree,
   removeStackBranch,
+  resumeStore,
   runGitCommand,
   type StackTree,
+  tryResolveRef,
 } from "../lib/stack.ts";
 import { topologicalOrder } from "./restack.ts";
 import { configLandCleanup } from "../lib/config.ts";
-import { buildNavPlan, executeNavAction } from "./nav.ts";
+import { applyNavPlan, buildNavPlan } from "../lib/nav.ts";
 
 /**
  * Comment posted by both `executeLand` and `executeLandFromCli` when
@@ -607,6 +609,27 @@ async function detachHeadFromDeleted(
   await runGitCommand(dir, "checkout", "--detach", sha.trim());
 }
 
+/**
+ * Delete `branch` if it exists locally. Returns the outcome so callers can
+ * decide how to report it. Intentionally does not touch any stack metadata;
+ * each call site has its own tombstone/removeStackBranch ordering.
+ */
+async function deleteBranchIfExists(
+  dir: string,
+  branch: string,
+): Promise<
+  { status: "deleted" } | { status: "absent" } | {
+    status: "failed";
+    stderr: string;
+  }
+> {
+  const sha = await tryResolveRef(dir, `refs/heads/${branch}`);
+  if (sha === null) return { status: "absent" };
+  const { code, stderr } = await runGitCommand(dir, "branch", "-D", branch);
+  if (code !== 0) return { status: "failed", stderr };
+  return { status: "deleted" };
+}
+
 async function executeCaseBCleanup(
   dir: string,
   plan: LandPlan,
@@ -619,21 +642,15 @@ async function executeCaseBCleanup(
   const order = [...plan.branchesToDelete].reverse();
   for (const branch of order) {
     emit(hooks, { kind: "delete", branch }, "running");
-    const { code: existsCode } = await runGitCommand(
-      dir,
-      "rev-parse",
-      "--verify",
-      `refs/heads/${branch}`,
-    );
-    if (existsCode !== 0) {
+    const outcome = await deleteBranchIfExists(dir, branch);
+    if (outcome.status === "absent") {
       emit(hooks, { kind: "delete", branch }, "skipped", "already absent");
       continue;
     }
-    const { code, stderr } = await runGitCommand(dir, "branch", "-D", branch);
-    if (code !== 0) {
-      emit(hooks, { kind: "delete", branch }, "failed", stderr);
+    if (outcome.status === "failed") {
+      emit(hooks, { kind: "delete", branch }, "failed", outcome.stderr);
       throw new LandError(
-        `Failed to delete ${branch}: ${stderr}`,
+        `Failed to delete ${branch}: ${outcome.stderr}`,
         plan,
         emptyRollback(),
         { kind: "delete", branch },
@@ -952,20 +969,9 @@ async function executeCaseA(
   // the stack has already landed, rolling back nav is not meaningful.
   emit(hooks, { kind: "nav" }, "running");
   try {
-    const repoInfo = await gh("repo", "view", "--json", "owner,name");
-    const parsed = JSON.parse(repoInfo) as {
-      owner: { login: string };
-      name: string;
-    };
-    const navActions = await buildNavPlan(
-      dir,
-      plan.stackName,
-      parsed.owner.login,
-      parsed.name,
-    );
-    for (const action of navActions) {
-      await executeNavAction(parsed.owner.login, parsed.name, action);
-    }
+    const { owner, repo } = await resolveRepo();
+    const navActions = await buildNavPlan(dir, plan.stackName, owner, repo);
+    await applyNavPlan(owner, repo, navActions);
     emit(hooks, { kind: "nav" }, navActions.length === 0 ? "skipped" : "ok");
   } catch (err) {
     emit(hooks, { kind: "nav" }, "failed", (err as Error).message);
@@ -1020,19 +1026,13 @@ async function executeCaseA(
       await removeStackBranch(dir, branch);
     }
 
-    const { code: existsCode } = await runGitCommand(
-      dir,
-      "rev-parse",
-      "--verify",
-      `refs/heads/${branch}`,
-    );
-    if (existsCode !== 0) {
+    const outcome = await deleteBranchIfExists(dir, branch);
+    if (outcome.status === "absent") {
       emit(hooks, { kind: "delete", branch }, "skipped", "already absent");
       continue;
     }
-    const { code, stderr } = await runGitCommand(dir, "branch", "-D", branch);
-    if (code !== 0) {
-      emit(hooks, { kind: "delete", branch }, "failed", stderr);
+    if (outcome.status === "failed") {
+      emit(hooks, { kind: "delete", branch }, "failed", outcome.stderr);
       continue;
     }
     emit(hooks, { kind: "delete", branch }, "ok");
@@ -1214,21 +1214,14 @@ export async function executeLand(
   return await executeCaseA(dir, plan, hooks);
 }
 
+const landResumeStateFor = (dir: string, stackName: string) =>
+  resumeStore<LandResumeState>(dir, stackName, "land-resume-state");
+
 async function readLandResumeState(
   dir: string,
   stackName: string,
 ): Promise<LandResumeState | null> {
-  const { code, stdout } = await runGitCommand(
-    dir,
-    "config",
-    `stack.${stackName}.land-resume-state`,
-  );
-  if (code !== 0) return null;
-  try {
-    return JSON.parse(stdout) as LandResumeState;
-  } catch {
-    return null;
-  }
+  return await landResumeStateFor(dir, stackName).read();
 }
 
 async function writeLandResumeState(
@@ -1236,24 +1229,14 @@ async function writeLandResumeState(
   stackName: string,
   state: LandResumeState,
 ): Promise<void> {
-  await runGitCommand(
-    dir,
-    "config",
-    `stack.${stackName}.land-resume-state`,
-    JSON.stringify(state),
-  );
+  await landResumeStateFor(dir, stackName).write(state);
 }
 
 async function clearLandResumeState(
   dir: string,
   stackName: string,
 ): Promise<void> {
-  await runGitCommand(
-    dir,
-    "config",
-    "--unset",
-    `stack.${stackName}.land-resume-state`,
-  );
+  await landResumeStateFor(dir, stackName).clear();
 }
 
 export async function executeLandFromCli(
@@ -1363,17 +1346,14 @@ export async function executeLandFromCli(
     const order = [...plan.branchesToDelete].reverse();
     for (const branch of order) {
       if (completed.deletedBranches.includes(branch)) continue;
-      const { code: existsCode } = await runGitCommand(
-        dir,
-        "rev-parse",
-        "--verify",
-        `refs/heads/${branch}`,
-      );
-      if (existsCode !== 0) {
+      const outcome = await deleteBranchIfExists(dir, branch);
+      if (outcome.status === "absent") {
         completed.deletedBranches.push(branch);
         continue;
       }
-      await runGitCommand(dir, "branch", "-D", branch);
+      // Swallow "failed" (matches pre-refactor: the exit code was ignored
+      // and the branch was still marked deleted). removeStackBranch runs
+      // regardless so the metadata doesn't linger as an orphan.
       await removeStackBranch(dir, branch);
       completed.deletedBranches.push(branch);
       await writeLandResumeState(dir, stackName, completed);
@@ -1504,20 +1484,9 @@ export async function executeLandFromCli(
   }
 
   if (!completed.navDone) {
-    const repoInfo = await gh("repo", "view", "--json", "owner,name");
-    const parsed = JSON.parse(repoInfo) as {
-      owner: { login: string };
-      name: string;
-    };
-    const navActions = await buildNavPlan(
-      dir,
-      stackName,
-      parsed.owner.login,
-      parsed.name,
-    );
-    for (const action of navActions) {
-      await executeNavAction(parsed.owner.login, parsed.name, action);
-    }
+    const { owner, repo } = await resolveRepo();
+    const navActions = await buildNavPlan(dir, stackName, owner, repo);
+    await applyNavPlan(owner, repo, navActions);
     completed.navDone = true;
     await writeLandResumeState(dir, stackName, completed);
   }
@@ -1551,24 +1520,8 @@ export async function executeLandFromCli(
       await removeStackBranch(dir, branch);
     }
 
-    const { code: existsCode } = await runGitCommand(
-      dir,
-      "rev-parse",
-      "--verify",
-      `refs/heads/${branch}`,
-    );
-    if (existsCode !== 0) {
-      completed.deletedBranches.push(branch);
-      await writeLandResumeState(dir, stackName, completed);
-      continue;
-    }
-    const { code: deleteCode } = await runGitCommand(
-      dir,
-      "branch",
-      "-D",
-      branch,
-    );
-    if (deleteCode !== 0) {
+    const outcome = await deleteBranchIfExists(dir, branch);
+    if (outcome.status === "failed") {
       // Leave the ref in place; the tombstone still stands. Do NOT mark
       // this branch deleted so a subsequent --resume can retry.
       continue;

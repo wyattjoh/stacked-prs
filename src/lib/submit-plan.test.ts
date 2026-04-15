@@ -11,7 +11,7 @@ import { setBaseBranch, setStackNode } from "./stack.ts";
 import type { StackTree } from "./stack.ts";
 import { setMockDir, writeFixture } from "./gh.ts";
 import { computeSubmitPlan } from "./submit-plan.ts";
-import { generateNavMarkdown } from "../commands/nav.ts";
+import { generateNavMarkdown } from "./nav.ts";
 
 /** Acquire a temp mock dir, register it, and reset on disposal. */
 async function makeMockDir(): Promise<AsyncDisposable & { path: string }> {

@@ -3,11 +3,12 @@ import {
   getMergeStrategy,
   getStackTree,
   runGitCommand,
+  tryResolveRef,
 } from "./stack.ts";
 import type { MergeStrategy } from "./stack.ts";
 import { gh, selectBestPr } from "./gh.ts";
-import { buildNavPlan } from "../commands/nav.ts";
-import type { NavAction } from "../commands/nav.ts";
+import { buildNavPlan } from "./nav.ts";
+import type { NavAction } from "./nav.ts";
 
 export interface BranchSubmitPlan {
   branch: string;
@@ -60,28 +61,10 @@ interface GhPrInfo {
   baseRefName: string;
 }
 
-/**
- * Return the commit SHA that a ref points to, or null if the ref does not
- * exist locally. Used to compare local branch tips against their
- * remote-tracking counterparts without failing when the remote ref is missing
- * (e.g. a newly-created branch that has never been pushed).
- */
-async function resolveRef(dir: string, ref: string): Promise<string | null> {
-  const result = await runGitCommand(
-    dir,
-    "rev-parse",
-    "--verify",
-    "--quiet",
-    ref,
-  );
-  if (result.code !== 0) return null;
-  return result.stdout || null;
-}
-
 async function computeNeedsPush(dir: string, branch: string): Promise<boolean> {
   const [local, remote] = await Promise.all([
-    resolveRef(dir, branch),
-    resolveRef(dir, `refs/remotes/origin/${branch}`),
+    tryResolveRef(dir, branch),
+    tryResolveRef(dir, `refs/remotes/origin/${branch}`),
   ]);
   if (local === null) return false;
   if (remote === null) return true;

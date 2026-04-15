@@ -3,10 +3,12 @@ import {
   getConflictFiles,
   getStackTree,
   rebaseInProgress,
+  resumeStore,
   revParse,
   runGitCommand,
   type StackNode,
   type StackTree,
+  tryResolveRef,
 } from "../lib/stack.ts";
 import { checkWorktreeSafety } from "../lib/worktrees.ts";
 
@@ -96,21 +98,14 @@ interface ResumeState {
   conflictedBranch?: string;
 }
 
+const resumeStateFor = (dir: string, stackName: string) =>
+  resumeStore<ResumeState>(dir, stackName, "resume-state");
+
 async function readResumeState(
   dir: string,
   stackName: string,
 ): Promise<ResumeState | null> {
-  const { code, stdout } = await runGitCommand(
-    dir,
-    "config",
-    `stack.${stackName}.resume-state`,
-  );
-  if (code !== 0) return null;
-  try {
-    return JSON.parse(stdout.trim()) as ResumeState;
-  } catch {
-    return null;
-  }
+  return await resumeStateFor(dir, stackName).read();
 }
 
 async function writeResumeState(
@@ -118,24 +113,14 @@ async function writeResumeState(
   stackName: string,
   state: ResumeState,
 ): Promise<void> {
-  await runGitCommand(
-    dir,
-    "config",
-    `stack.${stackName}.resume-state`,
-    JSON.stringify(state),
-  );
+  await resumeStateFor(dir, stackName).write(state);
 }
 
 async function clearResumeState(
   dir: string,
   stackName: string,
 ): Promise<void> {
-  await runGitCommand(
-    dir,
-    "config",
-    "--unset",
-    `stack.${stackName}.resume-state`,
-  );
+  await resumeStateFor(dir, stackName).clear();
 }
 
 /**
@@ -220,16 +205,8 @@ async function findMissingRefs(
 ): Promise<string[]> {
   const missing: string[] = [];
   for (const branch of branches) {
-    const probe = await runGitCommand(
-      dir,
-      "rev-parse",
-      "--verify",
-      "--quiet",
-      `refs/heads/${branch}`,
-    );
-    if (probe.code !== 0) {
-      missing.push(branch);
-    }
+    const sha = await tryResolveRef(dir, `refs/heads/${branch}`);
+    if (sha === null) missing.push(branch);
   }
   return missing;
 }

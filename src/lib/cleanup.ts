@@ -105,37 +105,58 @@ export async function detectCleanWorktreeCollisions(
   return await findWorktreeCollisions(dir, branches);
 }
 
+export interface TreeProjection {
+  /** Live branches whose parent changes; map[branch] = new parent. */
+  newParents: Map<string, string>;
+  /** Branches that become roots of the surviving tree (parent == base). */
+  remainingRoots: string[];
+  /** Generated stack names when more than one root remains. */
+  splits: Array<{ stackName: string; branches: string[] }>;
+}
+
 /**
- * Compute (in memory, no config writes) the shape of a cleanup after
- * removing `mergedBranch` from the tree: children of the merged branch
- * become new roots, and if more than one root remains we anticipate a
- * split with generated stack names.
+ * Project the tree shape after removing every branch in `mergedSet`.
+ * For each surviving node, climb past merged ancestors to find its new
+ * parent. Roots are collected (promoted children of merged roots included),
+ * and when more than one root remains we anticipate a split with generated
+ * stack names. Writes nothing; all computation is in memory.
  */
-export function previewBranchCleanup(
+export function projectTreeAfterRemoval(
   tree: StackTree,
-  mergedBranch: string,
-): CleanupPreview {
-  const mergedNode = findNode(tree, mergedBranch);
-  const remainingRoots: string[] = [];
-  for (const root of tree.roots) {
-    if (root.branch === mergedBranch) {
-      if (mergedNode) {
-        for (const child of mergedNode.children) {
-          remainingRoots.push(child.branch);
-        }
-      }
-      continue;
+  mergedSet: ReadonlySet<string>,
+): TreeProjection {
+  const base = tree.baseBranch;
+  const nodes = getAllNodes(tree);
+
+  // Climb past merged ancestors to find the first non-merged parent (or base).
+  const resolveLiveParent = (parent: string): string => {
+    let ancestor = parent;
+    while (ancestor !== base && mergedSet.has(ancestor)) {
+      ancestor = findNode(tree, ancestor)?.parent ?? base;
     }
-    remainingRoots.push(root.branch);
+    return ancestor;
+  };
+
+  const newParents = new Map<string, string>();
+  const remainingRoots: string[] = [];
+  for (const node of nodes) {
+    if (mergedSet.has(node.branch)) continue;
+    const liveParent = resolveLiveParent(node.parent);
+    if (liveParent !== node.parent) {
+      newParents.set(node.branch, liveParent);
+    }
+    if (liveParent === base) {
+      remainingRoots.push(node.branch);
+    }
   }
 
   if (remainingRoots.length <= 1) {
-    return { remainingRoots, splits: [] };
+    return { newParents, remainingRoots, splits: [] };
   }
 
   // Mirror the naming logic in configSplitStack.
   const used = new Set<string>();
-  const splits: CleanupPreview["splits"] = [];
+  const splits: TreeProjection["splits"] = [];
   for (const rootBranch of remainingRoots) {
     let name = rootBranch.replace(/^(?:feature|fix|chore)\//, "");
     if (used.has(name)) {
@@ -149,6 +170,7 @@ export function previewBranchCleanup(
     const branches: string[] = [];
     if (subRoot) {
       const walk = (n: typeof subRoot): void => {
+        if (mergedSet.has(n.branch)) return;
         branches.push(n.branch);
         for (const c of n.children) walk(c);
       };
@@ -158,12 +180,66 @@ export function previewBranchCleanup(
     splits.push({ stackName: name, branches });
   }
 
+  return { newParents, remainingRoots, splits };
+}
+
+/**
+ * Compute the shape of a cleanup after removing `mergedBranch` from the
+ * tree. Preserved for call sites that only care about a single-branch removal;
+ * delegates to `projectTreeAfterRemoval`.
+ */
+export function previewBranchCleanup(
+  tree: StackTree,
+  mergedBranch: string,
+): CleanupPreview {
+  const { remainingRoots, splits } = projectTreeAfterRemoval(
+    tree,
+    new Set([mergedBranch]),
+  );
   return { remainingRoots, splits };
 }
 
 export interface BranchCleanupResult {
   removed: string;
   splitInto: Array<{ stackName: string; branches: string[] }>;
+}
+
+export interface ReparentAndRemoveOpts {
+  /** Parent to assign every child of `branch`. Defaults to `branch`'s own parent. */
+  newParentForChildren?: string;
+  /** When true, also record `branch` in `landed-branches` before removal. */
+  tombstone?: boolean;
+}
+
+/**
+ * Reparent every direct child of `branch` to `newParentForChildren`
+ * (default: the branch's own parent), then drop the branch's metadata.
+ * Optionally tombstones the branch by adding it to `landed-branches`.
+ * Shared by `configFoldBranch` (no tombstone) and `configBranchCleanup`
+ * (tombstone + explicit new parent).
+ */
+export async function reparentAndRemove(
+  dir: string,
+  stackName: string,
+  branch: string,
+  opts: ReparentAndRemoveOpts = {},
+): Promise<BranchCleanupResult> {
+  const tree = await getStackTree(dir, stackName);
+  const node = getAllNodes(tree).find((n) => n.branch === branch);
+  const newParent = opts.newParentForChildren ?? node?.parent;
+
+  if (node && newParent !== undefined) {
+    for (const child of node.children) {
+      await setStackNode(dir, child.branch, stackName, newParent);
+    }
+  }
+
+  if (opts.tombstone) {
+    await addLandedBranch(dir, stackName, branch);
+  }
+  await removeStackBranch(dir, branch);
+
+  return { removed: branch, splitInto: [] };
 }
 
 /**
@@ -179,17 +255,8 @@ export async function configBranchCleanup(
   mergedBranch: string,
   newParentForChildren: string,
 ): Promise<BranchCleanupResult> {
-  const tree = await getStackTree(dir, stackName);
-  const mergedNode = getAllNodes(tree).find((n) => n.branch === mergedBranch);
-
-  if (mergedNode) {
-    for (const child of mergedNode.children) {
-      await setStackNode(dir, child.branch, stackName, newParentForChildren);
-    }
-  }
-
-  await addLandedBranch(dir, stackName, mergedBranch);
-  await removeStackBranch(dir, mergedBranch);
-
-  return { removed: mergedBranch, splitInto: [] };
+  return await reparentAndRemove(dir, stackName, mergedBranch, {
+    newParentForChildren,
+    tombstone: true,
+  });
 }

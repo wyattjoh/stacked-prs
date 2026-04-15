@@ -1,6 +1,7 @@
 import { runGitCommand } from "../lib/stack.ts";
 import { gh } from "../lib/gh.ts";
-import { executeNavAction } from "./nav.ts";
+import { applyNavPlan } from "../lib/nav.ts";
+import type { NavAction } from "../lib/nav.ts";
 import type { SubmitPlan } from "../lib/submit-plan.ts";
 
 export interface SubmitExecutionResult {
@@ -140,15 +141,13 @@ export async function executeSubmit(
     }
   }
 
-  for (const nav of plan.navComments) {
-    await executeNavAction(owner, repo, {
-      action: nav.action,
-      prNumber: nav.prNumber,
-      body: nav.body,
-      ...(nav.commentId !== undefined ? { commentId: nav.commentId } : {}),
-    });
-    result.navCommentsApplied++;
-  }
+  const navActions: NavAction[] = plan.navComments.map((nav) => ({
+    action: nav.action,
+    prNumber: nav.prNumber,
+    body: nav.body,
+    ...(nav.commentId !== undefined ? { commentId: nav.commentId } : {}),
+  }));
+  result.navCommentsApplied += await applyNavPlan(owner, repo, navActions);
 
   return result;
 }

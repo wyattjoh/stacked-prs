@@ -1,6 +1,6 @@
-import { getAllNodes, getLandedPrs, getStackTree } from "../lib/stack.ts";
-import type { StackNode, StackTree } from "../lib/stack.ts";
-import { gh, selectBestPr } from "../lib/gh.ts";
+import { getAllNodes, getLandedPrs, getStackTree } from "./stack.ts";
+import type { StackNode, StackTree } from "./stack.ts";
+import { gh, selectBestPr } from "./gh.ts";
 
 export interface NavAction {
   action: "create" | "update";
@@ -255,4 +255,19 @@ export async function executeNavAction(
     "--field",
     `body=${action.body}`,
   );
+}
+
+/**
+ * Apply a batch of nav actions sequentially. Returns the count applied.
+ * Failures propagate; callers decide whether to catch.
+ */
+export async function applyNavPlan(
+  owner: string,
+  repo: string,
+  actions: readonly NavAction[],
+): Promise<number> {
+  for (const action of actions) {
+    await executeNavAction(owner, repo, action);
+  }
+  return actions.length;
 }

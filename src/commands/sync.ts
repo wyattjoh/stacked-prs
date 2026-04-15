@@ -4,16 +4,20 @@ import {
   getAllStackTrees,
   runGitCommand,
   type StackTree,
+  tryResolveRef,
 } from "../lib/stack.ts";
 import { planRestack, restack } from "./restack.ts";
 import type { RebasePlan, RestackResult } from "./restack.ts";
-import { buildNavPlan, executeNavAction } from "./nav.ts";
-import type { NavAction } from "./nav.ts";
+import { buildNavPlan, executeNavAction } from "../lib/nav.ts";
+import type { NavAction } from "../lib/nav.ts";
 import { queryPr } from "./status.ts";
 import type { PrInfo } from "./status.ts";
 import type { LandPrUpdate } from "./land.ts";
-import { gh, resolveRepo } from "../lib/gh.ts";
-import { configBranchCleanup } from "../lib/cleanup.ts";
+import { gh, resolveRepoOrNone } from "../lib/gh.ts";
+import {
+  configBranchCleanup,
+  projectTreeAfterRemoval,
+} from "../lib/cleanup.ts";
 
 // =========================================================================
 // Types
@@ -89,21 +93,6 @@ export interface SyncResult {
 // Helpers
 // =========================================================================
 
-async function tryRevParse(
-  dir: string,
-  ref: string,
-): Promise<string | undefined> {
-  const result = await runGitCommand(
-    dir,
-    "rev-parse",
-    "--verify",
-    "--quiet",
-    ref,
-  );
-  if (result.code !== 0) return undefined;
-  return result.stdout.trim() || undefined;
-}
-
 async function isAncestor(
   dir: string,
   a: string,
@@ -129,10 +118,10 @@ async function planBaseFastForward(
   dir: string,
   base: string,
 ): Promise<BaseFfPlan | undefined> {
-  const localSha = await tryRevParse(dir, base);
+  const localSha = await tryResolveRef(dir, base);
   if (!localSha) return undefined;
 
-  const originSha = await tryRevParse(dir, `origin/${base}`);
+  const originSha = await tryResolveRef(dir, `origin/${base}`);
   if (!originSha) {
     return { branch: base, status: "no-origin", localSha };
   }
@@ -150,26 +139,6 @@ async function planBaseFastForward(
   }
 
   return { branch: base, status: "skip-diverged", localSha, originSha };
-}
-
-function computeNewParents(
-  tree: StackTree,
-  mergedSet: Set<string>,
-): Map<string, string> {
-  const result = new Map<string, string>();
-  const base = tree.baseBranch;
-  for (const node of getAllNodes(tree)) {
-    if (mergedSet.has(node.branch)) continue;
-    let ancestor = node.parent;
-    while (ancestor !== base && mergedSet.has(ancestor)) {
-      const ancestorNode = findNode(tree, ancestor);
-      ancestor = ancestorNode?.parent ?? base;
-    }
-    if (ancestor !== node.parent) {
-      result.set(node.branch, ancestor);
-    }
-  }
-  return result;
 }
 
 // =========================================================================
@@ -207,7 +176,7 @@ async function planStackSync(
     if (pr?.state?.toUpperCase() === "MERGED") mergedSet.add(branch);
   }
 
-  const newParentByBranch = computeNewParents(tree, mergedSet);
+  const newParentByBranch = projectTreeAfterRemoval(tree, mergedSet).newParents;
 
   // Build prune steps in topological order (parents before children).
   const pruneSteps: BranchPruneStep[] = [];
@@ -322,16 +291,9 @@ export async function computeSyncPlan(dir: string): Promise<SyncPlan> {
 
   // Resolve owner/repo once. If gh isn't configured (no remote, offline, etc.)
   // we fall back to unscoped queryPr / no nav plan; pruning still works.
-  let owner: string | undefined;
-  let repo: string | undefined;
-  try {
-    const resolved = await resolveRepo();
-    owner = resolved.owner;
-    repo = resolved.repo;
-  } catch {
-    owner = undefined;
-    repo = undefined;
-  }
+  const resolved = await resolveRepoOrNone();
+  const owner = resolved?.owner;
+  const repo = resolved?.repo;
 
   const currentBranch = await getCurrentBranch(dir);
 
@@ -431,16 +393,9 @@ export async function executeSync(
   // Resolve owner/repo once for gh mutations. If resolution fails we can
   // still run prune + restack + push; PR edits and nav updates will be
   // skipped rather than error the entire sync.
-  let owner: string | undefined;
-  let repo: string | undefined;
-  try {
-    const resolved = await resolveRepo();
-    owner = resolved.owner;
-    repo = resolved.repo;
-  } catch {
-    owner = undefined;
-    repo = undefined;
-  }
+  const resolved = await resolveRepoOrNone();
+  const owner = resolved?.owner;
+  const repo = resolved?.repo;
 
   for (const stackPlan of plan.stacks) {
     if (stackPlan.isNoOp) {
