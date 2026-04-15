@@ -7,12 +7,13 @@ import {
 } from "../lib/stack.ts";
 import { planRestack, restack } from "./restack.ts";
 import type { RebasePlan, RestackResult } from "./restack.ts";
-import { buildNavPlan } from "./nav.ts";
+import { buildNavPlan, executeNavAction } from "./nav.ts";
 import type { NavAction } from "./nav.ts";
 import { queryPr } from "./status.ts";
 import type { PrInfo } from "./status.ts";
 import type { LandPrUpdate } from "./land.ts";
-import { resolveRepo } from "../lib/gh.ts";
+import { gh, resolveRepo } from "../lib/gh.ts";
+import { configBranchCleanup } from "../lib/cleanup.ts";
 
 // =========================================================================
 // Types
@@ -51,6 +52,10 @@ export interface StackSyncPlan {
   navUpdates: NavAction[];
   rebases: RebasePlan[];
   branchesToPush: string[];
+  /** Branches the restack planner was told to exclude (merged tombstones). */
+  excludeBranches: string[];
+  /** Per-branch parent overrides applied when planning the restack. */
+  reparented: Record<string, string>;
   isNoOp: boolean;
 }
 
@@ -286,6 +291,8 @@ async function planStackSync(
     navUpdates,
     rebases,
     branchesToPush,
+    excludeBranches,
+    reparented,
     isNoOp,
   };
 }
@@ -354,11 +361,21 @@ export async function computeSyncPlan(dir: string): Promise<SyncPlan> {
 /**
  * Execute a full cross-stack sync.
  *
- * TODO(sync-rewrite): this is a transitional stub covering only the
- * rebase+push path. The merged-PR pruning executor (PR base edits, branch
- * deletion, nav comment writes) lands in a follow-up task. Pruning plans
- * surface in the rendered output and can be actioned manually via `land`
- * and `nav` for now.
+ * Flow per invocation:
+ *   1. Fetch every distinct base from origin. Any fetch failure short-circuits.
+ *   2. Fast-forward local base branches that are strictly behind origin. If
+ *      the user is on a base branch, use `git merge --ff-only`; otherwise
+ *      update the ref directly without touching the working tree.
+ *   3. For each stack, in order:
+ *      a. Apply PR base updates (`gh pr edit --base`, optional `pr ready`).
+ *      b. Apply nav comment updates via `executeNavAction`.
+ *      c. Prune each merged branch: checkout base if needed, reparent
+ *         children via `configBranchCleanup`, then `git branch -D`.
+ *      d. Restack with the same excludeBranches/reparented overrides the
+ *         planner used so rebase targets match the post-prune topology.
+ *      e. Force-push updated branches with `--force-with-lease`.
+ *   Any failure within a stack marks the result as not-ok and stops the
+ *   executor; subsequent stacks are skipped entirely.
  */
 export async function executeSync(
   dir: string,
@@ -384,25 +401,177 @@ export async function executeSync(
     result.fetched.push(base);
   }
 
+  // Fast-forward local base branches where safe. `skip-diverged`,
+  // `skip-ahead`, `up-to-date`, and `no-origin` are all intentional no-ops:
+  // the renderer already warned the user about divergence.
+  const currentBranch = await getCurrentBranch(dir);
+  for (const ff of plan.baseFastForwards) {
+    if (ff.status !== "ff") continue;
+    if (currentBranch === ff.branch) {
+      const merge = await runGitCommand(
+        dir,
+        "merge",
+        "--ff-only",
+        `origin/${ff.branch}`,
+      );
+      if (merge.code !== 0) continue;
+    } else {
+      if (!ff.originSha) continue;
+      const update = await runGitCommand(
+        dir,
+        "update-ref",
+        `refs/heads/${ff.branch}`,
+        ff.originSha,
+      );
+      if (update.code !== 0) continue;
+    }
+    result.fastForwarded.push(ff.branch);
+  }
+
+  // Resolve owner/repo once for gh mutations. If resolution fails we can
+  // still run prune + restack + push; PR edits and nav updates will be
+  // skipped rather than error the entire sync.
+  let owner: string | undefined;
+  let repo: string | undefined;
+  try {
+    const resolved = await resolveRepo();
+    owner = resolved.owner;
+    repo = resolved.repo;
+  } catch {
+    owner = undefined;
+    repo = undefined;
+  }
+
   for (const stackPlan of plan.stacks) {
     if (stackPlan.isNoOp) {
       result.stacks.push({ stackName: stackPlan.stackName, ok: true });
       continue;
     }
 
-    const restackResult = await restack(dir, stackPlan.stackName, {});
-    if (!restackResult.ok) {
-      result.stacks.push({
-        stackName: stackPlan.stackName,
-        ok: false,
-        restack: restackResult,
-        error: restackResult.error ?? "restack failed",
-      });
+    const stackResult: StackSyncResult = {
+      stackName: stackPlan.stackName,
+      ok: true,
+      prunedBranches: [],
+    };
+
+    const fail = (error: string, extras: Partial<StackSyncResult> = {}) => {
+      stackResult.ok = false;
+      stackResult.error = error;
+      Object.assign(stackResult, extras);
+      result.stacks.push(stackResult);
       result.ok = false;
       result.failedAt = stackPlan.stackName;
       return result;
+    };
+
+    // 1. PR base edits (and flip-to-ready if needed). Done before any
+    // destructive local operations so a partial run still leaves GitHub
+    // in a consistent state relative to what's about to happen locally.
+    if (owner && repo) {
+      for (const update of stackPlan.prBaseUpdates) {
+        try {
+          await gh(
+            "pr",
+            "edit",
+            String(update.prNumber),
+            "--base",
+            update.newBase,
+            "--repo",
+            `${owner}/${repo}`,
+          );
+          if (update.flipToReady) {
+            await gh(
+              "pr",
+              "ready",
+              String(update.prNumber),
+              "--repo",
+              `${owner}/${repo}`,
+            );
+          }
+        } catch (err) {
+          return fail(
+            `gh pr edit #${update.prNumber} failed: ${(err as Error).message}`,
+          );
+        }
+      }
     }
 
+    // 2. Nav comment updates. Keep these before prune so merged tombstones
+    // in the old tree still exist when executeNavAction runs (mirrors the
+    // buildNavPlan input that produced these actions).
+    if (owner && repo) {
+      for (const action of stackPlan.navUpdates) {
+        try {
+          await executeNavAction(owner, repo, action);
+        } catch (err) {
+          return fail(
+            `nav ${action.action} for #${action.prNumber} failed: ${
+              (err as Error).message
+            }`,
+          );
+        }
+      }
+    }
+
+    // 3. Prune merged branches. If we're currently on one of them (or on
+    // any branch being rebased through), switch to the stack's base first.
+    // Do it once per stack rather than per branch.
+    let switchedToBase = false;
+    for (const step of stackPlan.pruneSteps) {
+      if (step.isCurrentBranch && !switchedToBase) {
+        const co = await runGitCommand(
+          dir,
+          "checkout",
+          stackPlan.baseBranch,
+        );
+        if (co.code !== 0) {
+          return fail(
+            `git checkout ${stackPlan.baseBranch} failed: ${co.stderr.trim()}`,
+          );
+        }
+        switchedToBase = true;
+      }
+
+      const newParentForChildren = step.childReparents.length > 0
+        ? step.childReparents[0].newParent
+        : stackPlan.baseBranch;
+      try {
+        await configBranchCleanup(
+          dir,
+          stackPlan.stackName,
+          step.branch,
+          newParentForChildren,
+        );
+      } catch (err) {
+        return fail(
+          `configBranchCleanup(${step.branch}) failed: ${
+            (err as Error).message
+          }`,
+        );
+      }
+
+      const del = await runGitCommand(dir, "branch", "-D", step.branch);
+      if (del.code !== 0) {
+        return fail(
+          `git branch -D ${step.branch} failed: ${del.stderr.trim()}`,
+        );
+      }
+      stackResult.prunedBranches!.push(step.branch);
+    }
+
+    // 4. Restack with the same options the planner used so rebase targets
+    // line up with the post-prune topology.
+    const restackResult = await restack(dir, stackPlan.stackName, {
+      excludeBranches: stackPlan.excludeBranches,
+      reparented: stackPlan.reparented,
+    });
+    stackResult.restack = restackResult;
+    if (!restackResult.ok) {
+      return fail(restackResult.error ?? "restack failed");
+    }
+
+    // 5. Force-push updated branches together so GitHub sees the retarget
+    // and the new tips in a single round-trip.
     if (stackPlan.branchesToPush.length > 0) {
       const pushResult = await runGitCommand(
         dir,
@@ -412,24 +581,14 @@ export async function executeSync(
         ...stackPlan.branchesToPush,
       );
       if (pushResult.code !== 0) {
-        result.stacks.push({
-          stackName: stackPlan.stackName,
-          ok: false,
-          restack: restackResult,
-          error: `git push failed: ${pushResult.stderr || pushResult.stdout}`,
-        });
-        result.ok = false;
-        result.failedAt = stackPlan.stackName;
-        return result;
+        return fail(
+          `git push failed: ${pushResult.stderr || pushResult.stdout}`,
+        );
       }
+      stackResult.pushed = stackPlan.branchesToPush;
     }
 
-    result.stacks.push({
-      stackName: stackPlan.stackName,
-      ok: true,
-      restack: restackResult,
-      pushed: stackPlan.branchesToPush,
-    });
+    result.stacks.push(stackResult);
   }
 
   return result;

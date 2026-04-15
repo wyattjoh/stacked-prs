@@ -8,7 +8,12 @@ import {
 } from "../lib/testdata/helpers.ts";
 import { runGitCommand, setBaseBranch, setStackNode } from "../lib/stack.ts";
 import { setMockDir, writeFixture } from "../lib/gh.ts";
-import { computeSyncPlan, renderSyncPlan, type SyncPlan } from "./sync.ts";
+import {
+  computeSyncPlan,
+  executeSync,
+  renderSyncPlan,
+  type SyncPlan,
+} from "./sync.ts";
 
 async function setupStack(
   dir: string,
@@ -293,6 +298,8 @@ describe("computeSyncPlan", () => {
             },
           ],
           branchesToPush: ["feat/c"],
+          excludeBranches: [],
+          reparented: {},
           isNoOp: false,
         },
       ],
@@ -316,5 +323,176 @@ describe("computeSyncPlan", () => {
         isNoOp: true,
       }),
     ).toContain("All stacks are already synced");
+  });
+});
+
+describe("executeSync", () => {
+  test("prunes merged middle branch, reparents child, pushes", async () => {
+    await using repo = await createTestRepo();
+    await using mock = await makeMockDir();
+    await writeRepoViewFixture(mock.path);
+
+    await addBranch(repo.dir, "feat/a", "main");
+    await addBranch(repo.dir, "feat/b", "feat/a");
+    await addBranch(repo.dir, "feat/c", "feat/b");
+    await setupStack(repo.dir, "s", [
+      ["feat/a", "main"],
+      ["feat/b", "feat/a"],
+      ["feat/c", "feat/b"],
+    ]);
+    await using _bare = await wireOrigin(repo.dir);
+    // Publish the feature branches so force-pushes have something to update.
+    await runGitCommand(
+      repo.dir,
+      "push",
+      "origin",
+      "feat/a",
+      "feat/b",
+      "feat/c",
+    );
+
+    await writePrListFixture(mock.path, "feat/a", [{
+      number: 1,
+      state: "OPEN",
+    }]);
+    await writePrListFixture(mock.path, "feat/b", [{
+      number: 2,
+      state: "MERGED",
+    }]);
+    await writePrListFixture(mock.path, "feat/c", [{
+      number: 3,
+      state: "OPEN",
+    }]);
+
+    // Stay off feat/b so the prune doesn't need a base-checkout.
+    await runGitCommand(repo.dir, "checkout", "feat/a");
+
+    const plan = await computeSyncPlan(repo.dir);
+    const result = await executeSync(repo.dir, plan);
+
+    expect(result.ok).toBe(true);
+    const stack = result.stacks.find((s) => s.stackName === "s")!;
+    expect(stack.ok).toBe(true);
+    expect(stack.prunedBranches).toContain("feat/b");
+
+    // Local feat/b is deleted.
+    const { code: verifyCode } = await runGitCommand(
+      repo.dir,
+      "rev-parse",
+      "--verify",
+      "--quiet",
+      "feat/b",
+    );
+    expect(verifyCode).not.toBe(0);
+
+    // feat/c's recorded parent is now feat/a.
+    const { stdout: parentOut } = await runGitCommand(
+      repo.dir,
+      "config",
+      "branch.feat/c.stack-parent",
+    );
+    expect(parentOut.trim()).toBe("feat/a");
+  });
+
+  test("fetch failure short-circuits before running any stack work", async () => {
+    await using repo = await createTestRepo();
+    await using mock = await makeMockDir();
+    await writeRepoViewFixture(mock.path);
+    // No origin remote configured: fetch will fail.
+
+    const plan: SyncPlan = {
+      baseBranches: ["main"],
+      baseFastForwards: [],
+      stacks: [
+        {
+          stackName: "s",
+          baseBranch: "main",
+          pruneSteps: [],
+          prBaseUpdates: [],
+          navUpdates: [],
+          rebases: [],
+          branchesToPush: [],
+          excludeBranches: [],
+          reparented: {},
+          isNoOp: false,
+        },
+      ],
+      isNoOp: false,
+    };
+
+    const result = await executeSync(repo.dir, plan);
+    expect(result.ok).toBe(false);
+    expect(result.failedAt).toBe("fetch origin main");
+    expect(result.stacks).toEqual([]);
+  });
+
+  test("divergent local base: no fast-forward, rebases still target origin", async () => {
+    await using repo = await createTestRepo();
+    await using mock = await makeMockDir();
+    await writeRepoViewFixture(mock.path);
+    await addBranch(repo.dir, "feat/a", "main");
+    await setupStack(repo.dir, "s", [["feat/a", "main"]]);
+    await using _bare = await wireOrigin(repo.dir);
+    await runGitCommand(repo.dir, "push", "origin", "feat/a");
+
+    // Advance origin/main beyond the common ancestor.
+    await runGitCommand(repo.dir, "checkout", "main");
+    await commitFile(repo.dir, "remote-only.txt", "remote only");
+    await runGitCommand(repo.dir, "push", "origin", "main");
+    // Step local main sideways so origin and local share only the root.
+    await runGitCommand(repo.dir, "reset", "--hard", "HEAD~1");
+    await commitFile(repo.dir, "local-only.txt", "local only");
+    // Get back off main so executeSync's ff path takes the update-ref branch.
+    await runGitCommand(repo.dir, "checkout", "feat/a");
+
+    const plan = await computeSyncPlan(repo.dir);
+    expect(
+      plan.baseFastForwards.find((f) => f.branch === "main")?.status,
+    ).toBe("skip-diverged");
+
+    const result = await executeSync(repo.dir, plan);
+    expect(result.fastForwarded).not.toContain("main");
+    // The rebase itself targets origin/main by default and should succeed.
+    expect(result.ok).toBe(true);
+  });
+
+  test("current-branch protection: checks out base before deleting", async () => {
+    await using repo = await createTestRepo();
+    await using mock = await makeMockDir();
+    await writeRepoViewFixture(mock.path);
+    await addBranch(repo.dir, "feat/a", "main");
+    await addBranch(repo.dir, "feat/b", "feat/a");
+    await setupStack(repo.dir, "s", [
+      ["feat/a", "main"],
+      ["feat/b", "feat/a"],
+    ]);
+    await using _bare = await wireOrigin(repo.dir);
+    await runGitCommand(repo.dir, "push", "origin", "feat/a", "feat/b");
+
+    await writePrListFixture(mock.path, "feat/a", [{
+      number: 1,
+      state: "OPEN",
+    }]);
+    await writePrListFixture(mock.path, "feat/b", [{
+      number: 2,
+      state: "MERGED",
+    }]);
+
+    // User is checked out on the merged branch.
+    await runGitCommand(repo.dir, "checkout", "feat/b");
+
+    const plan = await computeSyncPlan(repo.dir);
+    const result = await executeSync(repo.dir, plan);
+
+    expect(result.ok).toBe(true);
+    // feat/b is gone.
+    const { code } = await runGitCommand(
+      repo.dir,
+      "rev-parse",
+      "--verify",
+      "--quiet",
+      "feat/b",
+    );
+    expect(code).not.toBe(0);
   });
 });
