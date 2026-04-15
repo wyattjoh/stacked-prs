@@ -449,12 +449,16 @@ merged out of order. The submit plan reconciles drift on every run via the
    - GitHub: PRs to flip draft state (branches with `draftAction` of "to-draft"
      or "to-ready"; show the transition and the reason, e.g. "parent is feat/a,
      not main").
-   - Comments: nav comments to create/update.
+   - Comments: nav comments to create/update. Note that the dry-run plan only
+     reflects nav actions for PRs that already exist on GitHub. Any branch with
+     action `"create"` will also get a nav comment posted after its PR is
+     opened, even though the dry-run plan doesn't list it.
 4. **Wait for confirmation.**
 5. Run `cli.ts submit --force --stack-name=<name>` to execute. The CLI pushes
    with `--force-with-lease`, then creates/edits PRs via `gh pr create|edit`,
-   flips draft state via `gh pr ready` / `gh pr ready --undo`, and applies the
-   nav comment plan.
+   flips draft state via `gh pr ready` / `gh pr ready --undo`, and finally
+   rebuilds the nav plan against the live PR set (so freshly-created PRs are
+   included) and posts/updates nav comments.
 6. Report the PR URLs from the CLI output.
 
 ### `pr`
