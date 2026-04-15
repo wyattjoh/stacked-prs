@@ -327,7 +327,7 @@ describe("tombstone survives branch deletion", () => {
 
       // Simulate what executeLand case A does:
       // 1. configLandCleanup (writes tombstone, reparents children, removes merged branch config)
-      const { configLandCleanup } = await import("./config.ts");
+      const { configLandCleanup } = await import("../lib/config.ts");
       await configLandCleanup(repo.dir, "s", "feat/a");
 
       // 2. Delete the branch (destroys any remaining branch.<name>.* config)

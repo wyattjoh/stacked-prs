@@ -11,8 +11,8 @@ import {
   setMergeStrategy,
   setStackNode,
   type StackTree,
-} from "../lib/stack.ts";
-import { configBranchCleanup } from "../lib/cleanup.ts";
+} from "./stack.ts";
+import { configBranchCleanup } from "./cleanup.ts";
 
 export interface SetBranchOpts {
   branch: string;

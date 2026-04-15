@@ -25,24 +25,24 @@ release-please-config.json
 .release-please-manifest.json
 src/
 ├── cli.ts                      # Unified CLI entry point (@cliffy/command router)
-├── lib/
-│   ├── stack.ts                # Core library: types, git config read/write, tree traversal
+├── lib/                        # Shared libraries (no direct CLI mapping)
+│   ├── stack.ts                # Core: types, git config read/write, tree traversal
 │   ├── gh.ts                   # GitHub CLI wrapper with test fixture support (GH_MOCK_DIR)
 │   ├── worktrees.ts            # Pre-flight worktree safety reader (git worktree list + status)
 │   ├── cleanup.ts              # Shared cleanup primitives: snapshot capture, merged-branch preview, config reparent/tombstone
+│   ├── config.ts               # Metadata mutation helpers (insert/fold/move/split/land cleanup)
+│   ├── submit-plan.ts          # Computes the full submit plan (consumed by submit.ts)
 │   ├── colors.ts               # Per-stack color assignment (shared by TUI and clean output)
 │   ├── ansi.ts                 # ANSI escape code helpers
 │   └── testdata/helpers.ts     # Test utilities (createTestRepo, addBranch, commitFile)
-├── commands/
+├── commands/                   # One file per `cli.ts <name>` subcommand
 │   ├── clean.ts                # Stale config detection and removal
-│   ├── config.ts               # Metadata mutations (library, not a CLI subcommand)
 │   ├── create.ts               # Branch creation: child / auto-init / auto-init + worktree
 │   ├── status.ts               # Stack state + PR info
 │   ├── restack.ts              # Per-branch topological rebase
 │   ├── nav.ts                  # PR navigation comment management
 │   ├── verify-refs.ts          # Post-rebase branch ancestry verification
 │   ├── import-discover.ts      # Chain detection: walks git graph to find branch trees
-│   ├── submit-plan.ts          # Computes full submit plan
 │   ├── submit.ts               # Executes submit plan: push + PR create/edit/ready + nav
 │   ├── sync.ts                 # Cross-stack fetch + restack + push
 │   ├── pr.ts                   # Branch-to-PR lookup
@@ -97,11 +97,11 @@ deno task compile:linux   # Linux (xclip/wl-copy clipboard support)
 ```
 
 Subcommands: `status` (add `-i`/`--interactive` to launch the TUI), `create`,
-`restack`, `nav`, `verify-refs`, `import-discover`, `submit-plan`, `submit`,
-`sync`, `pr`, `land`, `clean`. `commands/config.ts` is a library; import its
-functions, do not try to invoke it via `cli.ts`.
+`restack`, `nav`, `verify-refs`, `import-discover`, `submit`, `sync`, `pr`,
+`land`, `clean`. `lib/config.ts` and `lib/submit-plan.ts` are libraries shared
+across commands; import their functions directly.
 
-`submit` wraps `submit-plan` with an execution path: force-push, then
+`submit` wraps `computeSubmitPlan` with an execution path: force-push, then
 `gh pr create|edit|ready` per branch, then apply nav comments. `sync` iterates
 every stack returned by `getAllStackTrees`: it fetches every base once,
 fast-forwards local base branches when safe (warning on divergence), prunes
@@ -151,16 +151,16 @@ can be continued across process invocations.
 | --------------------------------- | --------------------------------------------------------------------- | ----------------------------------------------------------------------- |
 | `src/lib/stack.ts`                | Library only, not a CLI                                               | Imported by all other scripts                                           |
 | `src/lib/gh.ts`                   | Library only, not a CLI                                               | Imported by scripts needing GitHub data                                 |
+| `src/lib/config.ts`               | Library: metadata mutations (insert/fold/move/split/land cleanup)     | Imported by commands that mutate stack metadata                         |
+| `src/lib/submit-plan.ts`          | Library: submit planning (consumed by `submit.ts`)                    | Imported by `commands/submit.ts` and tests                              |
 | `src/commands/clean.ts`           | Stale config detection and removal                                    | `cli.ts clean [--force] [--json]`                                       |
-| `src/commands/config.ts`          | Library functions for metadata mutations                              | Imported by other commands                                              |
 | `src/commands/create.ts`          | Branch creation with optional worktree                                | `cli.ts create <branch> [flags]`                                        |
 | `src/commands/status.ts`          | Read stack state + PR info                                            | `cli.ts status [--json]`                                                |
 | `src/commands/restack.ts`         | Per-branch topological rebase                                         | `cli.ts restack [--dry-run] [--json] [--resume]`                        |
 | `src/commands/nav.ts`             | Navigation comments                                                   | `cli.ts nav [--dry-run]`                                                |
 | `src/commands/verify-refs.ts`     | Post-rebase verification                                              | `cli.ts verify-refs`                                                    |
 | `src/commands/import-discover.ts` | Branch tree detection                                                 | `cli.ts import-discover`                                                |
-| `src/commands/submit-plan.ts`     | Submit planning                                                       | `cli.ts submit-plan`                                                    |
-| `src/commands/submit.ts`          | Execute submit plan (push + gh ops + nav)                             | `cli.ts submit [--dry-run] [--force] [--json]`                          |
+| `src/commands/submit.ts`          | Plan (with `--dry-run`) and execute submit                            | `cli.ts submit [--dry-run] [--force] [--json]`                          |
 | `src/commands/sync.ts`            | Fetch + ff base + prune merged PRs + restack + push across all stacks | `cli.ts sync [--dry-run] [--force] [--json]`                            |
 | `src/commands/pr.ts`              | Branch-to-PR lookup                                                   | `cli.ts pr [--branch=<name>] [--print] [--json]`                        |
 | `src/commands/land.ts`            | Land planning and execution (pure planLand + impure executeLand)      | `cli.ts land [--dry-run] [--json] [--resume]`; also imported by the TUI |
@@ -295,15 +295,17 @@ when editing the runbook.
 
 - All scripts must be **Deno TypeScript**. No bash scripts.
 - Scripts must use **explicit Deno permissions** (`--allow-run=git`, etc.).
-- `lib/stack.ts` and `lib/gh.ts` are libraries. Do not add CLI entry points to
-  them.
+- `src/lib/` holds shared libraries with no CLI mapping (e.g. `stack.ts`,
+  `gh.ts`, `cleanup.ts`, `config.ts`, `submit-plan.ts`, `worktrees.ts`,
+  `colors.ts`, `ansi.ts`). Do not add CLI entry points to them.
+- `src/commands/` holds one file per `cli.ts <name>` subcommand. If a helper is
+  shared by more than one command, it belongs in `src/lib/`, not
+  `src/commands/`.
 - `cli.ts` is the only CLI entry point. Do not add `import.meta.main` blocks to
   command files.
 - Command functions must be pure: no `Deno.args`, no `console.log`, no
   `Deno.exit`. They receive typed options and return structured results. The CLI
   layer (`cli.ts`) owns all I/O: parsing, printing, exit codes.
-- `commands/config.ts` is a library of metadata mutation functions, not a CLI
-  with sub-commands. Import its functions directly.
 - `commands/restack.ts` owns all rebase logic. Claude calls it via
   `cli.ts restack` rather than constructing rebase commands manually.
 - When adding a new command, register it in the "Scripts" section of `SKILL.md`

@@ -428,9 +428,8 @@ merged out of order. The submit plan reconciles drift on every run via the
 - No flags: print the plan and prompt `[y/N]` before executing.
 - `--force`: execute without the prompt.
 
-1. Run `cli.ts submit --dry-run --stack-name=<name>` to inspect the plan. The
-   underlying `submit-plan` command is still available when you need the raw
-   JSON shape (`cli.ts submit-plan --stack-name=<name>`).
+1. Run `cli.ts submit --dry-run --stack-name=<name>` to inspect the plan. Add
+   `--json` to get the raw `SubmitPlan` shape.
 2. **No-op check:** if the plan reports `isNoOp: true`, report "All PRs are up
    to date with correct bases, draft state, and nav comments" and stop.
 3. **Present full plan:**
@@ -679,7 +678,6 @@ command.
 - `deno run ... cli.ts create --dry-run` (with or without `--json`)
 - `deno run ... cli.ts land --dry-run` (with or without `--json`)
 - `deno run ... cli.ts submit --dry-run` (with or without `--json`)
-- `deno run ... cli.ts submit-plan` (JSON plan)
 - `deno run ... cli.ts sync --dry-run` (with or without `--json`)
 - `deno run ... cli.ts pr` (read-only PR lookup; also opens the browser, which
   is a local action, not a repo mutation)
@@ -784,17 +782,6 @@ Discovers the tree of local branches between the given branch and main, then
 annotates each with PR data from GitHub. Returns JSON with the discovered tree,
 base branch, and any warnings (e.g., PR base mismatches).
 
-### `submit-plan`
-
-```bash
-deno run --allow-run=git,gh --allow-env --allow-read ${CLAUDE_PLUGIN_ROOT}/src/cli.ts submit-plan \
-  [--stack-name=<name>] [--owner=<owner> --repo=<repo>]
-```
-
-Computes the full submit plan for a stack: which PRs need creating, which need
-base updates, and what nav comment changes are needed. Iterates nodes in DFS
-order. Returns JSON with per-branch actions and an `isNoOp` flag.
-
 ### `submit`
 
 ```bash
@@ -805,9 +792,10 @@ deno run --allow-run=git,gh --allow-env --allow-read ${CLAUDE_PLUGIN_ROOT}/src/c
 
 Runs the full submit flow: force-pushes branches, creates or edits PRs (with
 `--draft` derived from the stack's shape), flips draft state when needed, and
-applies the nav comment plan. `--dry-run` prints the plan without mutating; with
-no flags the CLI prints the plan and prompts `[y/N]`; `--force` skips the
-prompt.
+applies the nav comment plan. `--dry-run` prints the plan without mutating
+(combine with `--json` for the raw `SubmitPlan` shape: per-branch actions, an
+`isNoOp` flag, and nav comment plan); with no flags the CLI prints the plan and
+prompts `[y/N]`; `--force` skips the prompt.
 
 ### `sync`
 

@@ -7,7 +7,7 @@ import {
 } from "../lib/testdata/helpers.ts";
 import { setBaseBranch, setStackNode } from "../lib/stack.ts";
 import { setCallLog, setMockDir, writeFixture } from "../lib/gh.ts";
-import { computeSubmitPlan } from "./submit-plan.ts";
+import { computeSubmitPlan } from "../lib/submit-plan.ts";
 import { executeSubmit, renderSubmitPlan } from "./submit.ts";
 
 async function makeMockDir(): Promise<AsyncDisposable & { path: string }> {

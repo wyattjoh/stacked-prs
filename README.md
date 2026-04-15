@@ -354,8 +354,7 @@ deno run --allow-run=git,gh --allow-env --allow-read \
 | `cli.ts nav [--dry-run]`                      | Builds and executes navigation comment plans                           |
 | `cli.ts verify-refs`                          | Checks branch ancestry after rebase, outputs repair commands           |
 | `cli.ts import-discover`                      | Discovers branch trees between a branch and main                       |
-| `cli.ts submit-plan`                          | Computes the full submit plan (PRs to create/update, nav changes)      |
-| `cli.ts submit [--dry-run] [--force]`         | Run the submit plan: push + PR create/edit + draft flips + nav         |
+| `cli.ts submit [--dry-run] [--force]`         | Plan (with `--dry-run`) or run submit: push + PR create/edit + nav     |
 | `cli.ts sync [--dry-run] [--force]`           | Fetch + ff bases + prune merged PRs + restack + push across all stacks |
 | `cli.ts pr [--branch=<name>] [--print]`       | Open the branch's PR in the browser via `gh pr view --web`             |
 | `cli.ts land [--dry-run] [--json] [--resume]` | Land a merged PR; plan only with `--dry-run`, resume after conflicts   |

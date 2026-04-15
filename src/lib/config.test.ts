@@ -1,6 +1,6 @@
 import { describe, it as test } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { addBranch, createTestRepo } from "../lib/testdata/helpers.ts";
+import { addBranch, createTestRepo } from "./testdata/helpers.ts";
 import {
   getAllNodes,
   getMergeStrategy,
@@ -9,7 +9,7 @@ import {
   runGitCommand,
   setBaseBranch,
   setStackNode,
-} from "../lib/stack.ts";
+} from "./stack.ts";
 import {
   configFoldBranch,
   configGet,

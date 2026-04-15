@@ -1,5 +1,5 @@
 import type { DirtyWorktree } from "../lib/worktrees.ts";
-import type { SplitInfo } from "./config.ts";
+import type { SplitInfo } from "../lib/config.ts";
 import type { NavAction } from "./nav.ts";
 import type { PrInfo } from "./status.ts";
 
@@ -216,7 +216,7 @@ import {
   type StackTree,
 } from "../lib/stack.ts";
 import { topologicalOrder } from "./restack.ts";
-import { configLandCleanup } from "./config.ts";
+import { configLandCleanup } from "../lib/config.ts";
 import { buildNavPlan, executeNavAction } from "./nav.ts";
 
 /**

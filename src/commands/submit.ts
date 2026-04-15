@@ -1,7 +1,7 @@
 import { runGitCommand } from "../lib/stack.ts";
 import { gh } from "../lib/gh.ts";
 import { executeNavAction } from "./nav.ts";
-import type { SubmitPlan } from "./submit-plan.ts";
+import type { SubmitPlan } from "../lib/submit-plan.ts";
 
 export interface SubmitExecutionResult {
   ok: boolean;

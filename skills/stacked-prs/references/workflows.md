@@ -84,7 +84,7 @@ you> y
 claude> [runs cli.ts create --force]
 
 you> /stacked-prs submit
-claude> [runs submit-plan, shows push list, PR create/update, draft transitions,
+claude> [runs submit --dry-run, shows push list, PR create/update, draft transitions,
          nav comments]
         Proceed? (y/N)
 you> y

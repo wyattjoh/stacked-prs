@@ -3,11 +3,11 @@ import {
   getMergeStrategy,
   getStackTree,
   runGitCommand,
-} from "../lib/stack.ts";
-import type { MergeStrategy } from "../lib/stack.ts";
-import { gh, selectBestPr } from "../lib/gh.ts";
-import { buildNavPlan } from "./nav.ts";
-import type { NavAction } from "./nav.ts";
+} from "./stack.ts";
+import type { MergeStrategy } from "./stack.ts";
+import { gh, selectBestPr } from "./gh.ts";
+import { buildNavPlan } from "../commands/nav.ts";
+import type { NavAction } from "../commands/nav.ts";
 
 export interface BranchSubmitPlan {
   branch: string;

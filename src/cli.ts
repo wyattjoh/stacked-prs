@@ -9,9 +9,9 @@ import { restack } from "./commands/restack.ts";
 import { buildNavPlan, executeNavAction } from "./commands/nav.ts";
 import { verifyRefs } from "./commands/verify-refs.ts";
 import { discoverChain } from "./commands/import-discover.ts";
-import { computeSubmitPlan } from "./commands/submit-plan.ts";
 import { applyClean, detectStaleConfig } from "./commands/clean.ts";
 import { findPrForBranch } from "./commands/pr.ts";
+import { computeSubmitPlan } from "./lib/submit-plan.ts";
 import { executeSubmit, renderSubmitPlan } from "./commands/submit.ts";
 import {
   computeSyncPlan,
@@ -476,20 +476,6 @@ await new Command()
     }
     const result = await discoverChain(dir, options.branch, owner, repo);
     console.log(JSON.stringify(result, null, 2));
-  })
-  // --- submit-plan ---
-  .command("submit-plan", "Compute the submit plan for a stack")
-  .option(
-    "--stack-name <name:string>",
-    "Stack name (auto-detected from current branch)",
-  )
-  .option("--owner <owner:string>", "GitHub repo owner")
-  .option("--repo <repo:string>", "GitHub repo name")
-  .action(async (options) => {
-    const stackName = await resolveStackName(dir, options.stackName);
-    const { owner, repo } = await resolveRepo(options.owner, options.repo);
-    const plan = await computeSubmitPlan(dir, stackName, owner, repo);
-    console.log(JSON.stringify(plan, null, 2));
   })
   // --- clean ---
   .command("clean", "Detect and remove stale stack/branch config entries")
