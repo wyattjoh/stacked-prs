@@ -1,27 +1,13 @@
 import { describe, it as test } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { makeTempDir } from "./testdata/helpers.ts";
+import { makeMockDir } from "./testdata/helpers.ts";
 import {
   fixtureKey,
   gh,
   resolveRepo,
   selectBestPr,
-  setMockDir,
   writeFixture,
 } from "./gh.ts";
-
-/** Acquire a temp mock dir, register it, and reset on disposal. */
-async function makeMockDir(): Promise<AsyncDisposable & { path: string }> {
-  const dir = await makeTempDir("stacked-prs-mock-");
-  setMockDir(dir.path);
-  return {
-    path: dir.path,
-    [Symbol.asyncDispose]: async () => {
-      setMockDir(undefined);
-      await dir[Symbol.asyncDispose]();
-    },
-  };
-}
 
 describe("fixtureKey", () => {
   test("normalizes slashes in branch names", () => {

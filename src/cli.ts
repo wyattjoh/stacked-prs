@@ -2,7 +2,7 @@
 import { Command } from "@cliffy/command";
 import pluginMeta from "../.claude-plugin/plugin.json" with { type: "json" };
 import { getStackTree, renderTree, runGitCommand } from "./lib/stack.ts";
-import { gh, resolveRepo, selectBestPr } from "./lib/gh.ts";
+import { gh, listPrsForBranch, resolveRepo } from "./lib/gh.ts";
 import { prStateFrom } from "./commands/land.ts";
 import { getStackStatus } from "./commands/status.ts";
 import { restack } from "./commands/restack.ts";
@@ -32,6 +32,42 @@ import {
 import { getAllNodes } from "./lib/stack.ts";
 import { assignColors, detectTheme, readColorOverrides } from "./lib/colors.ts";
 import { ansiColor } from "./lib/ansi.ts";
+
+/** Pretty-print a value as JSON with 2-space indent on stdout. */
+function logJson(value: unknown): void {
+  console.log(JSON.stringify(value, null, 2));
+}
+
+/**
+ * Interactive confirmation gate shared by submit/sync/create/clean/land.
+ * Prints `renderPlan()` output, then asks `[y/N]`. Exits if stdin isn't a
+ * TTY (so `--force` is required in non-interactive mode). Returns true
+ * when the user confirmed and the caller should proceed.
+ */
+function confirmOrExit(opts: {
+  force: boolean;
+  prompt?: string;
+  /** Printed before the prompt; omit when the plan was already rendered. */
+  render?: () => void;
+  /** Non-TTY error message. */
+  nonInteractiveHint?: string;
+}): boolean {
+  if (opts.force) return true;
+  if (!Deno.stdin.isTerminal()) {
+    console.error(
+      opts.nonInteractiveHint ??
+        "Cannot prompt in non-interactive mode. Pass --force to execute, or --dry-run to inspect.",
+    );
+    Deno.exit(1);
+  }
+  opts.render?.();
+  const answer = prompt(opts.prompt ?? "Proceed? [y/N]");
+  if (answer?.trim().toLowerCase() !== "y") {
+    console.log("Aborted.");
+    return false;
+  }
+  return true;
+}
 
 /** Resolve stack name from current branch's git config, with --stack-name override. */
 async function resolveStackName(
@@ -256,7 +292,7 @@ await new Command()
     }
     const status = await getStackStatus(dir, stackName, owner, repo);
     if (options.json) {
-      console.log(JSON.stringify(status, null, 2));
+      logJson(status);
     } else {
       console.log(status.display);
     }
@@ -302,19 +338,13 @@ await new Command()
     if (options.dryRun) {
       const result = await planCreate(dir, baseOpts);
       if (options.json) {
-        console.log(
-          JSON.stringify(
-            {
-              ok: result.ok,
-              dryRun: true,
-              plan: result.plan,
-              error: result.error,
-              message: result.message,
-            },
-            null,
-            2,
-          ),
-        );
+        logJson({
+          ok: result.ok,
+          dryRun: true,
+          plan: result.plan,
+          error: result.error,
+          message: result.message,
+        });
       } else if (result.ok && result.plan) {
         console.log(renderCreatePlan(result.plan));
       } else {
@@ -327,13 +357,15 @@ await new Command()
     const plan = await planCreate(dir, baseOpts);
     if (!plan.ok || !plan.plan) {
       if (options.json) {
-        console.log(JSON.stringify(plan, null, 2));
+        logJson(plan);
       } else {
         console.error(`${plan.error}: ${plan.message ?? ""}`);
       }
       Deno.exit(1);
     }
 
+    // create's contract differs from submit/sync: in non-TTY mode it proceeds
+    // silently instead of erroring. Only prompt when interactive + !force.
     if (!options.force && Deno.stdin.isTerminal()) {
       console.log(renderCreatePlan(plan.plan));
       const answer = prompt("Proceed? [y/N]");
@@ -345,7 +377,7 @@ await new Command()
 
     const result = await createBranch(dir, baseOpts);
     if (options.json) {
-      console.log(JSON.stringify(result, null, 2));
+      logJson(result);
     } else if (result.ok && result.plan) {
       const where = result.plan.worktreePath
         ? ` (worktree: ${result.plan.worktreePath})`
@@ -387,7 +419,7 @@ await new Command()
     });
 
     if (options.json) {
-      console.log(JSON.stringify(result, null, 2));
+      logJson(result);
     } else {
       const tree = await getStackTree(dir, stackName);
       const statusIcons = new Map<string, string>();
@@ -430,7 +462,7 @@ await new Command()
     const plan = await buildNavPlan(dir, stackName, owner, repo);
 
     if (options.dryRun) {
-      console.log(JSON.stringify(plan, null, 2));
+      logJson(plan);
       return;
     }
 
@@ -454,7 +486,7 @@ await new Command()
   .action(async (options) => {
     const stackName = await resolveStackName(dir, options.stackName);
     const result = await verifyRefs(dir, stackName);
-    console.log(JSON.stringify(result, null, 2));
+    logJson(result);
     if (!result.valid) Deno.exit(1);
   })
   // --- import-discover ---
@@ -475,7 +507,7 @@ await new Command()
       }
     }
     const result = await discoverChain(dir, options.branch, owner, repo);
-    console.log(JSON.stringify(result, null, 2));
+    logJson(result);
   })
   // --- clean ---
   .command("clean", "Detect and remove stale stack/branch config entries")
@@ -492,19 +524,13 @@ await new Command()
 
     if (options.json && !options.force) {
       // Dry-run JSON: just the report.
-      console.log(JSON.stringify(report, null, 2));
+      logJson(report);
       return;
     }
 
     if (report.findings.length === 0) {
       if (options.json) {
-        console.log(
-          JSON.stringify(
-            { ...report, applied: { removed: [], applied: [] } },
-            null,
-            2,
-          ),
-        );
+        logJson({ ...report, applied: { removed: [], applied: [] } });
       } else {
         console.log(
           `No stale config found (scanned ${report.stacksScanned} stack(s), ${report.branchesScanned} branch entry/entries).`,
@@ -563,28 +589,21 @@ await new Command()
       }
     }
 
-    if (!options.force) {
-      if (!Deno.stdin.isTerminal()) {
-        console.error(
+    if (
+      !confirmOrExit({
+        force: options.force ?? false,
+        prompt: `Apply ${report.findings.length} cleanup(s)? [y/N]`,
+        nonInteractiveHint:
           "Cannot prompt in non-interactive mode. Pass --force to apply, or --json to inspect.",
-        );
-        Deno.exit(1);
-      }
-      const answer = prompt(
-        `Apply ${report.findings.length} cleanup(s)? [y/N]`,
-      );
-      if (answer?.trim().toLowerCase() !== "y") {
-        console.log("Aborted. No changes made.");
-        return;
-      }
+      })
+    ) {
+      return;
     }
 
     const applyResult = await applyClean(dir, report.findings);
 
     if (options.json) {
-      console.log(
-        JSON.stringify({ ...report, applied: applyResult }, null, 2),
-      );
+      logJson({ ...report, applied: applyResult });
     } else {
       console.log(`Removed ${applyResult.removed.length} config key(s):`);
       for (const key of applyResult.removed) {
@@ -620,20 +639,10 @@ await new Command()
 
     await Promise.all(
       nodes.map(async (node) => {
-        const result = await gh(
-          "pr",
-          "list",
-          "--head",
-          node.branch,
-          "--repo",
-          `${owner}/${repoName}`,
-          "--state",
-          "all",
-          "--json",
-          "number,url,state,isDraft,createdAt",
-        );
-        const prs = JSON.parse(result) as import("./tui/types.ts").PrInfo[];
-        const best = selectBestPr(prs);
+        const best = await listPrsForBranch(node.branch, {
+          owner,
+          repo: repoName,
+        });
         if (best) {
           prStateByBranch.set(node.branch, prStateFrom(best));
           prInfoByBranch.set(node.branch, best);
@@ -651,7 +660,7 @@ await new Command()
         prInfoByBranch,
       );
       if (options.json) {
-        console.log(JSON.stringify(plan, null, 2));
+        logJson(plan);
       } else {
         console.log("Land plan for stack:", stackName);
         console.log("Case:", plan.case);
@@ -680,7 +689,7 @@ await new Command()
     );
 
     if (options.json) {
-      console.log(JSON.stringify(result, null, 2));
+      logJson(result);
     } else {
       if (result.ok) {
         console.log(`Stack "${stackName}" landed successfully.`);
@@ -725,7 +734,7 @@ await new Command()
     const result = await findPrForBranch(dir, owner, repo, options.branch);
 
     if (options.json) {
-      console.log(JSON.stringify(result, null, 2));
+      logJson(result);
       if (!result.ok) Deno.exit(1);
       return;
     }
@@ -771,7 +780,7 @@ await new Command()
 
     if (options.dryRun) {
       if (options.json) {
-        console.log(JSON.stringify(plan, null, 2));
+        logJson(plan);
       } else {
         console.log(renderSubmitPlan(plan));
       }
@@ -780,7 +789,7 @@ await new Command()
 
     if (plan.isNoOp) {
       if (options.json) {
-        console.log(JSON.stringify({ ok: true, isNoOp: true }, null, 2));
+        logJson({ ok: true, isNoOp: true });
       } else {
         console.log(
           "All PRs are up to date with correct bases, draft state, and nav comments.",
@@ -789,25 +798,19 @@ await new Command()
       return;
     }
 
-    if (!options.force) {
-      if (!Deno.stdin.isTerminal()) {
-        console.error(
-          "Cannot prompt in non-interactive mode. Pass --force to execute, or --dry-run to inspect.",
-        );
-        Deno.exit(1);
-      }
-      console.log(renderSubmitPlan(plan));
-      const answer = prompt("Proceed? [y/N]");
-      if (answer?.trim().toLowerCase() !== "y") {
-        console.log("Aborted.");
-        return;
-      }
+    if (
+      !confirmOrExit({
+        force: options.force ?? false,
+        render: () => console.log(renderSubmitPlan(plan)),
+      })
+    ) {
+      return;
     }
 
     const result = await executeSubmit(dir, plan, owner, repo);
 
     if (options.json) {
-      console.log(JSON.stringify(result, null, 2));
+      logJson(result);
     } else if (result.ok) {
       console.log(
         `Pushed ${result.pushedBranches.length} branch(es). ` +
@@ -838,7 +841,7 @@ await new Command()
 
     if (options.dryRun) {
       if (options.json) {
-        console.log(JSON.stringify(plan, null, 2));
+        logJson(plan);
       } else {
         console.log(renderSyncPlan(plan));
       }
@@ -847,7 +850,7 @@ await new Command()
 
     if (plan.isNoOp && plan.stacks.length > 0) {
       if (options.json) {
-        console.log(JSON.stringify({ ok: true, isNoOp: true }, null, 2));
+        logJson({ ok: true, isNoOp: true });
       } else {
         console.log("All stacks are already synced with origin.");
       }
@@ -858,25 +861,19 @@ await new Command()
       return;
     }
 
-    if (!options.force) {
-      if (!Deno.stdin.isTerminal()) {
-        console.error(
-          "Cannot prompt in non-interactive mode. Pass --force to execute, or --dry-run to inspect.",
-        );
-        Deno.exit(1);
-      }
-      console.log(renderSyncPlan(plan));
-      const answer = prompt("Proceed? [y/N]");
-      if (answer?.trim().toLowerCase() !== "y") {
-        console.log("Aborted.");
-        return;
-      }
+    if (
+      !confirmOrExit({
+        force: options.force ?? false,
+        render: () => console.log(renderSyncPlan(plan)),
+      })
+    ) {
+      return;
     }
 
     const result = await executeSync(dir, plan);
 
     if (options.json) {
-      console.log(JSON.stringify(result, null, 2));
+      logJson(result);
     } else if (result.ok) {
       console.log(
         `Fetched ${result.fetched.join(", ")}. Synced ${

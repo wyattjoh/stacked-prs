@@ -1,7 +1,7 @@
 import React from "react";
 import { Box, Text } from "ink";
 import type { ConnectorStyle, State, SyncStatus } from "../types.ts";
-import { StackBand, type TrunkSegment } from "./stack-band.tsx";
+import { StackBand, type TrunkSegment, TrunkSegments } from "./stack-band.tsx";
 
 export interface StackMapProps {
   state: State;
@@ -30,6 +30,28 @@ function connectorStyleFromSync(sync: SyncStatus | undefined): ConnectorStyle {
 }
 
 /**
+ * Trunk bars for every stack rendered *below* stack `S`, in render order.
+ * Shared by content rows and header rows: both need the vertical bars for
+ * stacks S+1..N-1 on the left, which occupy slots `0..N-2-S`.
+ */
+function belowStackBars(
+  S: number,
+  stackCount: number,
+  colors: string[],
+  styles: ConnectorStyle[],
+): TrunkSegment[] {
+  const segs: TrunkSegment[] = [];
+  for (let j = 0; j < stackCount - 1 - S; j++) {
+    const barIdx = stackCount - 1 - j;
+    segs.push({
+      text: `${trunkVertical(styles[barIdx])}  `,
+      color: colors[barIdx],
+    });
+  }
+  return segs;
+}
+
+/**
  * Trunk segments for a content row *inside* stack `S`.
  *
  * Stacks are indexed 0..N-1 in render order (top to bottom). Stack N-1
@@ -48,19 +70,9 @@ function contentTrunkSegments(
   colors: string[],
   styles: ConnectorStyle[],
 ): TrunkSegment[] {
-  const N = stackCount;
-  const segs: TrunkSegment[] = [];
-  for (let j = 0; j < N - 1 - S; j++) {
-    const barIdx = N - 1 - j;
-    segs.push({
-      text: `${trunkVertical(styles[barIdx])}  `,
-      color: colors[barIdx],
-    });
-  }
+  const segs = belowStackBars(S, stackCount, colors, styles);
   // Remaining (S+1) slots = blank filler to reach the shared content col.
-  if (S + 1 > 0) {
-    segs.push({ text: "   ".repeat(S + 1) });
-  }
+  segs.push({ text: "   ".repeat(S + 1) });
   return segs;
 }
 
@@ -75,15 +87,7 @@ function headerTrunkSegments(
   colors: string[],
   styles: ConnectorStyle[],
 ): TrunkSegment[] {
-  const N = stackCount;
-  const segs: TrunkSegment[] = [];
-  for (let j = 0; j < N - 1 - S; j++) {
-    const barIdx = N - 1 - j;
-    segs.push({
-      text: `${trunkVertical(styles[barIdx])}  `,
-      color: colors[barIdx],
-    });
-  }
+  const segs = belowStackBars(S, stackCount, colors, styles);
   // Corner spans 3*(S+1) chars: `└` + horiz fill + trailing space.
   const width = 3 * (S + 1);
   const horiz = cornerHoriz(styles[S]);
@@ -207,11 +211,9 @@ export function StackMap(props: StackMapProps): React.ReactElement {
         </Box>
         {/* Initial trunk row: all bars originate here, one per stack. */}
         <Box flexDirection="row" flexShrink={0}>
-          {initialTrunkSegments(stackCount, colors, styles).map((s, i) => (
-            <Box key={i} flexShrink={0}>
-              <Text color={s.color}>{s.text}</Text>
-            </Box>
-          ))}
+          <TrunkSegments
+            segs={initialTrunkSegments(stackCount, colors, styles)}
+          />
         </Box>
         {visible.map((tree, S) => {
           const cells = grid.byStack.get(tree.stackName) ?? [];
@@ -247,11 +249,7 @@ export function StackMap(props: StackMapProps): React.ReactElement {
               }
               {!isLast && (
                 <Box flexDirection="row" flexShrink={0}>
-                  {contentPrefix.map((s, i) => (
-                    <Box key={i} flexShrink={0}>
-                      <Text color={s.color}>{s.text}</Text>
-                    </Box>
-                  ))}
+                  <TrunkSegments segs={contentPrefix} />
                 </Box>
               )}
             </Box>

@@ -1,11 +1,12 @@
 import {
+  computeSyncStatus,
   getAllNodes,
   getAllStackTrees,
   getLandedPrs,
   runGitCommand,
   type StackTree,
 } from "../../lib/stack.ts";
-import { gh, selectBestPr } from "../../lib/gh.ts";
+import { listPrsForBranch } from "../../lib/gh.ts";
 import { listBranchWorktrees } from "../../lib/worktrees.ts";
 import type { CommitInfo, PrInfo, SyncStatus, WorktreeInfo } from "../types.ts";
 
@@ -23,30 +24,6 @@ export interface LoadLocalResult {
    */
   landedPrByBranch: Map<string, PrInfo>;
   currentBranch: string | null;
-}
-
-async function computeSync(
-  dir: string,
-  branch: string,
-  parent: string,
-): Promise<SyncStatus> {
-  const { code: fwd } = await runGitCommand(
-    dir,
-    "merge-base",
-    "--is-ancestor",
-    parent,
-    branch,
-  );
-  if (fwd === 0) return "up-to-date";
-  const { code: rev } = await runGitCommand(
-    dir,
-    "merge-base",
-    "--is-ancestor",
-    branch,
-    parent,
-  );
-  if (rev === 0) return "behind-parent";
-  return "diverged";
 }
 
 export async function loadLocal(dir: string): Promise<LoadLocalResult> {
@@ -82,7 +59,7 @@ export async function loadLocal(dir: string): Promise<LoadLocalResult> {
       } else {
         syncByBranch.set(
           node.branch,
-          await computeSync(dir, node.branch, node.parent),
+          await computeSyncStatus(dir, node.branch, node.parent),
         );
       }
     }
@@ -130,20 +107,9 @@ export async function loadPrsProgressive(
       if (opts.signal?.aborted) return;
       const branch = opts.branches[idx++];
       try {
-        const out = await gh(
-          { signal: opts.signal },
-          "pr",
-          "list",
-          "--head",
-          branch,
-          "--state",
-          "all",
-          "--json",
-          "number,url,state,isDraft,createdAt",
-        );
+        const best = await listPrsForBranch(branch, { signal: opts.signal });
         if (opts.signal?.aborted) return;
-        const parsed = JSON.parse(out) as PrInfo[];
-        opts.onLoaded(branch, selectBestPr(parsed));
+        opts.onLoaded(branch, best);
       } catch (err) {
         if ((err as Error).name === "AbortError") return;
         opts.onError(branch, (err as Error).message);

@@ -5,25 +5,12 @@ import { EventEmitter } from "node:events";
 import {
   addBranch,
   createTestRepo,
-  makeTempDir,
+  makeMockDir,
 } from "../lib/testdata/helpers.ts";
 import type { TestRepo } from "../lib/testdata/helpers.ts";
 import { runGitCommand, setBaseBranch, setStackNode } from "../lib/stack.ts";
-import { setMockDir, writeFixture } from "../lib/gh.ts";
+import { writeFixture } from "../lib/gh.ts";
 import { App } from "./app.tsx";
-
-/** Acquire a temp mock dir, register it, and reset on disposal. */
-async function makeMockDir(): Promise<AsyncDisposable & { path: string }> {
-  const dir = await makeTempDir("stacked-prs-mock-");
-  setMockDir(dir.path);
-  return {
-    path: dir.path,
-    [Symbol.asyncDispose]: async () => {
-      setMockDir(undefined);
-      await dir[Symbol.asyncDispose]();
-    },
-  };
-}
 
 /**
  * Stdout shim with controllable dimensions. `ink-testing-library` hard-codes

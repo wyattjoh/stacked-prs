@@ -3,24 +3,13 @@ import { expect } from "@std/expect";
 import {
   addBranch,
   createTestRepo,
+  makeMockDir,
   makeTempDir,
 } from "../lib/testdata/helpers.ts";
 import { setBaseBranch, setStackNode } from "../lib/stack.ts";
-import { setCallLog, setMockDir, writeFixture } from "../lib/gh.ts";
+import { setCallLog, writeFixture } from "../lib/gh.ts";
 import { computeSubmitPlan } from "../lib/submit-plan.ts";
 import { executeSubmit, renderSubmitPlan } from "./submit.ts";
-
-async function makeMockDir(): Promise<AsyncDisposable & { path: string }> {
-  const dir = await makeTempDir("stacked-prs-mock-");
-  setMockDir(dir.path);
-  return {
-    path: dir.path,
-    [Symbol.asyncDispose]: async () => {
-      setMockDir(undefined);
-      await dir[Symbol.asyncDispose]();
-    },
-  };
-}
 
 function makeCallLog(): AsyncDisposable & { calls: string[][] } {
   const calls: string[][] = [];

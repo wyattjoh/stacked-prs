@@ -4,10 +4,11 @@ import {
   addBranch,
   commitFile,
   createTestRepo,
+  makeMockDir,
   makeTempDir,
 } from "../lib/testdata/helpers.ts";
 import { runGitCommand, setBaseBranch, setStackNode } from "../lib/stack.ts";
-import { setMockDir, writeFixture } from "../lib/gh.ts";
+import { writeFixture } from "../lib/gh.ts";
 import {
   computeSyncPlan,
   executeSync,
@@ -24,19 +25,6 @@ async function setupStack(
   for (const [b, parent] of branches) {
     await setStackNode(dir, b, stack, parent);
   }
-}
-
-/** Acquire a temp mock dir, register it, and reset on disposal. */
-async function makeMockDir(): Promise<AsyncDisposable & { path: string }> {
-  const dir = await makeTempDir("stacked-prs-mock-");
-  setMockDir(dir.path);
-  return {
-    path: dir.path,
-    [Symbol.asyncDispose]: async () => {
-      setMockDir(undefined);
-      await dir[Symbol.asyncDispose]();
-    },
-  };
 }
 
 /** Hook up a bare remote and publish `main` to `origin/main`. */

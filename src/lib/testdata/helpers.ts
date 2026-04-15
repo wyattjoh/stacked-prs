@@ -1,3 +1,5 @@
+import { setMockDir } from "../gh.ts";
+
 const GIT_ENV = {
   GIT_AUTHOR_NAME: "Test User",
   GIT_AUTHOR_EMAIL: "test@example.com",
@@ -26,6 +28,25 @@ export async function makeTempDir(prefix: string): Promise<TempDir> {
     path,
     [Symbol.asyncDispose]: async () => {
       await Deno.remove(path, { recursive: true }).catch(() => {});
+    },
+  };
+}
+
+/**
+ * Acquire a temp mock dir, register it with gh.ts via setMockDir, and
+ * reset both on disposal. Every test that stubs `gh` calls needs this
+ * exact shape; use `await using mock = await makeMockDir()` in tests.
+ */
+export async function makeMockDir(): Promise<
+  AsyncDisposable & { path: string }
+> {
+  const dir = await makeTempDir("stacked-prs-mock-");
+  setMockDir(dir.path);
+  return {
+    path: dir.path,
+    [Symbol.asyncDispose]: async () => {
+      setMockDir(undefined);
+      await dir[Symbol.asyncDispose]();
     },
   };
 }

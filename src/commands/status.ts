@@ -1,12 +1,16 @@
 import {
+  computeSyncStatus,
   getAllNodes,
   getStackTree,
   renderTree,
   runGitCommand,
   type StackNode,
   type StackTree,
+  type SyncStatus,
 } from "../lib/stack.ts";
-import { gh, selectBestPr } from "../lib/gh.ts";
+import { listPrsForBranch } from "../lib/gh.ts";
+
+export type { SyncStatus };
 
 export interface PrInfo {
   number: number;
@@ -16,8 +20,6 @@ export interface PrInfo {
   /** ISO timestamp; present when the query asks for `createdAt`. */
   createdAt?: string;
 }
-
-export type SyncStatus = "up-to-date" | "behind-parent" | "diverged" | "landed";
 
 export interface BranchStatus {
   branch: string;
@@ -47,41 +49,7 @@ export async function queryPr(
   owner?: string,
   repo?: string,
 ): Promise<PrInfo | null> {
-  const args = ["pr", "list", "--head", branch];
-  if (owner && repo) {
-    args.push("--repo", `${owner}/${repo}`);
-  }
-  args.push("--state", "all");
-  args.push("--json", "number,url,state,isDraft,createdAt");
-  const result = await gh(...args);
-  const parsed = JSON.parse(result) as PrInfo[];
-  return selectBestPr(parsed);
-}
-
-async function getSyncStatus(
-  dir: string,
-  parent: string,
-  branch: string,
-): Promise<SyncStatus> {
-  const { code: ancestorCode } = await runGitCommand(
-    dir,
-    "merge-base",
-    "--is-ancestor",
-    parent,
-    branch,
-  );
-  if (ancestorCode === 0) return "up-to-date";
-
-  const { code: reverseCode } = await runGitCommand(
-    dir,
-    "merge-base",
-    "--is-ancestor",
-    branch,
-    parent,
-  );
-  if (reverseCode === 0) return "behind-parent";
-
-  return "diverged";
+  return await listPrsForBranch(branch, { owner, repo });
 }
 
 /** Walk the tree DFS and compute depth + isLastChild for each node. */
@@ -139,7 +107,7 @@ export async function getStackStatus(
     nodes.map(async (node): Promise<BranchStatus> => {
       const syncStatus: SyncStatus = node.merged
         ? "landed"
-        : await getSyncStatus(dir, node.parent, node.branch);
+        : await computeSyncStatus(dir, node.branch, node.parent);
       const pr = await queryPr(node.branch, owner, repo);
 
       const { depth, isLastChild } = depthMap.get(node.branch) ?? {

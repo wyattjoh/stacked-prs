@@ -63,17 +63,7 @@ async function isWorktreeDirty(wtPath: string): Promise<boolean> {
 export async function listBranchWorktrees(
   dir: string,
 ): Promise<BranchWorktreesResult> {
-  const { code, stdout, stderr } = await runGitCommand(
-    dir,
-    "worktree",
-    "list",
-    "--porcelain",
-  );
-  if (code !== 0) {
-    throw new Error(`git worktree list failed: ${stderr}`);
-  }
-
-  const worktrees = parseWorktreeList(stdout);
+  const worktrees = await listWorktrees(dir);
   const byBranch = new Map<string, BranchWorktreeInfo>();
   if (worktrees.length === 0) {
     return { mainPath: dir, byBranch };
@@ -101,6 +91,23 @@ export async function listBranchWorktrees(
   }
 
   return { mainPath, byBranch };
+}
+
+/**
+ * Run `git worktree list --porcelain` and return the parsed entries.
+ * Throws with a consistent message on non-zero exit.
+ */
+async function listWorktrees(dir: string): Promise<ParsedWorktree[]> {
+  const { code, stdout, stderr } = await runGitCommand(
+    dir,
+    "worktree",
+    "list",
+    "--porcelain",
+  );
+  if (code !== 0) {
+    throw new Error(`git worktree list failed: ${stderr}`);
+  }
+  return parseWorktreeList(stdout);
 }
 
 function parseWorktreeList(porcelain: string): ParsedWorktree[] {
@@ -176,17 +183,7 @@ export async function checkWorktreeSafety(
   const scope = new Set(branchesToTouch);
   if (scope.size === 0) return [];
 
-  const { code, stdout, stderr } = await runGitCommand(
-    dir,
-    "worktree",
-    "list",
-    "--porcelain",
-  );
-  if (code !== 0) {
-    throw new Error(`git worktree list failed: ${stderr}`);
-  }
-
-  const worktrees = parseWorktreeList(stdout);
+  const worktrees = await listWorktrees(dir);
   const dirty: DirtyWorktree[] = [];
 
   for (const wt of worktrees) {
@@ -262,17 +259,7 @@ export async function findWorktreeCollisions(
 ): Promise<WorktreeCollision[]> {
   if (branches.length === 0) return [];
 
-  const { code, stdout, stderr } = await runGitCommand(
-    dir,
-    "worktree",
-    "list",
-    "--porcelain",
-  );
-  if (code !== 0) {
-    throw new Error(`git worktree list failed: ${stderr}`);
-  }
-
-  const worktrees = parseWorktreeList(stdout);
+  const worktrees = await listWorktrees(dir);
   if (worktrees.length === 0) return [];
 
   // Resolve the worktree root that contains `dir` so we skip it: git allows
@@ -307,16 +294,7 @@ export async function findWorktreeCollisions(
 export async function listInProgressOperations(
   dir: string,
 ): Promise<InProgressOperation[]> {
-  const { code, stdout, stderr } = await runGitCommand(
-    dir,
-    "worktree",
-    "list",
-    "--porcelain",
-  );
-  if (code !== 0) {
-    throw new Error(`git worktree list failed: ${stderr}`);
-  }
-  const worktrees = parseWorktreeList(stdout);
+  const worktrees = await listWorktrees(dir);
   const ops: InProgressOperation[] = [];
 
   for (const wt of worktrees) {

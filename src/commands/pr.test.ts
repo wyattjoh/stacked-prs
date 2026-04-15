@@ -3,23 +3,11 @@ import { expect } from "@std/expect";
 import {
   addBranch,
   createTestRepo,
-  makeTempDir,
+  makeMockDir,
 } from "../lib/testdata/helpers.ts";
 import { runGitCommand } from "../lib/stack.ts";
-import { setMockDir, writeFixture } from "../lib/gh.ts";
+import { writeFixture } from "../lib/gh.ts";
 import { findPrForBranch } from "./pr.ts";
-
-async function makeMockDir(): Promise<AsyncDisposable & { path: string }> {
-  const dir = await makeTempDir("stacked-prs-mock-");
-  setMockDir(dir.path);
-  return {
-    path: dir.path,
-    [Symbol.asyncDispose]: async () => {
-      setMockDir(undefined);
-      await dir[Symbol.asyncDispose]();
-    },
-  };
-}
 
 describe("findPrForBranch", () => {
   test("returns the best PR for a branch", async () => {

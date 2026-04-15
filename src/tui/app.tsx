@@ -24,7 +24,7 @@ import {
   moveUp,
 } from "./state/navigation.ts";
 import { copyToClipboard } from "./lib/clipboard.ts";
-import { gh } from "../lib/gh.ts";
+import { gh, listPrsForBranch } from "../lib/gh.ts";
 import { runGitCommand } from "../lib/stack.ts";
 import { HeaderBox } from "./components/header-box.tsx";
 import { StackMap } from "./components/stack-map.tsx";
@@ -40,7 +40,6 @@ import {
   UnsupportedLandShape,
 } from "../commands/land.ts";
 import type { PrInfo } from "./types.ts";
-import { selectBestPr } from "../lib/gh.ts";
 
 export interface AppProps {
   dir: string;
@@ -332,22 +331,8 @@ export function App(props: AppProps): React.ReactElement {
             const fresh: PrStateByBranch = new Map();
             await Promise.all(branches.map(async (b) => {
               try {
-                const out = await gh(
-                  "pr",
-                  "list",
-                  "--head",
-                  b,
-                  "--state",
-                  "all",
-                  "--json",
-                  "number,url,state,isDraft,createdAt",
-                );
-                const rows = JSON.parse(out) as Array<{
-                  state: string;
-                  isDraft: boolean;
-                  createdAt?: string;
-                }>;
-                fresh.set(b, prStateFrom(selectBestPr(rows)));
+                const best = await listPrsForBranch(b);
+                fresh.set(b, prStateFrom(best));
               } catch {
                 fresh.set(b, "NONE");
               }

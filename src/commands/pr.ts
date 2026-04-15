@@ -1,13 +1,7 @@
-import { gh, selectBestPr } from "../lib/gh.ts";
+import { type GhPrListInfo, listPrsForBranch } from "../lib/gh.ts";
 import { runGitCommand } from "../lib/stack.ts";
 
-export interface PrLookupInfo {
-  number: number;
-  url: string;
-  state: string;
-  isDraft: boolean;
-  createdAt?: string;
-}
+export type PrLookupInfo = GhPrListInfo;
 
 export interface PrLookupResult {
   ok: boolean;
@@ -44,20 +38,7 @@ export async function findPrForBranch(
     targetBranch = stdout;
   }
 
-  const result = await gh(
-    "pr",
-    "list",
-    "--head",
-    targetBranch,
-    "--repo",
-    `${owner}/${repo}`,
-    "--state",
-    "all",
-    "--json",
-    "number,url,state,isDraft,createdAt",
-  );
-  const prs = JSON.parse(result) as PrLookupInfo[];
-  const best = selectBestPr(prs);
+  const best = await listPrsForBranch(targetBranch, { owner, repo });
   if (!best) {
     return {
       ok: false,

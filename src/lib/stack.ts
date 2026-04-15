@@ -168,6 +168,32 @@ export async function tryResolveRef(
   return stdout || null;
 }
 
+/**
+ * If HEAD currently points to a symbolic ref in `branches`, detach it to the
+ * current commit SHA so those branches can be deleted. No-op when HEAD is
+ * already detached or points to a surviving branch.
+ */
+export async function detachHeadIfIn(
+  dir: string,
+  branches: readonly string[],
+): Promise<void> {
+  const { code, stdout } = await runGitCommand(
+    dir,
+    "symbolic-ref",
+    "--short",
+    "HEAD",
+  );
+  if (code !== 0) return; // already detached
+  if (!branches.includes(stdout.trim())) return;
+  const { code: shaCode, stdout: sha } = await runGitCommand(
+    dir,
+    "rev-parse",
+    "HEAD",
+  );
+  if (shaCode !== 0) return;
+  await runGitCommand(dir, "checkout", "--detach", sha.trim());
+}
+
 /** Return the list of unmerged (conflict) file paths in `dir`. */
 export async function getConflictFiles(dir: string): Promise<string[]> {
   const { stdout } = await runGitCommand(
@@ -189,6 +215,37 @@ export async function rebaseInProgress(dir: string): Promise<boolean> {
     "REBASE_HEAD",
   );
   return code === 0;
+}
+
+export type SyncStatus = "up-to-date" | "behind-parent" | "diverged" | "landed";
+
+/**
+ * Determine how `branch`'s tip relates to `parent`'s: up-to-date if parent
+ * is an ancestor of branch, behind-parent if the reverse is true, otherwise
+ * diverged. Callers map the "landed" variant themselves from tombstones.
+ */
+export async function computeSyncStatus(
+  dir: string,
+  branch: string,
+  parent: string,
+): Promise<SyncStatus> {
+  const { code: fwd } = await runGitCommand(
+    dir,
+    "merge-base",
+    "--is-ancestor",
+    parent,
+    branch,
+  );
+  if (fwd === 0) return "up-to-date";
+  const { code: rev } = await runGitCommand(
+    dir,
+    "merge-base",
+    "--is-ancestor",
+    branch,
+    parent,
+  );
+  if (rev === 0) return "behind-parent";
+  return "diverged";
 }
 
 /** Run `git config --get-regexp <pattern>`, return parsed lines as [key, value] pairs. */

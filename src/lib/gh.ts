@@ -150,6 +150,43 @@ export function selectBestPr<
   return sorted[0];
 }
 
+export interface GhPrListInfo {
+  number: number;
+  url: string;
+  state: string;
+  isDraft: boolean;
+  createdAt?: string;
+}
+
+export interface ListPrsForBranchOptions extends GhOptions {
+  owner?: string;
+  repo?: string;
+}
+
+/**
+ * Query `gh pr list --head <branch> --state all` and return the best PR
+ * via `selectBestPr`. Consolidates the identical query + parse + select
+ * pattern that otherwise lives in pr.ts, status.ts, loader.ts, and
+ * land's cli fetch loop. Pass `{owner, repo}` to scope the query to a
+ * specific repo (required when `gh` can't infer it from the cwd).
+ */
+export async function listPrsForBranch(
+  branch: string,
+  opts: ListPrsForBranchOptions = {},
+): Promise<GhPrListInfo | null> {
+  const args = ["pr", "list", "--head", branch];
+  if (opts.owner && opts.repo) {
+    args.push("--repo", `${opts.owner}/${opts.repo}`);
+  }
+  args.push("--state", "all");
+  args.push("--json", "number,url,state,isDraft,createdAt");
+  const result = opts.signal
+    ? await gh({ signal: opts.signal }, ...args)
+    : await gh(...args);
+  const parsed = JSON.parse(result) as GhPrListInfo[];
+  return selectBestPr(parsed);
+}
+
 /**
  * Resolve the GitHub owner and repo name for the current repository.
  *

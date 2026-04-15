@@ -208,6 +208,7 @@ import {
   addLandedBranch,
   addLandedPr,
   clearStackConfig,
+  detachHeadIfIn,
   getAllNodes,
   getConflictFiles,
   getStackTree,
@@ -227,6 +228,21 @@ import { applyNavPlan, buildNavPlan } from "../lib/nav.ts";
  */
 const AUTO_MERGED_CLOSE_COMMENT =
   "auto-merged during stack land: every commit was already upstream";
+
+/**
+ * Close a PR whose branch was detected as auto-merged by patch-id during
+ * rebase. The comment identifies the close reason so reviewers understand
+ * why the PR closed without a merge commit.
+ */
+async function closeAutoMergedPr(prNumber: number): Promise<void> {
+  await gh(
+    "pr",
+    "close",
+    String(prNumber),
+    "--comment",
+    AUTO_MERGED_CLOSE_COMMENT,
+  );
+}
 
 export async function isShallowRepository(dir: string): Promise<boolean> {
   const { code, stdout } = await runGitCommand(
@@ -584,32 +600,6 @@ function describeBlockers(blockers: LandBlocker[]): string {
 }
 
 /**
- * If HEAD is currently a symbolic ref pointing to one of `branchesToDelete`,
- * detach it to the current commit SHA so the deletion can proceed. Has no
- * effect when HEAD is already detached or points to a surviving branch.
- */
-async function detachHeadFromDeleted(
-  dir: string,
-  branchesToDelete: string[],
-): Promise<void> {
-  const { code, stdout } = await runGitCommand(
-    dir,
-    "symbolic-ref",
-    "--short",
-    "HEAD",
-  );
-  if (code !== 0) return; // Already detached.
-  if (!branchesToDelete.includes(stdout.trim())) return;
-  const { code: shaCode, stdout: sha } = await runGitCommand(
-    dir,
-    "rev-parse",
-    "HEAD",
-  );
-  if (shaCode !== 0) return;
-  await runGitCommand(dir, "checkout", "--detach", sha.trim());
-}
-
-/**
  * Delete `branch` if it exists locally. Returns the outcome so callers can
  * decide how to report it. Intentionally does not touch any stack metadata;
  * each call site has its own tombstone/removeStackBranch ordering.
@@ -636,7 +626,7 @@ async function executeCaseBCleanup(
   hooks: LandHooks,
 ): Promise<LandResult> {
   // If HEAD is on a branch about to be deleted, detach it first.
-  await detachHeadFromDeleted(dir, plan.branchesToDelete);
+  await detachHeadIfIn(dir, plan.branchesToDelete);
 
   // Leaves-first: reverse the DFS order stored in branchesToDelete.
   const order = [...plan.branchesToDelete].reverse();
@@ -771,13 +761,7 @@ async function executeCaseARebases(
     state.rebased.add(step.branch);
 
     // Empty-branch detection: rebase dropped every commit via patch-id.
-    const countResult = await runGitCommand(
-      dir,
-      "rev-list",
-      "--count",
-      `${step.newTarget}..${step.branch}`,
-    );
-    if (countResult.code === 0 && countResult.stdout === "0") {
+    if (await isBranchAutoMerged(dir, step.branch, step.newTarget)) {
       state.autoMerged.add(step.branch);
       emit(
         hooks,
@@ -1009,7 +993,7 @@ async function executeCaseA(
   const prByBranch = new Map(
     plan.landedPrNumbers.map((e) => [e.branch, e.prNumber]),
   );
-  await detachHeadFromDeleted(dir, toDelete);
+  await detachHeadIfIn(dir, toDelete);
   for (const branch of toDelete) {
     emit(hooks, { kind: "delete", branch }, "running");
 
@@ -1095,13 +1079,7 @@ async function executeCaseAPrCloses(
     if (!state.autoMerged.has(update.branch)) continue;
     emit(hooks, { kind: "pr-close", branch: update.branch }, "running");
     try {
-      await gh(
-        "pr",
-        "close",
-        String(update.prNumber),
-        "--comment",
-        AUTO_MERGED_CLOSE_COMMENT,
-      );
+      await closeAutoMergedPr(update.prNumber);
       state.prClosed.add(update.prNumber);
       emit(hooks, { kind: "pr-close", branch: update.branch }, "ok");
     } catch (err) {
@@ -1342,7 +1320,7 @@ export async function executeLandFromCli(
   }
 
   if (plan.case === "all-merged") {
-    await detachHeadFromDeleted(dir, plan.branchesToDelete);
+    await detachHeadIfIn(dir, plan.branchesToDelete);
     const order = [...plan.branchesToDelete].reverse();
     for (const branch of order) {
       if (completed.deletedBranches.includes(branch)) continue;
@@ -1465,13 +1443,7 @@ export async function executeLandFromCli(
     if (!completed.autoMerged.includes(update.branch)) continue;
     if (completed.prClosed.includes(update.prNumber)) continue;
     try {
-      await gh(
-        "pr",
-        "close",
-        String(update.prNumber),
-        "--comment",
-        AUTO_MERGED_CLOSE_COMMENT,
-      );
+      await closeAutoMergedPr(update.prNumber);
     } catch (err) {
       throw new Error(
         `Failed to close PR #${update.prNumber} for auto-merged branch ` +
@@ -1503,7 +1475,7 @@ export async function executeLandFromCli(
   const prByBranch = new Map(
     plan.landedPrNumbers.map((e) => [e.branch, e.prNumber]),
   );
-  await detachHeadFromDeleted(dir, toDelete);
+  await detachHeadIfIn(dir, toDelete);
   for (const branch of toDelete) {
     if (completed.deletedBranches.includes(branch)) continue;
 

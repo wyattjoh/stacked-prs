@@ -5,24 +5,11 @@ import { render } from "ink-testing-library";
 import {
   addBranch,
   createTestRepo,
-  makeTempDir,
+  makeMockDir,
 } from "../lib/testdata/helpers.ts";
 import { setBaseBranch, setStackNode } from "../lib/stack.ts";
-import { setMockDir, writeFixture } from "../lib/gh.ts";
+import { writeFixture } from "../lib/gh.ts";
 import { App } from "./app.tsx";
-
-/** Acquire a temp mock dir, register it, and reset on disposal. */
-async function makeMockDir(): Promise<AsyncDisposable & { path: string }> {
-  const dir = await makeTempDir("stacked-prs-mock-");
-  setMockDir(dir.path);
-  return {
-    path: dir.path,
-    [Symbol.asyncDispose]: async () => {
-      setMockDir(undefined);
-      await dir[Symbol.asyncDispose]();
-    },
-  };
-}
 
 describe(
   "App integration",
