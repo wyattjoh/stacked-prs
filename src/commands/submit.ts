@@ -48,7 +48,9 @@ export async function executeSubmit(
 ): Promise<SubmitExecutionResult> {
   const result = emptyResult();
 
-  const branchesToPush = plan.branches.map((b) => b.branch);
+  const branchesToPush = plan.branches
+    .filter((b) => b.needsPush)
+    .map((b) => b.branch);
   if (branchesToPush.length > 0) {
     const pushResult = await runGitCommand(
       dir,
@@ -165,11 +167,13 @@ export function renderSubmitPlan(plan: SubmitPlan): string {
     return lines.join("\n");
   }
 
-  const pushList = plan.branches.map((b) => `    ${b.branch}`).join("\n");
-  if (pushList) {
+  const toPush = plan.branches.filter((b) => b.needsPush);
+  if (toPush.length > 0) {
     lines.push("");
     lines.push("  Push (--force-with-lease):");
-    lines.push(pushList);
+    for (const b of toPush) {
+      lines.push(`    ${b.branch}`);
+    }
   }
 
   const creates = plan.branches.filter((b) => b.action === "create");

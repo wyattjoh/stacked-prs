@@ -16,6 +16,13 @@ export interface BranchSubmitPlan {
   pr: GhPrInfo | null;
   action: "create" | "update-base" | "none";
   /**
+   * True when the local branch tip differs from `refs/remotes/origin/<branch>`
+   * (or when the remote ref does not exist yet). A fresh fetch is the caller's
+   * responsibility; the planner reads whatever the local remote-tracking ref
+   * points to, and `--force-with-lease` at execute time catches any drift.
+   */
+  needsPush: boolean;
+  /**
    * True when the PR for this branch should be a draft. PRs whose parent is
    * the stack's base branch (e.g. "main") are ready for review; all other PRs
    * in the stack are kept as drafts so they cannot be merged out of order.
@@ -53,6 +60,34 @@ interface GhPrInfo {
   baseRefName: string;
 }
 
+/**
+ * Return the commit SHA that a ref points to, or null if the ref does not
+ * exist locally. Used to compare local branch tips against their
+ * remote-tracking counterparts without failing when the remote ref is missing
+ * (e.g. a newly-created branch that has never been pushed).
+ */
+async function resolveRef(dir: string, ref: string): Promise<string | null> {
+  const result = await runGitCommand(
+    dir,
+    "rev-parse",
+    "--verify",
+    "--quiet",
+    ref,
+  );
+  if (result.code !== 0) return null;
+  return result.stdout || null;
+}
+
+async function computeNeedsPush(dir: string, branch: string): Promise<boolean> {
+  const [local, remote] = await Promise.all([
+    resolveRef(dir, branch),
+    resolveRef(dir, `refs/remotes/origin/${branch}`),
+  ]);
+  if (local === null) return false;
+  if (remote === null) return true;
+  return local !== remote;
+}
+
 function toNavCommentPlan(action: NavAction): NavCommentPlan {
   return {
     prNumber: action.prNumber,
@@ -77,20 +112,23 @@ export async function computeSubmitPlan(
   const currentBranch = currentBranchResult.stdout;
   const nodes = getAllNodes(tree);
 
-  // Fetch PR info for all nodes in parallel
+  // Fetch PR info and compute push state for all nodes in parallel
   const branchPlans = await Promise.all(
     nodes.map(async (b): Promise<BranchSubmitPlan> => {
-      const result = await gh(
-        "pr",
-        "list",
-        "--head",
-        b.branch,
-        "--repo",
-        `${owner}/${repo}`,
-        "--json",
-        "number,url,title,state,isDraft,baseRefName",
-      );
-      const prs = JSON.parse(result) as GhPrInfo[];
+      const [prListResult, needsPush] = await Promise.all([
+        gh(
+          "pr",
+          "list",
+          "--head",
+          b.branch,
+          "--repo",
+          `${owner}/${repo}`,
+          "--json",
+          "number,url,title,state,isDraft,baseRefName",
+        ),
+        computeNeedsPush(dir, b.branch),
+      ]);
+      const prs = JSON.parse(prListResult) as GhPrInfo[];
       const pr = selectBestPr(prs);
 
       let action: BranchSubmitPlan["action"];
@@ -119,6 +157,7 @@ export async function computeSubmitPlan(
         isCurrent: b.branch === currentBranch,
         pr,
         action,
+        needsPush,
         desiredDraft,
         draftAction,
       };
@@ -129,8 +168,10 @@ export async function computeSubmitPlan(
   const navActions = await buildNavPlan(dir, stackName, owner, repo);
   const navComments = navActions.map(toNavCommentPlan);
 
-  const isNoOp = branchPlans.every((b) => b.action === "none") &&
-    navComments.length === 0;
+  const isNoOp =
+    branchPlans.every((b) =>
+      b.action === "none" && b.draftAction === "none" && !b.needsPush
+    ) && navComments.length === 0;
 
   return {
     stackName,

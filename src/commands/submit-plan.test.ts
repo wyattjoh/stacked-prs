@@ -2,8 +2,10 @@ import { describe, it as test } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import {
   addBranch,
+  commitFile,
   createTestRepo,
   makeTempDir,
+  runGit,
 } from "../lib/testdata/helpers.ts";
 import { setBaseBranch, setStackNode } from "../lib/stack.ts";
 import type { StackTree } from "../lib/stack.ts";
@@ -125,7 +127,11 @@ describe("computeSubmitPlan", () => {
   test("isNoOp is true when all PRs have correct base and nav is current", async () => {
     await using repo = await createTestRepo();
     await using mock = await makeMockDir();
+    await using bare = await makeTempDir("bare-");
     await addBranch(repo.dir, "feat/a", "main");
+    await runGit(repo.dir, "init", "--bare", "-q", bare.path);
+    await runGit(repo.dir, "remote", "add", "origin", bare.path);
+    await runGit(repo.dir, "push", "origin", "feat/a");
 
     await setBaseBranch(repo.dir, "my-stack", "main");
     await setStackNode(repo.dir, "feat/a", "my-stack", "main");
@@ -168,10 +174,83 @@ describe("computeSubmitPlan", () => {
 
     expect(plan.branches).toHaveLength(1);
     expect(plan.branches[0].action).toBe("none");
+    expect(plan.branches[0].needsPush).toBe(false);
     expect(plan.branches[0].desiredDraft).toBe(false);
     expect(plan.branches[0].draftAction).toBe("none");
     expect(plan.navComments).toHaveLength(0);
     expect(plan.isNoOp).toBe(true);
+  });
+
+  test("needsPush is true when local branch tip differs from remote", async () => {
+    await using repo = await createTestRepo();
+    await using mock = await makeMockDir();
+    await using bare = await makeTempDir("bare-");
+    await addBranch(repo.dir, "feat/a", "main");
+    await runGit(repo.dir, "init", "--bare", "-q", bare.path);
+    await runGit(repo.dir, "remote", "add", "origin", bare.path);
+    await runGit(repo.dir, "push", "origin", "feat/a");
+
+    // Add a new local commit on feat/a so it diverges from origin/feat/a.
+    await runGit(repo.dir, "checkout", "feat/a");
+    await commitFile(repo.dir, "extra.txt", "extra\n");
+    await runGit(repo.dir, "checkout", "main");
+
+    await setBaseBranch(repo.dir, "my-stack", "main");
+    await setStackNode(repo.dir, "feat/a", "my-stack", "main");
+
+    // PR has correct base and isDraft; only local SHA has moved.
+    await writeFixture(
+      mock.path,
+      ["pr", "list", "--head", "feat/a", "--repo", "o/r"],
+      [{
+        number: 10,
+        url: "https://github.com/o/r/pull/10",
+        title: "feat: a",
+        state: "OPEN",
+        isDraft: false,
+        baseRefName: "main",
+      }],
+    );
+
+    // Nav matches current topology so it doesn't force isNoOp=false on its own.
+    const tree: StackTree = {
+      stackName: "my-stack",
+      baseBranch: "main",
+      mergeStrategy: undefined,
+      roots: [{
+        branch: "feat/a",
+        stackName: "my-stack",
+        parent: "main",
+        children: [],
+      }],
+    };
+    const navBody = generateNavMarkdown(tree, new Map([["feat/a", 10]]), 10);
+    await writeFixture(
+      mock.path,
+      ["api", "repos/o/r/issues/10/comments"],
+      [{ id: 500, body: navBody }],
+    );
+
+    const plan = await computeSubmitPlan(repo.dir, "my-stack", "o", "r");
+
+    expect(plan.branches[0].action).toBe("none");
+    expect(plan.branches[0].draftAction).toBe("none");
+    expect(plan.branches[0].needsPush).toBe(true);
+    expect(plan.navComments).toHaveLength(0);
+    expect(plan.isNoOp).toBe(false);
+  });
+
+  test("needsPush is true when the remote-tracking ref does not exist", async () => {
+    await using repo = await createTestRepo();
+    await using _mock = await makeMockDir();
+    await addBranch(repo.dir, "feat/a", "main");
+
+    await setBaseBranch(repo.dir, "my-stack", "main");
+    await setStackNode(repo.dir, "feat/a", "my-stack", "main");
+
+    const plan = await computeSubmitPlan(repo.dir, "my-stack", "o", "r");
+
+    expect(plan.branches[0].needsPush).toBe(true);
   });
 
   test("flips a non-base PR back to draft when it has been marked ready", async () => {
