@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.9.1](https://github.com/wyattjoh/stacked-prs/compare/stacked-prs-v1.9.0...stacked-prs-v1.9.1) (2026-04-15)
+
+
+### Bug Fixes
+
+* **submit:** post nav comments for freshly-created PRs ([36fc4ad](https://github.com/wyattjoh/stacked-prs/commit/36fc4ad26968763bdc3819ee4722f211da83ca77))
+
 ## [1.9.0](https://github.com/wyattjoh/stacked-prs/compare/stacked-prs-v1.8.0...stacked-prs-v1.9.0) (2026-04-15)
 
 
