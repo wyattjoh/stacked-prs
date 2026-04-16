@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.10.0](https://github.com/wyattjoh/stacked-prs/compare/stacked-prs-v1.9.1...stacked-prs-v1.10.0) (2026-04-16)
+
+
+### Features
+
+* **sync:** add --filter to restrict sync to matching stack-name globs ([0739aa2](https://github.com/wyattjoh/stacked-prs/commit/0739aa2369f1375c34db3b5d72913ad114ca03a7))
+
 ## [1.9.1](https://github.com/wyattjoh/stacked-prs/compare/stacked-prs-v1.9.0...stacked-prs-v1.9.1) (2026-04-15)
 
 
