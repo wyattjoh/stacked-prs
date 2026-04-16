@@ -86,7 +86,7 @@ export async function planInsert(
 
   const tree = await getStackTree(dir, opts.stackName);
   const childNode = findNode(tree, opts.child);
-  if (!childNode) {
+  if (!childNode || childNode.merged) {
     return {
       ok: false,
       error: "child-not-in-stack",

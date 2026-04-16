@@ -2,6 +2,7 @@ import { describe, it as test } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import {
   addBranch,
+  addTombstone,
   createTestRepo,
   makeMockDir,
   runGit,
@@ -248,5 +249,25 @@ describe("getStackStatus with merged nodes", () => {
 
     const branchA = status.branches.find((b) => b.branch === "feature/a");
     expect(branchA?.syncStatus).toBe("landed");
+  });
+
+  test("renders stack-level tombstone root as a landed node", async () => {
+    await using repo = await createTestRepo();
+    await using _mock = await makeMockDir();
+    await addBranch(repo.dir, "feature/live", "main");
+    await setStackNode(repo.dir, "feature/live", "my-stack", "main");
+    await setBaseBranch(repo.dir, "my-stack", "main");
+    await addTombstone(repo.dir, "my-stack", "feature/landed", {
+      prNumber: 51,
+    });
+
+    const status = await getStackStatus(repo.dir, "my-stack");
+
+    const landed = status.branches.find((b) => b.branch === "feature/landed");
+    expect(landed?.syncStatus).toBe("landed");
+    expect(landed?.parent).toBe("main");
+    // The live subtree still renders with computed sync status.
+    const live = status.branches.find((b) => b.branch === "feature/live");
+    expect(live?.syncStatus).toBe("up-to-date");
   });
 });

@@ -101,7 +101,10 @@ export async function verifyRefs(
   stackName: string,
 ): Promise<VerifyResult> {
   const tree = await getStackTree(dir, stackName);
-  const stack = getAllNodes(tree);
+  // Tombstoned (merged) nodes have no live ref: git merge-base and rev-list
+  // against them would fail. Skip them entirely — the stack's live topology
+  // is the only thing worth verifying.
+  const stack = getAllNodes(tree).filter((n) => !n.merged);
 
   // Check each branch sequentially so transitive staleness propagates:
   // if a branch is stale, all downstream branches are also considered stale.

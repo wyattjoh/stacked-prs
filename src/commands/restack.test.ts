@@ -2,6 +2,7 @@ import { describe, it, it as test } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import {
   addBranch,
+  addTombstone,
   commitFile,
   createTestRepo,
   makeTempDir,
@@ -1069,5 +1070,39 @@ describe("topologicalOrder skips merged nodes", () => {
     } finally {
       await repo.cleanup();
     }
+  });
+});
+
+describe("restack (stack-level tombstone present)", () => {
+  test("planRestack does not probe tombstone refs and plans only live nodes", async () => {
+    await using repo = await createTestRepo();
+    await addBranch(repo.dir, "feat/live", "main");
+    await setBaseBranch(repo.dir, "my-stack", "main");
+    await setStackNode(repo.dir, "feat/live", "my-stack", "main");
+    await addTombstone(repo.dir, "my-stack", "feat/landed", { prNumber: 41 });
+
+    // setupFakeOrigin requires a remote; planRestack alone does not.
+    const plan = await planRestack(repo.dir, "my-stack", {});
+
+    // Only the live branch shows up in the plan.
+    expect(plan.ok).toBe(true);
+    expect(plan.rebases.map((r) => r.branch)).toEqual(["feat/live"]);
+  });
+
+  test("executeRestack completes successfully with a tombstone root", async () => {
+    await using repo = await createTestRepo();
+    await addBranch(repo.dir, "feat/a", "main");
+    await addBranch(repo.dir, "feat/b", "feat/a");
+    await setBaseBranch(repo.dir, "my-stack", "main");
+    await setStackNode(repo.dir, "feat/a", "my-stack", "main");
+    await setStackNode(repo.dir, "feat/b", "my-stack", "feat/a");
+    await using _bare = await setupFakeOrigin(repo.dir);
+
+    await addTombstone(repo.dir, "my-stack", "feat/landed", { prNumber: 42 });
+
+    const result = await executeRestack(repo.dir, "my-stack", {});
+
+    expect(result.ok).toBe(true);
+    expect(result.rebases.map((r) => r.branch)).toEqual(["feat/a", "feat/b"]);
   });
 });

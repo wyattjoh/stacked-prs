@@ -27,7 +27,10 @@ export async function captureSnapshot(
   dir: string,
   tree: StackTree,
 ): Promise<BranchSnapshot[]> {
-  const nodes = getAllNodes(tree);
+  // Tombstone nodes have no ref; revParse would throw. Skip them — the
+  // snapshot is used to recover pre-mutation state and only live branches
+  // can be mutated.
+  const nodes = getAllNodes(tree).filter((n) => !n.merged);
   const snapshots: BranchSnapshot[] = [];
   for (const node of nodes) {
     const tipSha = await revParse(dir, node.branch);
@@ -141,6 +144,8 @@ export function projectTreeAfterRemoval(
   const remainingRoots: string[] = [];
   for (const node of nodes) {
     if (mergedSet.has(node.branch)) continue;
+    // Tombstones are historical; they should not influence projected roots.
+    if (node.merged) continue;
     const liveParent = resolveLiveParent(node.parent);
     if (liveParent !== node.parent) {
       newParents.set(node.branch, liveParent);

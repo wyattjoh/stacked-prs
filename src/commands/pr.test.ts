@@ -65,4 +65,18 @@ describe("findPrForBranch", () => {
     expect(result.ok).toBe(false);
     expect(result.error).toContain("No PR found");
   });
+
+  test("lookup on a tombstoned branch returns a clean not-found result", async () => {
+    // Tombstoned branches have no local ref. findPrForBranch takes the branch
+    // name as input and queries gh with it; the branch name is valid even
+    // when the ref is gone. gh returns no matches and we report "No PR found"
+    // rather than crashing.
+    await using repo = await createTestRepo();
+    await using _mock = await makeMockDir();
+    // No fixture registered, so mock gh returns [].
+
+    const result = await findPrForBranch(repo.dir, "o", "r", "feat/landed");
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain("No PR found");
+  });
 });

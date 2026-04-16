@@ -2,6 +2,7 @@ import { describe, it as test } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import {
   addBranch,
+  addTombstone,
   commitFile,
   createTestRepo,
   runGit,
@@ -185,5 +186,49 @@ describe("verifyRefs", () => {
     expect(staleBranches).toContain("feature/b");
     expect(staleBranches).toContain("feature/c");
     expect(staleBranches).toContain("feature/d");
+  });
+
+  test("skips tombstone roots whose refs no longer exist", async () => {
+    // Regression: verifyRefs previously iterated tombstone roots and crashed
+    // on `git merge-base` against the deleted ref. It must skip merged nodes
+    // and only verify the live subtree.
+    await using repo = await createTestRepo();
+    await addBranch(repo.dir, "feature/live", "main");
+    await setBaseBranch(repo.dir, "my-stack", "main");
+    await setStackNode(repo.dir, "feature/live", "my-stack", "main");
+    await addTombstone(repo.dir, "my-stack", "feature/landed", {
+      prNumber: 42,
+    });
+
+    const result = await verifyRefs(repo.dir, "my-stack");
+
+    expect(result.valid).toBe(true);
+    expect(result.branches.map((b) => b.branch)).toEqual(["feature/live"]);
+  });
+
+  test("tombstone plus stale live child still reports the stale child", async () => {
+    await using repo = await createTestRepo();
+    await addBranch(repo.dir, "feature/a", "main");
+    await addBranch(repo.dir, "feature/b", "feature/a");
+    await setBaseBranch(repo.dir, "my-stack", "main");
+    await setStackNode(repo.dir, "feature/a", "my-stack", "main");
+    await setStackNode(repo.dir, "feature/b", "my-stack", "feature/a");
+    await addTombstone(repo.dir, "my-stack", "feature/legacy", {
+      prNumber: 99,
+    });
+
+    // Make feature/b stale relative to feature/a.
+    await runGit(repo.dir, "checkout", "feature/a");
+    await commitFile(repo.dir, "extra.txt", "x\n");
+    await runGit(repo.dir, "checkout", "main");
+
+    const result = await verifyRefs(repo.dir, "my-stack");
+
+    expect(result.valid).toBe(false);
+    expect(result.repairs.map((r) => r.branch)).toEqual(["feature/b"]);
+    // Tombstone never appears in the verified set.
+    expect(result.branches.map((b) => b.branch)).not.toContain(
+      "feature/legacy",
+    );
   });
 });

@@ -2,6 +2,7 @@ import { describe, it as test } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import {
   addBranch,
+  addTombstone,
   commitFile,
   createTestRepo,
   runGit,
@@ -281,5 +282,24 @@ describe("detectStaleConfig", () => {
         (f) => f.kind === "missing-branch" && f.branch === "b",
       ),
     ).toBe(true);
+  });
+
+  test("tombstones do not surface as missing-branch findings", async () => {
+    // A landed branch intentionally has no ref and no branch.<name>.stack-*
+    // config — it lives only in stack.<n>.landed-branches. clean must not
+    // flag it as stale, or users would delete their tombstones during routine
+    // cleanup.
+    await using repo = await createTestRepo();
+    await addBranch(repo.dir, "live", "main");
+    await setBaseBranch(repo.dir, "s", "main");
+    await setStackNode(repo.dir, "live", "s", "main");
+    await addTombstone(repo.dir, "s", "landed-feat", { prNumber: 61 });
+
+    const report = await detectStaleConfig(repo.dir);
+
+    expect(
+      report.findings.find((f) => f.branch === "landed-feat"),
+    ).toBeUndefined();
+    expect(report.findings).toEqual([]);
   });
 });

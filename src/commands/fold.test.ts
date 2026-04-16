@@ -1,6 +1,11 @@
 import { describe, it as test } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { addBranch, createTestRepo, runGit } from "../lib/testdata/helpers.ts";
+import {
+  addBranch,
+  addTombstone,
+  createTestRepo,
+  runGit,
+} from "../lib/testdata/helpers.ts";
 import { fold, planFold } from "./fold.ts";
 
 /** Register a 3-branch linear stack: main <- feat/a <- feat/b <- feat/c. */
@@ -222,5 +227,36 @@ describe("fold — execute (real git)", () => {
     });
     expect(result.ok).toBe(false);
     expect(result.error).toBe("ff-not-possible");
+  });
+});
+
+describe("fold — tombstone handling", () => {
+  test("rejects folding a tombstoned branch", async () => {
+    await using repo = await createTestRepo();
+    await setupLinearStack(repo.dir);
+    await addTombstone(repo.dir, "my-stack", "feat/landed", { prNumber: 21 });
+
+    const result = await planFold(repo.dir, {
+      stackName: "my-stack",
+      branch: "feat/landed",
+      strategy: "ff",
+    });
+    expect(result.ok).toBe(false);
+    expect(result.error).toBe("not-in-stack");
+  });
+
+  test("folds a live branch even when a tombstone is present", async () => {
+    await using repo = await createTestRepo();
+    await setupLinearStack(repo.dir);
+    await addTombstone(repo.dir, "my-stack", "feat/legacy", { prNumber: 22 });
+
+    const result = await planFold(repo.dir, {
+      stackName: "my-stack",
+      branch: "feat/b",
+      strategy: "ff",
+    });
+    expect(result.ok).toBe(true);
+    expect(result.plan?.parent).toBe("feat/a");
+    expect(result.plan?.children).toEqual(["feat/c"]);
   });
 });

@@ -2,6 +2,7 @@ import { describe, it as test } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import {
   addBranch,
+  addTombstone,
   createTestRepo,
   makeMockDir,
   makeTempDir,
@@ -363,5 +364,32 @@ describe("executeSubmit", () => {
       isNoOp: true,
     };
     expect(renderSubmitPlan(plan)).toContain("All PRs are up to date");
+  });
+
+  test("computeSubmitPlan with a tombstone present produces no work for the tombstone", async () => {
+    await using repo = await createTestRepo();
+    await using mock = await makeMockDir();
+    await addBranch(repo.dir, "feat/live", "main");
+    await setBaseBranch(repo.dir, "my-stack", "main");
+    await setStackNode(repo.dir, "feat/live", "my-stack", "main");
+    await addTombstone(repo.dir, "my-stack", "feat/landed", { prNumber: 121 });
+
+    await writeFixture(
+      mock.path,
+      ["pr", "list", "--head", "feat/live", "--repo", "o/r"],
+      [{
+        number: 121,
+        url: "https://github.com/o/r/pull/121",
+        title: "live",
+        state: "OPEN",
+        isDraft: false,
+        baseRefName: "main",
+      }],
+    );
+
+    const plan = await computeSubmitPlan(repo.dir, "my-stack", "o", "r");
+    expect(plan.branches.map((b) => b.branch)).toEqual(["feat/live"]);
+    expect(plan.branches.find((b) => b.branch === "feat/landed"))
+      .toBeUndefined();
   });
 });

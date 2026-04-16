@@ -19,6 +19,7 @@ import {
 } from "./land.ts";
 import {
   addBranch,
+  addTombstone,
   createTestRepo,
   runGit,
   type TestRepo,
@@ -414,6 +415,44 @@ describe("executeLand case B (all-merged)", () => {
 
       expect(result.plan.case).toBe("all-merged");
       expect(result.split).toEqual([]);
+    }
+  });
+});
+
+describe("planLand with pre-existing tombstone", () => {
+  it("classifies root-merged ignoring a pre-existing tombstone root", async () => {
+    // Scenario: the stack already has a tombstone from a prior land cycle.
+    // A newer root PR is now merged too. planLand must treat the new merged
+    // root as the land target and leave the tombstone out of every plan
+    // step (no rebase, no push, no delete).
+    await using repo = await createTestRepo();
+    {
+      await addBranch(repo.dir, "feat/a", "main");
+      await addBranch(repo.dir, "feat/b", "feat/a");
+      await initStack(repo, "s", [
+        ["feat/a", "main"],
+        ["feat/b", "feat/a"],
+      ]);
+      await addTombstone(repo.dir, "s", "feat/legacy", { prNumber: 99 });
+
+      const prStates: PrStateByBranch = new Map([
+        ["feat/a", "MERGED"],
+        ["feat/b", "OPEN"],
+      ]);
+      const prInfo = new Map<string, PrInfo>([
+        ["feat/a", { number: 10, url: "", state: "MERGED", isDraft: false }],
+        ["feat/b", { number: 20, url: "", state: "OPEN", isDraft: true }],
+      ]);
+
+      const plan = await planLand(repo.dir, "s", prStates, prInfo);
+
+      expect(plan.case).toBe("root-merged");
+      expect(plan.mergedBranches).toEqual(["feat/a"]);
+      expect(plan.branchesToDelete).toEqual(["feat/a"]);
+      expect(plan.rebaseSteps.map((r) => r.branch)).toEqual(["feat/b"]);
+      // Tombstone is never a plan participant.
+      expect(plan.mergedBranches).not.toContain("feat/legacy");
+      expect(plan.branchesToDelete).not.toContain("feat/legacy");
     }
   });
 });

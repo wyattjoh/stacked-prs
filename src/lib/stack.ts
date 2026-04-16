@@ -809,9 +809,10 @@ export async function validateStackTree(
   const nodes = getAllNodes(tree);
   const nodeSet = new Set(nodes.map((n) => n.branch));
 
-  // Check 1: every node must resolve to a real git ref
+  // Check 1: every live node must resolve to a real git ref. Tombstones are
+  // intentionally refless, so skip them.
   await Promise.all(
-    nodes.map(async (node) => {
+    nodes.filter((n) => !n.merged).map(async (node) => {
       const { code } = await runGitCommand(
         dir,
         "rev-parse",

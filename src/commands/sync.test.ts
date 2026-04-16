@@ -2,6 +2,7 @@ import { describe, it as test } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import {
   addBranch,
+  addTombstone,
   commitFile,
   createTestRepo,
   makeMockDir,
@@ -610,5 +611,40 @@ describe("executeSync", () => {
       "feat/b",
     );
     expect(code).not.toBe(0);
+  });
+
+  test("pre-existing tombstone is preserved across a sync", async () => {
+    // A stack that already contains a tombstone from a prior land must sync
+    // cleanly: the tombstone stays in landed-branches, the live subtree is
+    // considered for push/retarget, and no spurious prune-steps are generated.
+    await using repo = await createTestRepo();
+    await using mock = await makeMockDir();
+    await writeRepoViewFixture(mock.path);
+    await addBranch(repo.dir, "feat/live", "main");
+    await setupStack(repo.dir, "s", [["feat/live", "main"]]);
+    await addTombstone(repo.dir, "s", "feat/landed", { prNumber: 111 });
+    await using _bare = await wireOrigin(repo.dir);
+
+    await writePrListFixture(mock.path, "feat/live", [{
+      number: 2,
+      state: "OPEN",
+    }]);
+
+    const plan = await computeSyncPlan(repo.dir);
+    const s = plan.stacks.find((x) => x.stackName === "s")!;
+    // No prune step for the already-tombstoned branch (it isn't a live node).
+    expect(s.pruneSteps).toEqual([]);
+
+    const result = await executeSync(repo.dir, plan);
+    expect(result.ok).toBe(true);
+
+    // Tombstone is still recorded.
+    const { stdout } = await runGitCommand(
+      repo.dir,
+      "config",
+      "--get-all",
+      "stack.s.landed-branches",
+    );
+    expect(stdout.split("\n")).toContain("feat/landed");
   });
 });

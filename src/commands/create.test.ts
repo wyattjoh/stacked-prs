@@ -2,6 +2,7 @@ import { describe, it as test } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import {
   addBranch,
+  addTombstone,
   createTestRepo,
   makeTempDir,
   runGit,
@@ -515,5 +516,20 @@ describe("create — case 3 (auto-init worktree)", () => {
       "refs/heads/feat/a",
     ).catch(() => "");
     expect(probe).toBe("");
+  });
+
+  test("creates a child when the stack has an existing tombstone", async () => {
+    // After a prior land, the stack's landed-branches key contains a
+    // tombstone. create should ignore it and successfully add a new child
+    // under the currently checked-out live branch.
+    await using repo = await createTestRepo();
+    await setupStackOnFeatA(repo.dir);
+    await addTombstone(repo.dir, "my-stack", "feat/landed", { prNumber: 71 });
+
+    const result = await create(repo.dir, { branch: "feat/b" });
+    expect(result.ok).toBe(true);
+    expect(result.plan?.case).toBe("child");
+    expect(result.plan?.parent).toBe("feat/a");
+    expect(result.plan?.stackName).toBe("my-stack");
   });
 });

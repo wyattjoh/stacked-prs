@@ -1,4 +1,5 @@
 import { setMockDir } from "../gh.ts";
+import { addLandedBranch, addLandedPr } from "../stack.ts";
 
 const GIT_ENV = {
   GIT_AUTHOR_NAME: "Test User",
@@ -116,4 +117,63 @@ export async function commitFile(
   await Deno.writeTextFile(`${dir}/${filename}`, content);
   await runGit(dir, "add", filename);
   await runGit(dir, "commit", "-m", `add ${filename}`);
+}
+
+export interface AddTombstoneOptions {
+  /** PR number to record under stack.<name>.landed-pr. Omit to skip the PR record. */
+  prNumber?: number;
+  /**
+   * When true (default), also delete any local ref for `branch` so the state
+   * matches post-land. Pass false to keep the branch alive (used when testing
+   * the live-branch-wins dedup path).
+   */
+  deleteRef?: boolean;
+}
+
+/**
+ * Simulate a landed branch by writing the tombstone to stack-level config
+ * and removing the local branch ref. The stack config does not need to exist
+ * yet; callers are expected to have already set base-branch if they want
+ * `getStackTree` to succeed.
+ *
+ * Requires the caller to be off `branch` (will not detach HEAD). If HEAD is
+ * currently on `branch`, check out something else before calling.
+ */
+export async function addTombstone(
+  dir: string,
+  stackName: string,
+  branch: string,
+  options: AddTombstoneOptions = {},
+): Promise<void> {
+  const { prNumber, deleteRef = true } = options;
+  await addLandedBranch(dir, stackName, branch);
+  if (prNumber !== undefined) {
+    await addLandedPr(dir, stackName, branch, prNumber);
+  }
+  if (!deleteRef) return;
+  const probe = await new Deno.Command("git", {
+    args: ["rev-parse", "--verify", "--quiet", `refs/heads/${branch}`],
+    cwd: dir,
+    env: GIT_ENV,
+    stdout: "piped",
+    stderr: "piped",
+  }).output();
+  if (probe.code === 0) {
+    await runGit(dir, "branch", "-D", branch);
+  }
+  // Also drop any branch-level stack config so the tombstone reads as a pure
+  // "tombstone root" (live branches take precedence in getStackTree dedup).
+  for (
+    const key of [
+      `branch.${branch}.stack-name`,
+      `branch.${branch}.stack-parent`,
+      `branch.${branch}.stack-order`,
+    ]
+  ) {
+    await new Deno.Command("git", {
+      args: ["config", "--unset", key],
+      cwd: dir,
+      env: GIT_ENV,
+    }).output();
+  }
 }

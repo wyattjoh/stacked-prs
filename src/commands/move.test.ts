@@ -1,6 +1,11 @@
 import { describe, it as test } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { addBranch, createTestRepo, runGit } from "../lib/testdata/helpers.ts";
+import {
+  addBranch,
+  addTombstone,
+  createTestRepo,
+  runGit,
+} from "../lib/testdata/helpers.ts";
 import { move, planMove } from "./move.ts";
 
 /** Register a stack:  main <- feat/a <- feat/b, and sibling feat/c off feat/a. */
@@ -187,5 +192,50 @@ describe("move — execute (real git)", () => {
       "branch.feat/c.stack-parent",
     );
     expect(parent).toBe("feat/a");
+  });
+});
+
+describe("move — tombstone handling", () => {
+  test("rejects a tombstone root as the new parent", async () => {
+    await using repo = await createTestRepo();
+    await setupForkStack(repo.dir);
+    await addTombstone(repo.dir, "my-stack", "feat/landed", { prNumber: 11 });
+
+    const result = await planMove(repo.dir, {
+      stackName: "my-stack",
+      branch: "feat/c",
+      newParent: "feat/landed",
+    });
+    expect(result.ok).toBe(false);
+    expect(result.error).toBe("parent-not-in-stack");
+  });
+
+  test("rejects moving a tombstoned branch", async () => {
+    await using repo = await createTestRepo();
+    await setupForkStack(repo.dir);
+    await addTombstone(repo.dir, "my-stack", "feat/landed", { prNumber: 12 });
+
+    const result = await planMove(repo.dir, {
+      stackName: "my-stack",
+      branch: "feat/landed",
+      newParent: "feat/a",
+    });
+    expect(result.ok).toBe(false);
+    expect(result.error).toBe("not-in-stack");
+  });
+
+  test("moves live branch alongside an existing tombstone", async () => {
+    await using repo = await createTestRepo();
+    await setupForkStack(repo.dir);
+    await addTombstone(repo.dir, "my-stack", "feat/landed", { prNumber: 13 });
+
+    const result = await planMove(repo.dir, {
+      stackName: "my-stack",
+      branch: "feat/c",
+      newParent: "feat/b",
+    });
+    expect(result.ok).toBe(true);
+    expect(result.plan?.oldParent).toBe("feat/a");
+    expect(result.plan?.newParent).toBe("feat/b");
   });
 });

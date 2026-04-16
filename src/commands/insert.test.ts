@@ -1,6 +1,11 @@
 import { describe, it as test } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { addBranch, createTestRepo, runGit } from "../lib/testdata/helpers.ts";
+import {
+  addBranch,
+  addTombstone,
+  createTestRepo,
+  runGit,
+} from "../lib/testdata/helpers.ts";
 import { insert, planInsert } from "./insert.ts";
 
 /** Register a linear 2-branch stack: main <- feat/a <- feat/c. */
@@ -127,5 +132,33 @@ describe("insert — execute (real git)", () => {
       "branch.feat/c.stack-parent",
     );
     expect(cParent).toBe("feat/a");
+  });
+
+  test("inserts alongside an existing tombstone", async () => {
+    await using repo = await createTestRepo();
+    await setupTwoBranchStack(repo.dir);
+    await addTombstone(repo.dir, "my-stack", "feat/landed", { prNumber: 101 });
+
+    const result = await planInsert(repo.dir, {
+      stackName: "my-stack",
+      child: "feat/c",
+      branch: "feat/b",
+    });
+    expect(result.ok).toBe(true);
+    expect(result.plan?.parent).toBe("feat/a");
+  });
+
+  test("rejects a tombstoned branch as the child", async () => {
+    await using repo = await createTestRepo();
+    await setupTwoBranchStack(repo.dir);
+    await addTombstone(repo.dir, "my-stack", "feat/landed", { prNumber: 102 });
+
+    const result = await planInsert(repo.dir, {
+      stackName: "my-stack",
+      child: "feat/landed",
+      branch: "feat/b",
+    });
+    expect(result.ok).toBe(false);
+    expect(result.error).toBe("child-not-in-stack");
   });
 });

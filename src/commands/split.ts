@@ -160,7 +160,7 @@ export async function planSplit(
 
   const tree = await getStackTree(dir, opts.stackName);
   const node = findNode(tree, opts.branch);
-  if (!node) {
+  if (!node || node.merged) {
     return {
       ok: false,
       error: "not-in-stack",

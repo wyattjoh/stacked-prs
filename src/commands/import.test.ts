@@ -1,6 +1,12 @@
 import { describe, it as test } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { addBranch, createTestRepo, runGit } from "../lib/testdata/helpers.ts";
+import {
+  addBranch,
+  addTombstone,
+  createTestRepo,
+  runGit,
+} from "../lib/testdata/helpers.ts";
+import { setBaseBranch } from "../lib/stack.ts";
 import { importStack, planImport } from "./import.ts";
 
 async function setupBranchChain(dir: string): Promise<void> {
@@ -115,5 +121,26 @@ describe("import — execute (real git)", () => {
       "branch.feat/a.stack-name",
     ).catch(() => "");
     expect(probe).toBe("");
+  });
+
+  test("imports a chain while an unrelated stack has tombstones", async () => {
+    // Tombstones are stack-level config; they do not affect import-discover's
+    // branch-graph traversal. A newly imported stack under a different name
+    // must succeed.
+    await using repo = await createTestRepo();
+    await setBaseBranch(repo.dir, "old", "main");
+    await addTombstone(repo.dir, "old", "feat/old", { prNumber: 91 });
+
+    await setupBranchChain(repo.dir);
+    await runGit(repo.dir, "checkout", "feat/c");
+
+    const result = await importStack(repo.dir, { stackName: "new-stack" });
+    expect(result.ok).toBe(true);
+    expect(result.plan?.stackName).toBe("new-stack");
+    expect(result.plan?.entries.map((e) => e.branch).sort()).toEqual([
+      "feat/a",
+      "feat/b",
+      "feat/c",
+    ]);
   });
 });

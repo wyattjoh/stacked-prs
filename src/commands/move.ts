@@ -100,7 +100,12 @@ export async function planMove(
     };
   }
 
-  const inStack = getAllNodes(tree).some((n) => n.branch === opts.newParent);
+  // A tombstone root is present in the tree but does not exist as a ref, so
+  // rebase --onto <tombstone> would fail and the resulting config would point
+  // children at a non-existent parent. Reject up-front.
+  const inStack = getAllNodes(tree).some(
+    (n) => n.branch === opts.newParent && !n.merged,
+  );
   const isBase = opts.newParent === tree.baseBranch;
   if (!inStack && !isBase) {
     return {
@@ -108,6 +113,15 @@ export async function planMove(
       error: "parent-not-in-stack",
       message:
         `new parent "${opts.newParent}" is not a member of stack "${opts.stackName}" (and not the base branch)`,
+    };
+  }
+
+  if (node.merged) {
+    return {
+      ok: false,
+      error: "not-in-stack",
+      message:
+        `branch "${opts.branch}" has already landed; cannot move a tombstoned branch`,
     };
   }
 

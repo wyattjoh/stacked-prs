@@ -1,6 +1,12 @@
 import { describe, it as test } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { addBranch, createTestRepo, runGit } from "../lib/testdata/helpers.ts";
+import {
+  addBranch,
+  addTombstone,
+  createTestRepo,
+  runGit,
+} from "../lib/testdata/helpers.ts";
+import { setBaseBranch } from "../lib/stack.ts";
 import { init, planInit } from "./init.ts";
 
 describe("init — plan", () => {
@@ -107,5 +113,20 @@ describe("init — execute (real git)", () => {
       "branch.feat/a.stack-name",
     ).catch(() => "");
     expect(probe).toBe("");
+  });
+
+  test("initializes a new stack while an unrelated stack has tombstones", async () => {
+    await using repo = await createTestRepo();
+    await setBaseBranch(repo.dir, "old-stack", "main");
+    await addTombstone(repo.dir, "old-stack", "feat/old", { prNumber: 81 });
+
+    await addBranch(repo.dir, "feat/new", "main");
+    await runGit(repo.dir, "checkout", "feat/new");
+
+    const result = await init(repo.dir, { stackName: "new-stack" });
+    expect(result.ok).toBe(true);
+    expect(
+      await runGit(repo.dir, "config", "branch.feat/new.stack-name"),
+    ).toBe("new-stack");
   });
 });

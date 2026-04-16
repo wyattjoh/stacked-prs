@@ -1,6 +1,10 @@
 import { describe, it as test } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { createTestRepo, runGit } from "../lib/testdata/helpers.ts";
+import {
+  addTombstone,
+  createTestRepo,
+  runGit,
+} from "../lib/testdata/helpers.ts";
 import { planSplit, split } from "./split.ts";
 
 /**
@@ -242,5 +246,40 @@ describe("split --by-file — execute (real git)", () => {
     });
     expect(result.ok).toBe(false);
     expect(result.error).toBe("file-not-in-branch");
+  });
+});
+
+describe("split — tombstone handling", () => {
+  test("rejects splitting a tombstoned branch", async () => {
+    await using repo = await createTestRepo();
+    const [c1] = await setupMultiCommitStack(repo.dir);
+    void c1;
+    await addTombstone(repo.dir, "my-stack", "feat/landed", { prNumber: 31 });
+
+    const result = await planSplit(repo.dir, {
+      mode: "by-commit",
+      stackName: "my-stack",
+      branch: "feat/landed",
+      at: "HEAD",
+      newBranch: "feat/b",
+    });
+    expect(result.ok).toBe(false);
+    expect(result.error).toBe("not-in-stack");
+  });
+
+  test("splits a live branch even when a tombstone is present", async () => {
+    await using repo = await createTestRepo();
+    const [c1] = await setupMultiCommitStack(repo.dir);
+    await addTombstone(repo.dir, "my-stack", "feat/legacy", { prNumber: 32 });
+
+    const result = await planSplit(repo.dir, {
+      mode: "by-commit",
+      stackName: "my-stack",
+      branch: "feat/a",
+      at: c1,
+      newBranch: "feat/b",
+    });
+    expect(result.ok).toBe(true);
+    expect(result.plan?.keep).toEqual([c1]);
   });
 });
