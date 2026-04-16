@@ -1,3 +1,4 @@
+import { globToRegExp } from "@std/path";
 import {
   findNode,
   getAllNodes,
@@ -69,6 +70,10 @@ export interface SyncPlan {
   /** Unique base branches across all stacks, to be fetched from origin. */
   baseBranches: string[];
   isNoOp: boolean;
+  /** The filter expression applied, if any. */
+  filter?: string;
+  /** Stack names that existed but were filtered out, for reporting. */
+  filteredOut: string[];
 }
 
 export interface StackSyncResult {
@@ -92,6 +97,50 @@ export interface SyncResult {
 // =========================================================================
 // Helpers
 // =========================================================================
+
+/**
+ * Split a `--filter` expression into its positive and negative glob patterns.
+ * Patterns are comma-separated; a leading `!` marks a negation. Whitespace
+ * around each entry is trimmed and empty entries are discarded so trailing
+ * commas and spaces are tolerated.
+ */
+export function parseStackFilter(
+  filter: string,
+): { includes: string[]; excludes: string[] } {
+  const parts = filter.split(",").map((s) => s.trim()).filter(
+    (s) => s.length > 0,
+  );
+  const includes: string[] = [];
+  const excludes: string[] = [];
+  for (const p of parts) {
+    if (p.startsWith("!")) {
+      const rest = p.slice(1).trim();
+      if (rest.length > 0) excludes.push(rest);
+    } else {
+      includes.push(p);
+    }
+  }
+  return { includes, excludes };
+}
+
+/**
+ * Test a stack name against a `--filter` expression. An undefined or empty
+ * filter matches everything. Pure negative filters (e.g. `!di*`) match every
+ * name that is not excluded; mixed filters require at least one positive match
+ * and no excludes hitting.
+ */
+export function stackNameMatchesFilter(
+  name: string,
+  filter: string | undefined,
+): boolean {
+  if (!filter) return true;
+  const { includes, excludes } = parseStackFilter(filter);
+  if (includes.length === 0 && excludes.length === 0) return true;
+  const included = includes.length === 0 ||
+    includes.some((g) => globToRegExp(g).test(name));
+  if (!included) return false;
+  return !excludes.some((g) => globToRegExp(g).test(name));
+}
 
 async function isAncestor(
   dir: string,
@@ -275,9 +324,28 @@ async function planStackSync(
  * pruning, base fast-forward status, child reparenting, PR base updates,
  * restack targets, and nav comment updates per stack so the caller can
  * present the full plan before deciding whether to execute.
+ *
+ * Pass `options.filter` to restrict the plan to a subset of stacks by name.
+ * The filter is a comma-separated list of globs; entries starting with `!`
+ * are negations. Only matching stacks are planned, and only those stacks'
+ * base branches are fetched / fast-forwarded.
  */
-export async function computeSyncPlan(dir: string): Promise<SyncPlan> {
-  const trees = await getAllStackTrees(dir);
+export async function computeSyncPlan(
+  dir: string,
+  options: { filter?: string } = {},
+): Promise<SyncPlan> {
+  const filter = options.filter;
+  const allTrees = await getAllStackTrees(dir);
+
+  const trees: StackTree[] = [];
+  const filteredOut: string[] = [];
+  for (const tree of allTrees) {
+    if (stackNameMatchesFilter(tree.stackName, filter)) {
+      trees.push(tree);
+    } else {
+      filteredOut.push(tree.stackName);
+    }
+  }
 
   const baseSet = new Set<string>();
   for (const tree of trees) baseSet.add(tree.baseBranch);
@@ -313,6 +381,8 @@ export async function computeSyncPlan(dir: string): Promise<SyncPlan> {
     stacks,
     baseBranches,
     isNoOp,
+    filter,
+    filteredOut,
   };
 }
 
@@ -570,11 +640,24 @@ function renderBaseFastForward(ff: BaseFfPlan): string {
 
 /** Render a sync plan as a human-readable summary. */
 export function renderSyncPlan(plan: SyncPlan): string {
+  if (plan.filter && plan.stacks.length === 0) {
+    return `No stacks match --filter=${plan.filter}. Nothing to do.`;
+  }
+
   if (plan.isNoOp) {
-    return "All stacks are already synced with origin. Nothing to do.";
+    const suffix = plan.filter ? ` (filter: ${plan.filter})` : "";
+    return `All stacks are already synced with origin${suffix}. Nothing to do.`;
   }
 
   const lines: string[] = [];
+
+  if (plan.filter) {
+    lines.push(`Filter: ${plan.filter}`);
+    if (plan.filteredOut.length > 0) {
+      lines.push(`  · skipped: ${plan.filteredOut.join(", ")}`);
+    }
+    lines.push("");
+  }
 
   if (plan.baseFastForwards.length > 0) {
     lines.push("Base branches:");

@@ -65,6 +65,8 @@ stacked-prs pr
 # 6. Keep everything up to date as main advances.
 stacked-prs sync --dry-run             # preview across ALL stacks
 stacked-prs sync                       # fetch + restack + push across all stacks
+stacked-prs sync --filter='!di*'       # skip stacks whose name matches di*
+stacked-prs sync --filter='feat-*'     # only sync stacks named feat-*
 
 # 7. After the bottom PR merges on GitHub.
 stacked-prs land

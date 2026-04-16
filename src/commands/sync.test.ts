@@ -12,7 +12,9 @@ import { writeFixture } from "../lib/gh.ts";
 import {
   computeSyncPlan,
   executeSync,
+  parseStackFilter,
   renderSyncPlan,
+  stackNameMatchesFilter,
   type SyncPlan,
 } from "./sync.ts";
 
@@ -248,6 +250,7 @@ describe("computeSyncPlan", () => {
       ],
       baseBranches: ["main"],
       isNoOp: false,
+      filteredOut: [],
       stacks: [
         {
           stackName: "s",
@@ -302,6 +305,87 @@ describe("computeSyncPlan", () => {
     expect(out).toContain("Push (--force-with-lease): feat/c");
   });
 
+  test("filter excludes matching stacks (negative glob)", async () => {
+    await using repo = await createTestRepo();
+    await using mock = await makeMockDir();
+    await writeRepoViewFixture(mock.path);
+    await addBranch(repo.dir, "di/1", "main");
+    await addBranch(repo.dir, "feat/a", "main");
+    await setupStack(repo.dir, "dingus", [["di/1", "main"]]);
+    await setupStack(repo.dir, "feat-a", [["feat/a", "main"]]);
+
+    await using _bare = await wireOrigin(repo.dir);
+
+    const plan = await computeSyncPlan(repo.dir, { filter: "!di*" });
+    expect(plan.stacks.map((s) => s.stackName)).toEqual(["feat-a"]);
+    expect(plan.filteredOut).toEqual(["dingus"]);
+    expect(plan.filter).toBe("!di*");
+  });
+
+  test("filter with only positive globs includes matching stacks", async () => {
+    await using repo = await createTestRepo();
+    await using mock = await makeMockDir();
+    await writeRepoViewFixture(mock.path);
+    await addBranch(repo.dir, "a/1", "main");
+    await addBranch(repo.dir, "b/1", "main");
+    await setupStack(repo.dir, "stack-a", [["a/1", "main"]]);
+    await setupStack(repo.dir, "stack-b", [["b/1", "main"]]);
+
+    await using _bare = await wireOrigin(repo.dir);
+
+    const plan = await computeSyncPlan(repo.dir, { filter: "stack-a" });
+    expect(plan.stacks.map((s) => s.stackName)).toEqual(["stack-a"]);
+    expect(plan.filteredOut).toEqual(["stack-b"]);
+  });
+
+  test("filter with mixed includes and excludes", async () => {
+    await using repo = await createTestRepo();
+    await using mock = await makeMockDir();
+    await writeRepoViewFixture(mock.path);
+    await addBranch(repo.dir, "a/1", "main");
+    await addBranch(repo.dir, "a/draft-1", "main");
+    await addBranch(repo.dir, "b/1", "main");
+    await setupStack(repo.dir, "a-feature", [["a/1", "main"]]);
+    await setupStack(repo.dir, "a-draft", [["a/draft-1", "main"]]);
+    await setupStack(repo.dir, "b-feature", [["b/1", "main"]]);
+
+    await using _bare = await wireOrigin(repo.dir);
+
+    const plan = await computeSyncPlan(repo.dir, {
+      filter: "a*,!*draft*",
+    });
+    expect(plan.stacks.map((s) => s.stackName).sort()).toEqual(["a-feature"]);
+    expect(plan.filteredOut.sort()).toEqual(["a-draft", "b-feature"]);
+  });
+
+  test("filter matching no stacks yields empty plan", async () => {
+    await using repo = await createTestRepo();
+    await using mock = await makeMockDir();
+    await writeRepoViewFixture(mock.path);
+    await addBranch(repo.dir, "feat/a", "main");
+    await setupStack(repo.dir, "feat-a", [["feat/a", "main"]]);
+
+    await using _bare = await wireOrigin(repo.dir);
+
+    const plan = await computeSyncPlan(repo.dir, { filter: "nope*" });
+    expect(plan.stacks).toEqual([]);
+    expect(plan.baseBranches).toEqual([]);
+    expect(plan.filteredOut).toEqual(["feat-a"]);
+  });
+
+  test("renderSyncPlan surfaces filter and no-match message", () => {
+    expect(
+      renderSyncPlan({
+        baseFastForwards: [],
+        stacks: [],
+        baseBranches: [],
+        isNoOp: true,
+        filter: "!di*",
+        filteredOut: ["dingus"],
+      }),
+    ).toContain("No stacks match --filter=!di*");
+  });
+
   test("renderSyncPlan reports no-op", () => {
     expect(
       renderSyncPlan({
@@ -309,8 +393,51 @@ describe("computeSyncPlan", () => {
         stacks: [],
         baseBranches: [],
         isNoOp: true,
+        filteredOut: [],
       }),
     ).toContain("All stacks are already synced");
+  });
+});
+
+describe("parseStackFilter", () => {
+  test("splits positives and negatives", () => {
+    expect(parseStackFilter("a*,!b*,c")).toEqual({
+      includes: ["a*", "c"],
+      excludes: ["b*"],
+    });
+  });
+
+  test("trims whitespace and drops empty entries", () => {
+    expect(parseStackFilter(" a* ,  ,! b* ,")).toEqual({
+      includes: ["a*"],
+      excludes: ["b*"],
+    });
+  });
+
+  test("empty filter returns empty arrays", () => {
+    expect(parseStackFilter("")).toEqual({ includes: [], excludes: [] });
+  });
+});
+
+describe("stackNameMatchesFilter", () => {
+  test("undefined filter matches everything", () => {
+    expect(stackNameMatchesFilter("anything", undefined)).toBe(true);
+  });
+
+  test("pure negative excludes matching names and keeps the rest", () => {
+    expect(stackNameMatchesFilter("dingus", "!di*")).toBe(false);
+    expect(stackNameMatchesFilter("feat-a", "!di*")).toBe(true);
+  });
+
+  test("positive globs gate inclusion", () => {
+    expect(stackNameMatchesFilter("stack-a", "stack-*")).toBe(true);
+    expect(stackNameMatchesFilter("other", "stack-*")).toBe(false);
+  });
+
+  test("mixed includes and excludes compose", () => {
+    expect(stackNameMatchesFilter("a-feature", "a*,!*draft*")).toBe(true);
+    expect(stackNameMatchesFilter("a-draft", "a*,!*draft*")).toBe(false);
+    expect(stackNameMatchesFilter("b-feature", "a*,!*draft*")).toBe(false);
   });
 });
 
@@ -406,6 +533,7 @@ describe("executeSync", () => {
         },
       ],
       isNoOp: false,
+      filteredOut: [],
     };
 
     const result = await executeSync(repo.dir, plan);

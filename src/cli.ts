@@ -975,9 +975,24 @@ await new Command()
   )
   .option("--dry-run", "Print the plan without executing")
   .option("--force", "Execute without the interactive confirmation prompt")
+  .option(
+    "--filter <globs:string>",
+    "Comma-separated stack-name globs; prefix with ! to exclude (e.g. --filter='!di*')",
+  )
   .option("--json", "Output as JSON")
   .action(async (options) => {
-    const plan = await computeSyncPlan(dir);
+    const plan = await computeSyncPlan(dir, { filter: options.filter });
+
+    if (plan.filter && plan.stacks.length === 0) {
+      if (options.json) {
+        logJson(plan);
+      } else {
+        console.log(
+          `No stacks match --filter=${plan.filter}. Nothing to do.`,
+        );
+      }
+      return;
+    }
 
     if (options.dryRun) {
       if (options.json) {

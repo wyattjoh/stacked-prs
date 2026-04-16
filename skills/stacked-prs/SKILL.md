@@ -355,10 +355,20 @@ Backed by `cli.ts sync`, which has three modes:
 - No flags: print the plan and prompt `[y/N]` before executing.
 - `--force`: execute without the prompt (non-interactive or trusted automation).
 
-1. Run `cli.ts sync --dry-run --json` to inspect the plan. Parse the returned
-   `stacks[]` array (each entry has `stackName`, `baseBranch`, `rebases[]`,
-   `branchesToPush[]`, `prunes[]`, and `isNoOp`) plus top-level
-   `baseFastForwards[]` with
+Optionally restrict the run to a subset of stacks with `--filter=<globs>`: a
+comma-separated list of stack-name globs where any entry starting with `!` is a
+negation. A filter with only negations (e.g. `--filter="!di*"`) includes every
+stack except those matching the excludes. A filter with any positive glob
+narrows to those matches (minus any negations). When the filter matches no
+configured stacks, `cli.ts sync` prints `No stacks match --filter=...` and exits
+without fetching or prompting. The dry-run plan's `filter` and `filteredOut`
+fields surface the active expression and the stack names that were skipped so
+Claude can report them to the user.
+
+1. Run `cli.ts sync --dry-run --json [--filter=<globs>]` to inspect the plan.
+   Parse the returned `stacks[]` array (each entry has `stackName`,
+   `baseBranch`, `rebases[]`, `branchesToPush[]`, `prunes[]`, and `isNoOp`) plus
+   top-level `baseFastForwards[]` with
    `{ baseBranch, action: "ff" | "skip-diverged", ... }` entries.
 2. **No-op check:** if `plan.isNoOp` is true, report "All stacks are already
    synced with origin" and stop. The CLI still fetches base branches in this
@@ -377,13 +387,15 @@ Backed by `cli.ts sync`, which has three modes:
    - Each stack's rebase list (old-parent to new-target) and branches to
      force-push.
 6. **Wait for confirmation.**
-7. Run `cli.ts sync --force` to execute. Execution order per stack is: prune
-   merged branches (with PR base retargets and nav updates), restack survivors,
-   then `git push --force-with-lease`. On the first conflict or push failure it
-   stops and reports `failedAt: <stackName>`.
+7. Run `cli.ts sync --force [--filter=<globs>]` to execute. Forward the same
+   `--filter` expression used during planning so execution operates on the same
+   stack set. Execution order per stack is: prune merged branches (with PR base
+   retargets and nav updates), restack survivors, then
+   `git push --force-with-lease`. On the first conflict or push failure it stops
+   and reports `failedAt: <stackName>`.
    - If a conflict: resolve the files in the stack that failed, then run
-     `cli.ts restack --stack-name=<failed> --resume`. Re-run `cli.ts sync` to
-     finish the remaining stacks.
+     `cli.ts restack --stack-name=<failed> --resume`. Re-run
+     `cli.ts sync [--filter=<globs>]` to finish the remaining stacks.
 8. Run `cli.ts verify-refs --stack-name=<name>` per synced stack as a
    post-flight check. If it is not clean on any stack, print the report and ask
    the user to inspect.
@@ -716,12 +728,12 @@ prompts `[y/N]`; `--force` skips the prompt.
 
 ```bash
 deno run --allow-run=git,gh --allow-env --allow-read ${CLAUDE_PLUGIN_ROOT}/src/cli.ts sync \
-  [--dry-run] [--force] [--json]
+  [--dry-run] [--force] [--filter=<globs>] [--json]
 ```
 
-Applies to **every** stack in the repo. Fetches each distinct base branch from
-origin once, fast-forwards each local base branch when safe (warning and
-continuing past any that have diverged), prunes branches whose PRs merged
+Applies to **every** stack in the repo by default. Fetches each distinct base
+branch from origin once, fast-forwards each local base branch when safe (warning
+and continuing past any that have diverged), prunes branches whose PRs merged
 (deleting the branch locally, reparenting its children, retargeting their PR
 bases on GitHub, and refreshing nav comments), then for each surviving stack
 runs `restack` and force-pushes with `--force-with-lease`. Stops at the first
@@ -730,6 +742,15 @@ conflict or push failure; the returned JSON (`--json`) records
 `cli.ts restack --stack-name=<failed> --resume` and then re-run `cli.ts sync`
 for the rest. Same three-mode shape as submit: `--dry-run`, interactive default,
 `--force`.
+
+Pass `--filter=<globs>` with a comma-separated list of stack-name globs to
+restrict the run to a subset of stacks. Entries prefixed with `!` are negations:
+`--filter="!di*"` syncs every stack whose name does not match `di*`;
+`--filter="feat-*,!feat-draft*"` syncs stacks named `feat-*` except those
+matching `feat-draft*`. Only matched stacks' base branches are fetched and
+fast-forwarded; skipped stack names appear in `plan.filteredOut`. If the filter
+matches nothing, the CLI prints `No stacks match --filter=...` and exits without
+fetching.
 
 ### `pr`
 
