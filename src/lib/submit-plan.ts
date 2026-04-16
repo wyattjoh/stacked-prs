@@ -93,7 +93,12 @@ export async function computeSubmitPlan(
   ]);
 
   const currentBranch = currentBranchResult.stdout;
-  const nodes = getAllNodes(tree);
+  // Tombstoned (merged) nodes have no live ref, so `gh pr list --head` returns
+  // nothing (merged PRs are excluded by gh's default state filter) and the
+  // planner would otherwise fall through to `action: "create"` for a branch
+  // that has already landed. Filter them out so submit never tries to push,
+  // recreate, or modify PRs for already-landed branches.
+  const nodes = getAllNodes(tree).filter((n) => !n.merged);
 
   // Fetch PR info and compute push state for all nodes in parallel
   const branchPlans = await Promise.all(

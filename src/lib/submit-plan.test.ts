@@ -8,7 +8,13 @@ import {
   makeTempDir,
   runGit,
 } from "./testdata/helpers.ts";
-import { setBaseBranch, setStackNode } from "./stack.ts";
+import {
+  addLandedBranch,
+  addLandedPr,
+  getStackTree,
+  setBaseBranch,
+  setStackNode,
+} from "./stack.ts";
 import type { StackTree } from "./stack.ts";
 import { writeFixture } from "./gh.ts";
 import { computeSubmitPlan } from "./submit-plan.ts";
@@ -290,6 +296,39 @@ describe("computeSubmitPlan", () => {
     expect(plan.branches[1].desiredDraft).toBe(true);
     expect(plan.branches[1].draftAction).toBe("to-draft");
     expect(plan.isNoOp).toBe(false);
+  });
+
+  test("excludes landed tombstone branches from the plan", async () => {
+    // Regression for a bug where submit queued `gh pr create` for an
+    // already-landed root (its local ref was deleted at land time, so
+    // `gh pr list --head <branch>` returned []). The merged PR has to stay
+    // in the tree for history/nav rendering, but must never show up as a
+    // live node that submit tries to push, recreate, or retarget.
+    await using repo = await createTestRepo();
+    await using _mock = await makeMockDir();
+    await addBranch(repo.dir, "feat/live", "main");
+
+    await setBaseBranch(repo.dir, "my-stack", "main");
+    await setStackNode(repo.dir, "feat/live", "my-stack", "main");
+
+    // Simulate the post-land state: the root landed and its branch ref was
+    // deleted. It lives on only as a stack-level tombstone.
+    await addLandedBranch(repo.dir, "my-stack", "feat/landed");
+    await addLandedPr(repo.dir, "my-stack", "feat/landed", 125);
+
+    // Precondition: getStackTree synthesizes the tombstone as a merged root.
+    const tree = await getStackTree(repo.dir, "my-stack");
+    expect(
+      tree.roots.some((r) => r.branch === "feat/landed" && r.merged === true),
+    ).toBe(true);
+
+    const plan = await computeSubmitPlan(repo.dir, "my-stack", "o", "r");
+
+    // Only the live branch should be in the plan.
+    expect(plan.branches.map((b) => b.branch)).toEqual(["feat/live"]);
+    // No action (especially not "create") should exist for the tombstone.
+    expect(plan.branches.find((b) => b.branch === "feat/landed"))
+      .toBeUndefined();
   });
 
   test("flips a base-targeted PR to ready when it is currently a draft", async () => {
