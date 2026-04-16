@@ -6,8 +6,6 @@ description: >-
   in sync before a release, after renaming or adding subcommands or flags,
   after changing git-config keys, or when the user asks to "audit the skill",
   "check SKILL.md for drift", or "verify the runbook matches the code".
-user-invocable: true
-disable-model-invocation: true
 context: fork
 agent: Explore
 effort: high
