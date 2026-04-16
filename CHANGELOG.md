@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.10.1](https://github.com/wyattjoh/stacked-prs/compare/stacked-prs-v1.10.0...stacked-prs-v1.10.1) (2026-04-16)
+
+
+### Bug Fixes
+
+* **submit:** exclude landed tombstone branches from the plan ([bada842](https://github.com/wyattjoh/stacked-prs/commit/bada842fd020b471e224283f8d79e59574a95e74))
+
 ## [1.10.0](https://github.com/wyattjoh/stacked-prs/compare/stacked-prs-v1.9.1...stacked-prs-v1.10.0) (2026-04-16)
 
 
