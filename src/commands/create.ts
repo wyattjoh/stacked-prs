@@ -1,6 +1,7 @@
 import { join } from "@std/path";
 import {
   detectDefaultBranch,
+  getDefaultMergeStrategy,
   gitConfig,
   type MergeStrategy,
   runGitCommand,
@@ -372,7 +373,8 @@ export async function planCreate(
   }
 
   const stackName = opts.stackName ?? opts.branch;
-  const mergeStrategy: MergeStrategy = opts.mergeStrategy ?? "merge";
+  const mergeStrategy: MergeStrategy = opts.mergeStrategy ??
+    await getDefaultMergeStrategy(dir);
 
   // Use --get-regexp to catch any orphan stack-level keys from a prior partial
   // run, not just the base-branch key.

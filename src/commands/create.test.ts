@@ -233,6 +233,20 @@ describe("create — case 2 (auto-init in-repo)", () => {
     expect(result.plan?.stackName).toBe("feat/a");
     expect(result.plan?.parent).toBe("main");
     expect(result.plan?.baseBranch).toBe("main");
+    expect(result.plan?.mergeStrategy).toBe("squash");
+  });
+
+  test("honors stack.default-merge-strategy git config override", async () => {
+    await using repo = await createTestRepo();
+    await runGit(
+      repo.dir,
+      "config",
+      "stack.default-merge-strategy",
+      "merge",
+    );
+
+    const result = await planCreate(repo.dir, { branch: "feat/a" });
+    expect(result.ok).toBe(true);
     expect(result.plan?.mergeStrategy).toBe("merge");
   });
 
@@ -254,7 +268,7 @@ describe("create — case 2 (auto-init in-repo)", () => {
     ).toBe("main");
     expect(
       await runGit(repo.dir, "config", "stack.feat/a.merge-strategy"),
-    ).toBe("merge");
+    ).toBe("squash");
   });
 
   test("honors explicit --stack-name and --merge-strategy", async () => {
@@ -449,7 +463,7 @@ describe("create — case 3 (auto-init worktree)", () => {
       "git config branch.feat/a.stack-name feat/a",
       "git config branch.feat/a.stack-parent main",
       "git config stack.feat/a.base-branch main",
-      "git config stack.feat/a.merge-strategy merge",
+      "git config stack.feat/a.merge-strategy squash",
     ]);
   });
 

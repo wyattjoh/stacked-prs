@@ -20,13 +20,29 @@ describe("init — plan", () => {
     expect(result.plan?.branch).toBe("feat/a");
     expect(result.plan?.stackName).toBe("feat/a");
     expect(result.plan?.baseBranch).toBe("main");
-    expect(result.plan?.mergeStrategy).toBe("merge");
+    expect(result.plan?.mergeStrategy).toBe("squash");
     expect(result.plan?.commands).toEqual([
       "git config branch.feat/a.stack-name feat/a",
       "git config branch.feat/a.stack-parent main",
       "git config stack.feat/a.base-branch main",
-      "git config stack.feat/a.merge-strategy merge",
+      "git config stack.feat/a.merge-strategy squash",
     ]);
+  });
+
+  test("honors stack.default-merge-strategy git config override", async () => {
+    await using repo = await createTestRepo();
+    await addBranch(repo.dir, "feat/a", "main");
+    await runGit(repo.dir, "checkout", "feat/a");
+    await runGit(
+      repo.dir,
+      "config",
+      "stack.default-merge-strategy",
+      "merge",
+    );
+
+    const result = await planInit(repo.dir, {});
+    expect(result.ok).toBe(true);
+    expect(result.plan?.mergeStrategy).toBe("merge");
   });
 
   test("honors --stack-name and --merge-strategy", async () => {

@@ -1,5 +1,6 @@
 import {
   detectDefaultBranch,
+  getDefaultMergeStrategy,
   gitConfig,
   type MergeStrategy,
   runGitCommand,
@@ -107,7 +108,8 @@ export async function planInit(
   }
 
   const stackName = opts.stackName ?? branch;
-  const mergeStrategy: MergeStrategy = opts.mergeStrategy ?? "merge";
+  const mergeStrategy: MergeStrategy = opts.mergeStrategy ??
+    await getDefaultMergeStrategy(dir);
 
   // Guard against a pre-existing stack with the chosen name.
   const existing = await runGitCommand(

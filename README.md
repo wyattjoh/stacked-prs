@@ -366,15 +366,30 @@ deno run --allow-run=git,gh --allow-env --allow-read \
 
 When initializing a stack, you choose a merge strategy:
 
-- **merge** (recommended for stacks): After landing, a standard
-  `git rebase origin/main --update-refs` realigns the stack because merge
-  commits preserve ancestry.
-- **squash**: After landing, requires
+- **squash** (default): After landing, requires
   `git rebase --onto origin/main <merged-branch> <next-branch>` because
   squashing breaks the ancestry chain.
+- **merge**: After landing, a standard `git rebase origin/main --update-refs`
+  realigns the stack because merge commits preserve ancestry.
 
 The skill tracks this in `stack.<name>.merge-strategy` and uses the correct
 rebase strategy automatically during `land`.
+
+### Changing the default
+
+`init`, `import`, and auto-init `create` default to `squash`. To change the
+default without passing `--merge-strategy` on every invocation, set
+`stack.default-merge-strategy` in git config:
+
+```bash
+# Per-repo override:
+git config stack.default-merge-strategy merge
+
+# Global override (applies to every repo):
+git config --global stack.default-merge-strategy merge
+```
+
+An explicit `--merge-strategy` flag always wins over the config value.
 
 ## Tree-shaped stacks
 

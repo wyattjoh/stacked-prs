@@ -1,4 +1,5 @@
 import {
+  getDefaultMergeStrategy,
   gitConfig,
   type MergeStrategy,
   runGitCommand,
@@ -134,7 +135,8 @@ export async function planImport(
   }
 
   const stackName = opts.stackName ?? entries[0].branch;
-  const mergeStrategy: MergeStrategy = opts.mergeStrategy ?? "merge";
+  const mergeStrategy: MergeStrategy = opts.mergeStrategy ??
+    await getDefaultMergeStrategy(dir);
 
   const preexisting = await runGitCommand(
     dir,

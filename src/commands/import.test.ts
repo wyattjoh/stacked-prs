@@ -30,6 +30,22 @@ describe("import — plan", () => {
     ]);
     expect(result.plan?.baseBranch).toBe("main");
     expect(result.plan?.stackName).toBe("feat/a");
+    expect(result.plan?.mergeStrategy).toBe("squash");
+  });
+
+  test("honors stack.default-merge-strategy git config override", async () => {
+    await using repo = await createTestRepo();
+    await setupBranchChain(repo.dir);
+    await runGit(repo.dir, "checkout", "feat/c");
+    await runGit(
+      repo.dir,
+      "config",
+      "stack.default-merge-strategy",
+      "merge",
+    );
+
+    const result = await planImport(repo.dir, {});
+    expect(result.ok).toBe(true);
     expect(result.plan?.mergeStrategy).toBe("merge");
   });
 
@@ -105,7 +121,7 @@ describe("import — execute (real git)", () => {
     ).toBe("main");
     expect(
       await runGit(repo.dir, "config", "stack.my-stack.merge-strategy"),
-    ).toBe("merge");
+    ).toBe("squash");
   });
 
   test("dry-run mutates nothing", async () => {

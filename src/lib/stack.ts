@@ -292,6 +292,19 @@ export async function getMergeStrategy(
   return undefined;
 }
 
+/**
+ * Resolve the default merge strategy for newly-initialized stacks. Reads
+ * `stack.default-merge-strategy` from git config (local repo, inherits global
+ * and system) and falls back to "squash" when unset or invalid.
+ */
+export async function getDefaultMergeStrategy(
+  dir: string,
+): Promise<MergeStrategy> {
+  const value = await gitConfig(dir, "stack.default-merge-strategy");
+  if (value === "merge" || value === "squash") return value;
+  return "squash";
+}
+
 /** Set the merge strategy for a stack. */
 export async function setMergeStrategy(
   dir: string,
