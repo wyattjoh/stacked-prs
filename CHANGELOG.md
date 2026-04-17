@@ -1,5 +1,18 @@
 # Changelog
 
+## [2.1.0](https://github.com/wyattjoh/stacked-prs/compare/stacked-prs-v2.0.0...stacked-prs-v2.1.0) (2026-04-17)
+
+
+### Features
+
+* **skill:** add lazy-compile wrapper script for CLI ([1c55b8f](https://github.com/wyattjoh/stacked-prs/commit/1c55b8f59c30f19ab8fcbae9292f0b84344f774d))
+* **skill:** route CLI invocations through wrapper script ([a06a13c](https://github.com/wyattjoh/stacked-prs/commit/a06a13c7c661e765a2c4eb2fb3e1a751a13b5823))
+
+
+### Bug Fixes
+
+* **skill:** clean up .tmp binary on compile failure ([a534c43](https://github.com/wyattjoh/stacked-prs/commit/a534c433399552605f2c56faa4ca4aa028d4cc0f))
+
 ## [2.0.0](https://github.com/wyattjoh/stacked-prs/compare/stacked-prs-v1.10.1...stacked-prs-v2.0.0) (2026-04-17)
 
 
