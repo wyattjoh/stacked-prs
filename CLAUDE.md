@@ -60,6 +60,8 @@ src/
     └── lib/
 skills/stacked-prs/
 ├── SKILL.md                    # Runbook Claude follows for each sub-command
+├── scripts/
+│   └── stacked-prs             # POSIX sh wrapper: lazy-compiles CLI to CLAUDE_PLUGIN_DATA/bin/stacked-prs, rebuilds on version bump
 └── references/
     └── git-commands.md         # Git reference for rebase, --onto, conflict resolution
 ```
@@ -134,6 +136,23 @@ presenting a plan to the user.
 - Claude presents plans before any write operation and waits for confirmation.
 - **Git config is the source of truth** for stack metadata. No files are added
   to the working tree.
+
+### Plugin CLI entry
+
+`skills/stacked-prs/SKILL.md` invokes the CLI via
+`${CLAUDE_PLUGIN_ROOT}/skills/stacked-prs/scripts/stacked-prs <subcommand>`.
+The wrapper reads the expected version from `.claude-plugin/plugin.json`,
+compares it to a cached marker at `${CLAUDE_PLUGIN_DATA}/bin/.version`, and
+runs `deno compile` into `${CLAUDE_PLUGIN_DATA}/bin/stacked-prs` the first
+time it runs after each plugin version bump. Subsequent invocations exec the
+cached binary directly, with no Deno runtime dependency.
+
+Single-slot cache: the new binary writes over the old one on upgrade. If
+`CLAUDE_PLUGIN_DATA` is unset, the fallback is `$HOME/.cache/stacked-prs/bin`.
+
+This is orthogonal to `deno task install`, which produces a global
+`stacked-prs` binary at `~/.deno/bin/stacked-prs` for use as a daily-driver
+CLI from any git repo. That path is unaffected by the wrapper.
 
 ### Tree model
 
