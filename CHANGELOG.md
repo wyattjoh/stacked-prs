@@ -1,5 +1,23 @@
 # Changelog
 
+## [2.0.0](https://github.com/wyattjoh/stacked-prs/compare/stacked-prs-v1.10.1...stacked-prs-v2.0.0) (2026-04-17)
+
+
+### ⚠ BREAKING CHANGES
+
+* `init`, `import`, and auto-init `create` now default to `squash` instead of `merge` when `--merge-strategy` is not passed.
+
+### Features
+
+* default merge strategy to squash, configurable per-repo ([2206163](https://github.com/wyattjoh/stacked-prs/commit/2206163b1ace4024c4cd3dc9821e790e5f39da23))
+* **stack:** preserve tombstone graph and batch CLI subprocess fan-out ([e0529d0](https://github.com/wyattjoh/stacked-prs/commit/e0529d0a2f2e4d480a60bf6763d74298e2600ea8))
+
+
+### Bug Fixes
+
+* document status --theme flag in SKILL.md ([ab38922](https://github.com/wyattjoh/stacked-prs/commit/ab38922cfe55751692e83a1592934f27ef747b42))
+* handle tombstoned branches across commands ([f0045a0](https://github.com/wyattjoh/stacked-prs/commit/f0045a0bbfc9389a5843fd66851bed7e2f9b8485))
+
 ## [1.10.1](https://github.com/wyattjoh/stacked-prs/compare/stacked-prs-v1.10.0...stacked-prs-v1.10.1) (2026-04-16)
 
 
