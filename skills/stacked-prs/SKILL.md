@@ -634,13 +634,14 @@ provided.
 
 ```bash
 deno run --allow-run=git,gh,pbcopy,wl-copy,clip.exe --allow-env --allow-read ${CLAUDE_PLUGIN_ROOT}/src/cli.ts status \
-  [--stack-name=<name>] [--owner=<owner> --repo=<repo>] [--json] [-i|--interactive]
+  [--stack-name=<name>] [--owner=<owner> --repo=<repo>] [--json] [-i|--interactive] [--theme <theme>]
 ```
 
 Returns human-readable tree output by default. Pass `--json` for structured JSON
 with full stack state. Pass `-i` / `--interactive` to launch the read-only TUI
 that renders every stack as a horizontal tree with per-stack colors, PR state,
-sync status, and a live commit detail pane.
+sync status, and a live commit detail pane. Pass `--theme light` or
+`--theme dark` to override auto-detection.
 
 ### `restack`
 
