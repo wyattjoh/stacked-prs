@@ -1,0 +1,66 @@
+#!/bin/sh
+# Lazy-compile wrapper for the stacked-prs CLI.
+#
+# Reads the expected plugin version from .claude-plugin/plugin.json,
+# compares it to a cached marker file, and runs `deno compile` into
+# ${CLAUDE_PLUGIN_DATA}/bin/stacked-prs the first time it runs after
+# each plugin version bump. Subsequent invocations exec the cached
+# binary directly with no Deno runtime dependency.
+
+set -e
+
+# Resolve plugin root. Claude Code sets CLAUDE_PLUGIN_ROOT; fall back to
+# walking three levels up from this script (scripts -> skill -> skills
+# -> plugin root).
+PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT:-}"
+if [ -z "$PLUGIN_ROOT" ]; then
+  script_dir="$(cd "$(dirname "$0")" && pwd)"
+  PLUGIN_ROOT="$(cd "$script_dir/../../.." && pwd)"
+fi
+
+PLUGIN_JSON="$PLUGIN_ROOT/.claude-plugin/plugin.json"
+if [ ! -f "$PLUGIN_JSON" ]; then
+  echo "stacked-prs: plugin.json not found at $PLUGIN_JSON" >&2
+  exit 1
+fi
+
+CACHE_DIR="${CLAUDE_PLUGIN_DATA:-$HOME/.cache/stacked-prs}/bin"
+BIN="$CACHE_DIR/stacked-prs"
+VERSION_FILE="$CACHE_DIR/.version"
+
+EXPECTED=$(sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' \
+  "$PLUGIN_JSON" | head -1)
+if [ -z "$EXPECTED" ]; then
+  echo "stacked-prs: could not parse version from $PLUGIN_JSON" >&2
+  exit 1
+fi
+
+CURRENT=""
+if [ -f "$VERSION_FILE" ]; then
+  CURRENT=$(cat "$VERSION_FILE")
+fi
+
+if [ ! -x "$BIN" ] || [ "$CURRENT" != "$EXPECTED" ]; then
+  if ! command -v deno >/dev/null 2>&1; then
+    echo "stacked-prs: deno is required to build the CLI." >&2
+    echo "  install: https://deno.land/install.sh  or  brew install deno" >&2
+    exit 127
+  fi
+
+  echo "stacked-prs: building v$EXPECTED..." >&2
+
+  mkdir -p "$CACHE_DIR"
+
+  deno compile \
+    --config "$PLUGIN_ROOT/deno.json" \
+    --lock "$PLUGIN_ROOT/deno.lock" \
+    --allow-run=git,gh,pbcopy,xclip,wl-copy \
+    --allow-env --allow-read --allow-write \
+    -o "$BIN.tmp" \
+    "$PLUGIN_ROOT/src/cli.ts"
+
+  mv "$BIN.tmp" "$BIN"
+  printf '%s\n' "$EXPECTED" > "$VERSION_FILE"
+fi
+
+exec "$BIN" "$@"
