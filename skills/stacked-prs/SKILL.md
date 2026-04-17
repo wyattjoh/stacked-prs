@@ -9,7 +9,8 @@ description: >-
   "land stack", "import stack", "split branch", "fold branch".
 argument-hint: "[init|create|insert|split|fold|move|sync|restack|submit|status|pr|land|import|clean]"
 allowed-tools: >-
-  Bash(git *), Bash(gh *), Bash(deno run *),
+  Bash(git *), Bash(gh *),
+  Bash(${CLAUDE_PLUGIN_ROOT}/skills/stacked-prs/scripts/stacked-prs *),
   Read, Grep, Glob, TodoWrite
 effort: high
 ---
@@ -139,7 +140,7 @@ Start a new stack from the current branch. Backed by `cli.ts init`.
 Full invocation:
 
 ```bash
-deno run --allow-run=git,gh --allow-env --allow-read ${CLAUDE_PLUGIN_ROOT}/src/cli.ts init \
+${CLAUDE_PLUGIN_ROOT}/skills/stacked-prs/scripts/stacked-prs init \
   [--branch <name>] [--stack-name <name>] [--merge-strategy merge|squash] \
   [--base-branch <name>] [--force] [--dry-run] [--json]
 ```
@@ -164,7 +165,7 @@ Discover and register an existing chain of branches/PRs as a stack. Backed by
 Full invocation:
 
 ```bash
-deno run --allow-run=git,gh --allow-env --allow-read ${CLAUDE_PLUGIN_ROOT}/src/cli.ts import \
+${CLAUDE_PLUGIN_ROOT}/skills/stacked-prs/scripts/stacked-prs import \
   [--branch <name>] [--stack-name <name>] [--merge-strategy merge|squash] \
   [--owner <owner> --repo <repo>] \
   [--force] [--dry-run] [--json]
@@ -204,8 +205,7 @@ The CLI resolves the create case automatically:
 Full invocation:
 
 ```bash
-deno run --allow-run=git,gh --allow-env --allow-read --allow-write \
-  ${CLAUDE_PLUGIN_ROOT}/src/cli.ts create <branch> \
+${CLAUDE_PLUGIN_ROOT}/skills/stacked-prs/scripts/stacked-prs create <branch> \
   [-m <message>] [--create-worktree <dir>] \
   [--stack-name <name>] [--merge-strategy merge|squash] \
   [--force] [--dry-run] [--json]
@@ -231,7 +231,7 @@ insert <new-branch> --child <selected>`.
 Full invocation:
 
 ```bash
-deno run --allow-run=git,gh --allow-env --allow-read ${CLAUDE_PLUGIN_ROOT}/src/cli.ts insert <branch> \
+${CLAUDE_PLUGIN_ROOT}/skills/stacked-prs/scripts/stacked-prs insert <branch> \
   [--stack-name <name>] [--child <name>] [--force] [--dry-run] [--json]
 ```
 
@@ -279,7 +279,7 @@ commit on the original.
 Full invocation:
 
 ```bash
-deno run --allow-run=git,gh --allow-env --allow-read ${CLAUDE_PLUGIN_ROOT}/src/cli.ts split \
+${CLAUDE_PLUGIN_ROOT}/skills/stacked-prs/scripts/stacked-prs split \
   [--stack-name <name>] [--branch <name>] --new-branch <name> \
   (--by-commit <sha> | --by-file <f1,f2,...>) \
   [--extract-message <msg>] [--remainder-message <msg>] \
@@ -306,7 +306,7 @@ Merge a branch into its parent. Inverse of split. Backed by `cli.ts fold`.
 Full invocation:
 
 ```bash
-deno run --allow-run=git,gh --allow-env --allow-read ${CLAUDE_PLUGIN_ROOT}/src/cli.ts fold \
+${CLAUDE_PLUGIN_ROOT}/skills/stacked-prs/scripts/stacked-prs fold \
   [--stack-name <name>] [--branch <name>] [--strategy ff|squash] \
   [--message <msg>] [--force] [--dry-run] [--json]
 ```
@@ -331,7 +331,7 @@ Detach a branch and reattach it as a child of a different parent. Backed by
 Full invocation:
 
 ```bash
-deno run --allow-run=git,gh --allow-env --allow-read ${CLAUDE_PLUGIN_ROOT}/src/cli.ts move \
+${CLAUDE_PLUGIN_ROOT}/skills/stacked-prs/scripts/stacked-prs move \
   [--stack-name <name>] [--branch <name>] --new-parent <name> \
   [--force] [--dry-run] [--json]
 ```
@@ -502,10 +502,10 @@ Show current stack state. **No confirmation needed** (read-only).
 
 #### Interactive view
 
-Run `deno run ... cli.ts status -i` (or `--interactive`) to launch a TUI. The
-TUI renders every configured stack as a horizontal left-to-right tree with
-per-stack colors, shows PR state and sync status per branch, and provides
-arrow-key navigation plus a live commit detail pane for the focused branch.
+Run `stacked-prs status -i` (or `--interactive`) to launch a TUI. The TUI
+renders every configured stack as a horizontal left-to-right tree with per-stack
+colors, shows PR state and sync status per branch, and provides arrow-key
+navigation plus a live commit detail pane for the focused branch.
 
 Key bindings: `?` shows the full list. Press `L` on a branch whose stack is
 eligible to land (root PR merged, or every PR merged) to open the land modal,
@@ -595,25 +595,25 @@ full git-config schema.
 
 - `git status`, `git log`, `git branch --show-current`, `git fetch`
 - `gh pr list`, `gh pr view`, `gh repo view`
-- `deno run ... cli.ts status`
-- `deno run ... cli.ts status --json`
-- `deno run ... cli.ts status -i` / `--interactive`
-- `deno run ... cli.ts nav --dry-run`
-- `deno run ... cli.ts verify-refs`
-- `deno run ... cli.ts restack --dry-run` (with or without `--json`)
-- `deno run ... cli.ts clean --json` (report-only; `--force` mutates)
-- `deno run ... cli.ts create --dry-run` (with or without `--json`)
-- `deno run ... cli.ts land --dry-run` (with or without `--json`)
-- `deno run ... cli.ts submit --dry-run` (with or without `--json`)
-- `deno run ... cli.ts sync --dry-run` (with or without `--json`)
-- `deno run ... cli.ts init --dry-run` (with or without `--json`)
-- `deno run ... cli.ts import --dry-run` (with or without `--json`)
-- `deno run ... cli.ts insert ... --dry-run` (with or without `--json`)
-- `deno run ... cli.ts fold ... --dry-run` (with or without `--json`)
-- `deno run ... cli.ts move ... --dry-run` (with or without `--json`)
-- `deno run ... cli.ts split ... --dry-run` (with or without `--json`)
-- `deno run ... cli.ts pr` (read-only PR lookup; also opens the browser, which
-  is a local action, not a repo mutation)
+- `stacked-prs status`
+- `stacked-prs status --json`
+- `stacked-prs status -i` / `--interactive`
+- `stacked-prs nav --dry-run`
+- `stacked-prs verify-refs`
+- `stacked-prs restack --dry-run` (with or without `--json`)
+- `stacked-prs clean --json` (report-only; `--force` mutates)
+- `stacked-prs create --dry-run` (with or without `--json`)
+- `stacked-prs land --dry-run` (with or without `--json`)
+- `stacked-prs submit --dry-run` (with or without `--json`)
+- `stacked-prs sync --dry-run` (with or without `--json`)
+- `stacked-prs init --dry-run` (with or without `--json`)
+- `stacked-prs import --dry-run` (with or without `--json`)
+- `stacked-prs insert ... --dry-run` (with or without `--json`)
+- `stacked-prs fold ... --dry-run` (with or without `--json`)
+- `stacked-prs move ... --dry-run` (with or without `--json`)
+- `stacked-prs split ... --dry-run` (with or without `--json`)
+- `stacked-prs pr` (read-only PR lookup; also opens the browser, which is a
+  local action, not a repo mutation)
 
 **If the plan changes mid-execution** (e.g., rebase conflicts), pause and
 re-present the remaining operations before continuing.
@@ -623,7 +623,7 @@ re-present the remaining operations before continuing.
 All scripts are accessed through a single unified CLI entry point:
 
 ```bash
-deno run --allow-run=git,gh --allow-env --allow-read ${CLAUDE_PLUGIN_ROOT}/src/cli.ts <subcommand> [flags]
+${CLAUDE_PLUGIN_ROOT}/skills/stacked-prs/scripts/stacked-prs <subcommand> [flags]
 ```
 
 `--stack-name` is auto-detected from the current branch's git config when not
@@ -633,7 +633,7 @@ provided.
 ### `status`
 
 ```bash
-deno run --allow-run=git,gh,pbcopy,wl-copy,clip.exe --allow-env --allow-read ${CLAUDE_PLUGIN_ROOT}/src/cli.ts status \
+${CLAUDE_PLUGIN_ROOT}/skills/stacked-prs/scripts/stacked-prs status \
   [--stack-name=<name>] [--owner=<owner> --repo=<repo>] [--json] [-i|--interactive] [--theme <theme>]
 ```
 
@@ -646,7 +646,7 @@ sync status, and a live commit detail pane. Pass `--theme light` or
 ### `restack`
 
 ```bash
-deno run --allow-run=git,gh --allow-env --allow-read ${CLAUDE_PLUGIN_ROOT}/src/cli.ts restack \
+${CLAUDE_PLUGIN_ROOT}/skills/stacked-prs/scripts/stacked-prs restack \
   [--stack-name=<name>] \
   [--upstack-from=<branch>] \
   [--downstack-from=<branch>] \
@@ -670,7 +670,7 @@ structured output of an executed run.
 ### `nav`
 
 ```bash
-deno run --allow-run=git,gh --allow-env --allow-read ${CLAUDE_PLUGIN_ROOT}/src/cli.ts nav \
+${CLAUDE_PLUGIN_ROOT}/skills/stacked-prs/scripts/stacked-prs nav \
   [--stack-name=<name>] [--owner=<owner> --repo=<repo>] [--dry-run]
 ```
 
@@ -680,7 +680,7 @@ without writing.
 ### `verify-refs`
 
 ```bash
-deno run --allow-run=git,gh --allow-env --allow-read ${CLAUDE_PLUGIN_ROOT}/src/cli.ts verify-refs \
+${CLAUDE_PLUGIN_ROOT}/skills/stacked-prs/scripts/stacked-prs verify-refs \
   [--stack-name=<name>]
 ```
 
@@ -693,7 +693,7 @@ Exits with code 1 if any branches are stale or duplicates are found.
 ### `create`
 
 ```bash
-deno run --allow-run=git,gh --allow-env --allow-read --allow-write ${CLAUDE_PLUGIN_ROOT}/src/cli.ts create <branch> \
+${CLAUDE_PLUGIN_ROOT}/skills/stacked-prs/scripts/stacked-prs create <branch> \
   [-m <message>] [--create-worktree <dir>] \
   [--stack-name <name>] [--merge-strategy merge|squash] \
   [--force] [--dry-run] [--json]
@@ -708,7 +708,7 @@ the plan without mutating anything.
 ### `import-discover`
 
 ```bash
-deno run --allow-run=git,gh --allow-env --allow-read ${CLAUDE_PLUGIN_ROOT}/src/cli.ts import-discover \
+${CLAUDE_PLUGIN_ROOT}/skills/stacked-prs/scripts/stacked-prs import-discover \
   [--branch=<name>] [--owner=<owner> --repo=<repo>]
 ```
 
@@ -719,7 +719,7 @@ base branch, and any warnings (e.g., PR base mismatches).
 ### `submit`
 
 ```bash
-deno run --allow-run=git,gh --allow-env --allow-read ${CLAUDE_PLUGIN_ROOT}/src/cli.ts submit \
+${CLAUDE_PLUGIN_ROOT}/skills/stacked-prs/scripts/stacked-prs submit \
   [--stack-name=<name>] [--owner=<owner> --repo=<repo>] \
   [--dry-run] [--force] [--json]
 ```
@@ -734,7 +734,7 @@ prompts `[y/N]`; `--force` skips the prompt.
 ### `sync`
 
 ```bash
-deno run --allow-run=git,gh --allow-env --allow-read ${CLAUDE_PLUGIN_ROOT}/src/cli.ts sync \
+${CLAUDE_PLUGIN_ROOT}/skills/stacked-prs/scripts/stacked-prs sync \
   [--dry-run] [--force] [--filter=<globs>] [--json]
 ```
 
@@ -762,7 +762,7 @@ fetching.
 ### `pr`
 
 ```bash
-deno run --allow-run=git,gh --allow-env --allow-read ${CLAUDE_PLUGIN_ROOT}/src/cli.ts pr \
+${CLAUDE_PLUGIN_ROOT}/skills/stacked-prs/scripts/stacked-prs pr \
   [--branch=<name>] [--owner=<owner> --repo=<repo>] [--print] [--json]
 ```
 
@@ -774,7 +774,7 @@ lookup result (`{ ok, branch, pr?: { number, url, state, isDraft }, error? }`).
 ### `land`
 
 ```bash
-deno run --allow-run=git,gh --allow-env --allow-read ${CLAUDE_PLUGIN_ROOT}/src/cli.ts land \
+${CLAUDE_PLUGIN_ROOT}/skills/stacked-prs/scripts/stacked-prs land \
   [--stack-name=<name>] [--dry-run] [--json] [--resume]
 ```
 
@@ -788,7 +788,7 @@ failure (conflict or blocked).
 ### `clean`
 
 ```bash
-deno run --allow-run=git,gh --allow-env --allow-read ${CLAUDE_PLUGIN_ROOT}/src/cli.ts clean \
+${CLAUDE_PLUGIN_ROOT}/skills/stacked-prs/scripts/stacked-prs clean \
   [--stack-name=<name>] [--force] [--json]
 ```
 
@@ -801,7 +801,7 @@ Pass `--force` for non-interactive use. Pass `--json` for structured output.
 ### `init`
 
 ```bash
-deno run --allow-run=git,gh --allow-env --allow-read ${CLAUDE_PLUGIN_ROOT}/src/cli.ts init \
+${CLAUDE_PLUGIN_ROOT}/skills/stacked-prs/scripts/stacked-prs init \
   [--branch <name>] [--stack-name <name>] [--merge-strategy merge|squash] \
   [--base-branch <name>] [--force] [--dry-run] [--json]
 ```
@@ -814,7 +814,7 @@ stack, and against a stack-name collision. Same three-mode shape as submit:
 ### `import`
 
 ```bash
-deno run --allow-run=git,gh --allow-env --allow-read ${CLAUDE_PLUGIN_ROOT}/src/cli.ts import \
+${CLAUDE_PLUGIN_ROOT}/skills/stacked-prs/scripts/stacked-prs import \
   [--branch <name>] [--stack-name <name>] [--merge-strategy merge|squash] \
   [--owner <owner> --repo <repo>] [--force] [--dry-run] [--json]
 ```
@@ -828,7 +828,7 @@ mismatches) are surfaced in the plan.
 ### `insert`
 
 ```bash
-deno run --allow-run=git,gh --allow-env --allow-read ${CLAUDE_PLUGIN_ROOT}/src/cli.ts insert <branch> \
+${CLAUDE_PLUGIN_ROOT}/skills/stacked-prs/scripts/stacked-prs insert <branch> \
   [--stack-name <name>] [--child <name>] [--force] [--dry-run] [--json]
 ```
 
@@ -839,7 +839,7 @@ no rebase happens because the inserted branch starts empty.
 ### `fold`
 
 ```bash
-deno run --allow-run=git,gh --allow-env --allow-read ${CLAUDE_PLUGIN_ROOT}/src/cli.ts fold \
+${CLAUDE_PLUGIN_ROOT}/skills/stacked-prs/scripts/stacked-prs fold \
   [--stack-name <name>] [--branch <name>] [--strategy ff|squash] \
   [--message <msg>] [--force] [--dry-run] [--json]
 ```
@@ -852,7 +852,7 @@ collapses the branch into a single commit on the parent.
 ### `move`
 
 ```bash
-deno run --allow-run=git,gh --allow-env --allow-read ${CLAUDE_PLUGIN_ROOT}/src/cli.ts move \
+${CLAUDE_PLUGIN_ROOT}/skills/stacked-prs/scripts/stacked-prs move \
   [--stack-name <name>] [--branch <name>] --new-parent <name> \
   [--force] [--dry-run] [--json]
 ```
@@ -866,7 +866,7 @@ stops and returns recovery commands matching the `restack` / `sync` shape.
 ### `split`
 
 ```bash
-deno run --allow-run=git,gh --allow-env --allow-read ${CLAUDE_PLUGIN_ROOT}/src/cli.ts split \
+${CLAUDE_PLUGIN_ROOT}/skills/stacked-prs/scripts/stacked-prs split \
   [--stack-name <name>] [--branch <name>] --new-branch <name> \
   (--by-commit <sha> | --by-file <f1,f2,...>) \
   [--extract-message <msg>] [--remainder-message <msg>] \
