@@ -50,6 +50,7 @@ if [ ! -x "$BIN" ] || [ "$CURRENT" != "$EXPECTED" ]; then
   echo "stacked-prs: building v$EXPECTED..." >&2
 
   mkdir -p "$CACHE_DIR"
+  trap 'rm -f "$BIN.tmp"' EXIT
 
   deno compile \
     --config "$PLUGIN_ROOT/deno.json" \
@@ -60,6 +61,7 @@ if [ ! -x "$BIN" ] || [ "$CURRENT" != "$EXPECTED" ]; then
     "$PLUGIN_ROOT/src/cli.ts"
 
   mv "$BIN.tmp" "$BIN"
+  trap - EXIT
   printf '%s\n' "$EXPECTED" > "$VERSION_FILE"
 fi
 
