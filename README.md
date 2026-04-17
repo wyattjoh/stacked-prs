@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/icon.png" alt="stacked-prs icon" width="160">
+</p>
+
 # stacked-prs
 
 A tool for managing stacked branches and pull requests. Available as a
