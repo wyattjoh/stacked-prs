@@ -1,8 +1,13 @@
 import {
   addLandedBranch,
+  addLandedParent,
+  addLandedPr,
   clearStackConfig,
   getAllNodes,
   getLandedBranches,
+  getLandedParents,
+  getLandedPrs,
+  getLiveSubtreeRoots,
   getMergeStrategy,
   getStackTree,
   type MergeStrategy,
@@ -10,6 +15,7 @@ import {
   setBaseBranch,
   setMergeStrategy,
   setStackNode,
+  type StackNode,
   type StackTree,
 } from "./stack.ts";
 import { configBranchCleanup, reparentAndRemove } from "./cleanup.ts";
@@ -77,10 +83,11 @@ export async function configSplitStack(
   const baseBranch = tree.baseBranch;
   const mergeStrategy = await getMergeStrategy(dir, stackName);
 
-  // Only live (non-merged) roots need to be split into new stacks
-  const liveRoots = tree.roots.filter((n) => !n.merged);
-
-  if (liveRoots.length <= 1) {
+  // Each live subtree (rooted at a branch whose effective parent is the base)
+  // becomes its own split stack. Tombstones stay attached to the original
+  // namespace until we remove them below.
+  const liveTops = getLiveSubtreeRoots(tree);
+  if (liveTops.length <= 1) {
     return [];
   }
 
@@ -88,8 +95,8 @@ export async function configSplitStack(
   const usedNames = new Set<string>();
   const splits: SplitInfo[] = [];
 
-  for (const root of liveRoots) {
-    let newName = deriveStackName(root.branch);
+  for (const top of liveTops) {
+    let newName = deriveStackName(top.branch);
     // Resolve collision by appending a suffix
     if (usedNames.has(newName)) {
       let i = 2;
@@ -98,8 +105,15 @@ export async function configSplitStack(
     }
     usedNames.add(newName);
 
-    const subtreeNodes = getAllNodes({ ...tree, roots: [root] });
-    const branches = subtreeNodes.map((n) => n.branch);
+    // Walk this subtree, skipping any descendant tombstones (they belong
+    // to the shared history rather than the split).
+    const branches: string[] = [];
+    const walk = (n: StackNode): void => {
+      if (n.merged) return;
+      branches.push(n.branch);
+      for (const c of n.children) walk(c);
+    };
+    walk(top);
     splits.push({ stackName: newName, branches });
   }
 
@@ -113,23 +127,35 @@ export async function configSplitStack(
     }
   }
 
-  // Copy tombstones from the original stack into every new split stack.
-  // Each split is a logical continuation of the pre-land stack and should
-  // display the same merge history.
-  const tombstones = await getLandedBranches(dir, stackName);
+  // Copy tombstone records (landed-branches + landed-pr + landed-parent)
+  // into every new split stack so nav comments continue to show the
+  // shared merge history with its structural shape.
+  const tombstoneBranches = await getLandedBranches(dir, stackName);
+  const tombstonePrs = await getLandedPrs(dir, stackName);
+  const tombstoneParents = await getLandedParents(dir, stackName);
   for (const split of splits) {
-    for (const branch of tombstones) {
+    for (const branch of tombstoneBranches) {
       await addLandedBranch(dir, split.stackName, branch);
+    }
+    for (const [branch, prNumber] of tombstonePrs) {
+      await addLandedPr(dir, split.stackName, branch, prNumber);
+    }
+    for (const [branch, parent] of tombstoneParents) {
+      await addLandedParent(dir, split.stackName, branch, parent);
     }
   }
 
-  // Remove stack metadata only from live nodes (merged nodes stay in original stack)
-  const liveNodes = [...nodeByBranch.values()].filter((n) => !n.merged);
-  for (const node of liveNodes) {
+  // Remove branch-level config for every node in the original stack.
+  // Tombstones are represented in each split via the stack-level records
+  // we just copied; live branches get rewritten below.
+  for (const node of nodeByBranch.values()) {
     await removeStackBranch(dir, node.branch);
   }
 
-  // Write branch-level metadata pointing to new stacks
+  // Write branch-level metadata for live branches into their split.
+  // Each branch keeps its recorded parent (including tombstoned parents)
+  // so live subtree roots continue to render nested under the shared
+  // merged history via the split's landed-parent records.
   for (const split of splits) {
     for (const branch of split.branches) {
       const node = nodeByBranch.get(branch)!;
@@ -211,16 +237,24 @@ export async function configLandCleanup(
   dir: string,
   stackName: string,
   mergedBranch: string,
+  /**
+   * Merged branch's PR number, if known. Recorded alongside the tombstone
+   * so the three writes (`landed-branches` + `landed-parent` + `landed-pr`)
+   * commit as a unit. If a crash strands the tombstone with only two of
+   * the three records, nav rendering falls back to the "flat siblings"
+   * shape this refactor fixes; keeping all three writes in one call
+   * prevents that state.
+   */
+  prNumber?: number,
 ): Promise<LandCleanupResult> {
-  const tree = await getStackTree(dir, stackName);
-  await configBranchCleanup(dir, stackName, mergedBranch, tree.baseBranch);
+  await configBranchCleanup(dir, stackName, mergedBranch, prNumber);
 
-  // Re-read the tree to see how many LIVE roots remain (exclude merged nodes)
+  // Re-read the tree to see how many live subtrees remain. A live subtree is
+  // rooted at a live branch whose effective parent (after walking past
+  // tombstones) is the base branch. If more than one remains, split the stack.
   const treeAfter = await getStackTree(dir, stackName);
-  const liveRoots = treeAfter.roots.filter((n) => !n.merged);
-
-  // If more than one live root remains, split the stack
-  if (liveRoots.length > 1) {
+  const liveTops = getLiveSubtreeRoots(treeAfter);
+  if (liveTops.length > 1) {
     const splitInto = await configSplitStack(dir, stackName);
     return { removed: mergedBranch, splitInto };
   }

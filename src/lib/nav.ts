@@ -1,6 +1,6 @@
 import { getAllNodes, getLandedPrs, getStackTree } from "./stack.ts";
 import type { StackNode, StackTree } from "./stack.ts";
-import { gh, selectBestPr } from "./gh.ts";
+import { gh, listPrsForBranch } from "./gh.ts";
 
 export interface NavAction {
   action: "create" | "update";
@@ -73,13 +73,8 @@ export function generateNavMarkdown(
   return lines.join("\n");
 }
 
-interface GhPr {
-  number: number;
-  url: string;
-  title: string;
-  state: string;
-  isDraft: boolean;
-}
+import type { GhPrListInfo } from "./gh.ts";
+type GhPr = GhPrListInfo;
 
 interface GhComment {
   id: number;
@@ -94,11 +89,26 @@ export interface BuildNavPlanOptions {
    * reflects the post-reparent tree shape.
    */
   reparented?: Record<string, string>;
+  /**
+   * Branches to mark as merged (tombstoned) in the projected tree. Callers
+   * use this to preview nav state before running the tombstone writes, so
+   * the rendered markdown shows the branch as `~~#N~~` while still keeping
+   * its recorded children nested beneath it.
+   */
+  markMerged?: string[];
+  /**
+   * Seed the internal branch -> PR number map with known values. Used with
+   * `markMerged` to preview nav markdown for branches that will become
+   * tombstones; at preview time their PR numbers aren't in `landed-pr`
+   * yet, but the caller may already know them from earlier `gh pr list`
+   * queries.
+   */
+  prOverrides?: Map<string, number>;
 }
 
 /**
- * Rebuild the stack tree with the given exclude/reparent overrides applied.
- * Returns a fresh tree; the input is not mutated.
+ * Rebuild the stack tree with the given exclude/reparent/markMerged
+ * overrides applied. Returns a fresh tree; the input is not mutated.
  */
 function applyNavOverrides(
   tree: StackTree,
@@ -106,7 +116,12 @@ function applyNavOverrides(
 ): StackTree {
   const excluded = new Set(opts?.excludeBranches ?? []);
   const reparented = opts?.reparented ?? {};
-  if (excluded.size === 0 && Object.keys(reparented).length === 0) {
+  const markMerged = new Set(opts?.markMerged ?? []);
+  if (
+    excluded.size === 0 &&
+    Object.keys(reparented).length === 0 &&
+    markMerged.size === 0
+  ) {
     return tree;
   }
 
@@ -118,6 +133,7 @@ function applyNavOverrides(
       ...n,
       parent,
       children: [],
+      ...(markMerged.has(n.branch) || n.merged ? { merged: true } : {}),
     });
   }
   const roots: StackNode[] = [];
@@ -157,25 +173,21 @@ export async function buildNavPlan(
   const landedPrs = await getLandedPrs(dir, stackName);
 
   // Fetch PRs for live nodes in parallel; skip merged tombstones.
+  // `listPrsForBranch` reads from the active repo-wide PR index when
+  // one is installed, collapsing N per-branch `gh pr list` calls into
+  // zero (the single batch fetch happened inside `withPrIndex`).
   const prResults = await Promise.all(
     nodes.map(async (node) => {
       if (node.merged) return { node, pr: null as GhPr | null };
-      const result = await gh(
-        "pr",
-        "list",
-        "--head",
-        node.branch,
-        "--repo",
-        `${owner}/${repo}`,
-        "--json",
-        "number,url,title,state,isDraft",
-      );
-      const prs = JSON.parse(result) as GhPr[];
-      return { node, pr: selectBestPr(prs) };
+      const pr = await listPrsForBranch(node.branch, { owner, repo });
+      return { node, pr };
     }),
   );
 
-  // Build prMap from live results, then overlay tombstone PR numbers.
+  // Build prMap from live results, then overlay tombstone PR numbers
+  // (first from stored `landed-pr`, then from caller-supplied overrides
+  // so preview callers can populate PR numbers for branches that will
+  // become tombstones but aren't yet recorded in config).
   const prMap = new Map<string, number>();
   for (const { node, pr } of prResults) {
     if (pr !== null) {
@@ -186,6 +198,11 @@ export async function buildNavPlan(
     if (!node.merged) continue;
     const num = landedPrs.get(node.branch);
     if (num !== undefined) prMap.set(node.branch, num);
+  }
+  if (options?.prOverrides) {
+    for (const [branch, num] of options.prOverrides) {
+      if (!prMap.has(branch)) prMap.set(branch, num);
+    }
   }
 
   // Filter to live nodes with open PRs (tombstones are rendered via prMap

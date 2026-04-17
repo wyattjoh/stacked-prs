@@ -144,6 +144,29 @@ export async function detectStaleConfig(
   const scopeStack = opts?.stackName;
   const findings: CleanFinding[] = [];
 
+  // Read each stack's tombstone set once. Tombstoned branches keep their
+  // branch-level stack-name / stack-parent config so they remain structural
+  // nodes in the tree, which means clean's ref-existence and parent-ref
+  // checks must exempt them (their refs are intentionally gone).
+  const tombstonesByStack = new Map<string, Set<string>>();
+  for (const { stackName } of stackEntries) {
+    if (scopeStack && stackName !== scopeStack) continue;
+    const { code, stdout } = await runGitCommand(
+      dir,
+      "config",
+      "--get-all",
+      `stack.${stackName}.landed-branches`,
+    );
+    const set = new Set<string>();
+    if (code === 0 && stdout) {
+      for (const line of stdout.split("\n")) {
+        const branch = line.trim();
+        if (branch) set.add(branch);
+      }
+    }
+    tombstonesByStack.set(stackName, set);
+  }
+
   // Partition branch entries into in-scope (for checks 1 and 2) and full set.
   const inScopeBranches = scopeStack
     ? branchEntries.filter((e) => e.stackName === scopeStack)
@@ -152,9 +175,13 @@ export async function detectStaleConfig(
   // Check 1 and 2: walk each in-scope branch entry.
   for (const entry of inScopeBranches) {
     const { branch, stackName } = entry;
+    const tombstones = tombstonesByStack.get(stackName) ?? new Set<string>();
+    const isTombstone = tombstones.has(branch);
     const refExists = await branchRefExists(dir, branch);
 
     if (!refExists) {
+      // Tombstoned branches are expected to have no ref.
+      if (isTombstone) continue;
       const configKeys = await collectBranchStackKeys(dir, branch);
       findings.push({
         kind: "missing-branch",
@@ -186,6 +213,9 @@ export async function detectStaleConfig(
 
     if (baseBranch !== undefined && parent === baseBranch) continue;
     if (memberSet.has(parent)) continue;
+    // A parent that is itself a tombstone is expected: live children keep
+    // pointing at their landed parent so the tree shape is preserved.
+    if (tombstones.has(parent)) continue;
 
     const parentRefExists = await branchRefExists(dir, parent);
     if (!parentRefExists) {

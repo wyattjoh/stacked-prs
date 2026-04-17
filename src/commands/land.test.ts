@@ -327,31 +327,29 @@ describe("tombstone survives branch deletion", () => {
       await initStack(repo, "s", [["feat/a", "main"], ["feat/b", "feat/a"]]);
 
       // Simulate what executeLand case A does:
-      // 1. configLandCleanup (writes tombstone, reparents children, removes merged branch config)
+      // 1. configLandCleanup (tombstones the landed branch without touching
+      //    its branch-level config or its children's stack-parent).
       const { configLandCleanup } = await import("../lib/config.ts");
       await configLandCleanup(repo.dir, "s", "feat/a");
 
-      // 2. Delete the branch (destroys any remaining branch.<name>.* config)
+      // 2. Delete the branch ref. Branch-level stack-name/stack-parent
+      //    config is intentionally preserved so the tombstone remains a
+      //    structural node in the tree.
       await runGitCommand(repo.dir, "checkout", "main");
       await runGitCommand(repo.dir, "branch", "-D", "feat/a");
 
-      // 3. Remove remaining branch config (mirrors removeStackBranch in executeLand)
-      const { removeStackBranch } = await import("../lib/stack.ts");
-      await removeStackBranch(repo.dir, "feat/a");
-
-      // Tree should still contain feat/a as a merged root
+      // Tree should still contain feat/a as a merged inner node with the
+      // live child nested beneath it.
       const tree = await getStackTree(repo.dir, "s");
-      const nodeA = tree.roots.find((n) => n.branch === "feat/a");
-      expect(nodeA).toBeDefined();
-      expect(nodeA!.merged).toBe(true);
-      expect(nodeA!.parent).toBe("main");
-      expect(nodeA!.children).toEqual([]);
-
-      // feat/b should be a live root reparented to main
-      const nodeB = tree.roots.find((n) => n.branch === "feat/b");
-      expect(nodeB).toBeDefined();
-      expect(nodeB!.merged).toBeUndefined();
-      expect(nodeB!.parent).toBe("main");
+      expect(tree.roots).toHaveLength(1);
+      const [nodeA] = tree.roots;
+      expect(nodeA.branch).toBe("feat/a");
+      expect(nodeA.merged).toBe(true);
+      expect(nodeA.parent).toBe("main");
+      expect(nodeA.children).toHaveLength(1);
+      expect(nodeA.children[0].branch).toBe("feat/b");
+      expect(nodeA.children[0].merged).toBeFalsy();
+      expect(nodeA.children[0].parent).toBe("feat/a");
     }
   });
 });
@@ -510,19 +508,20 @@ describe("executeLand case A tombstone integration", () => {
       );
       expect(probe.code !== 0).toBe(true);
 
-      // getStackTree must reconstruct feat/a as a merged root tombstone.
+      // getStackTree must reconstruct feat/a as a merged inner node with
+      // the live child nested beneath it. Tombstones preserve their
+      // structural position in the tree so nav comments keep showing the
+      // parent/child relationship.
       const tree = await getStackTree(env.dir, "s");
-      const tombstone = tree.roots.find((n) =>
-        n.branch === "feat/a" && n.merged === true
-      );
-      expect(tombstone).toBeDefined();
-      expect(tombstone!.parent).toBe("main");
-      expect(tombstone!.children).toEqual([]);
-
-      // feat/b must be a live root reparented to main.
-      const liveB = tree.roots.find((n) => n.branch === "feat/b" && !n.merged);
-      expect(liveB).toBeDefined();
-      expect(liveB!.parent).toBe("main");
+      expect(tree.roots).toHaveLength(1);
+      const [tombstone] = tree.roots;
+      expect(tombstone.branch).toBe("feat/a");
+      expect(tombstone.merged).toBe(true);
+      expect(tombstone.parent).toBe("main");
+      expect(tombstone.children).toHaveLength(1);
+      expect(tombstone.children[0].branch).toBe("feat/b");
+      expect(tombstone.children[0].merged).toBeFalsy();
+      expect(tombstone.children[0].parent).toBe("feat/a");
     }
   });
 });
@@ -1002,13 +1001,16 @@ describe("executeLand case A cleanup phase", () => {
       );
       expect(aExists.code).not.toBe(0);
 
-      // feat/b's parent in config is now main
+      // feat/b's stack-parent still points at feat/a (the tombstone). The
+      // live tree renders feat/a as a merged inner node so downstream
+      // consumers can still see the parent/child relationship; only git
+      // rebase targets walk through the tombstone to reach origin/main.
       const parent = await runGitCommand(
         env.dir,
         "config",
         "branch.feat/b.stack-parent",
       );
-      expect(parent.stdout).toBe("main");
+      expect(parent.stdout).toBe("feat/a");
     }
   });
 });

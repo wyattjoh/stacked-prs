@@ -41,6 +41,12 @@ export async function loadLocal(dir: string): Promise<LoadLocalResult> {
       );
     }),
   );
+  // Collect every (node, parent) pair that needs a sync status probe
+  // and fire them concurrently. The old serialized `for ... await
+  // computeSyncStatus` spawned 2 git-subprocesses per live branch in
+  // strict order; on a multi-stack TUI this was the dominant TUI-load
+  // latency.
+  const syncProbes: Array<Promise<[string, SyncStatus]>> = [];
   for (const tree of trees) {
     const stackLandedPrs = landedPrByStack.get(tree.stackName);
     for (const node of getAllNodes(tree)) {
@@ -57,12 +63,16 @@ export async function loadLocal(dir: string): Promise<LoadLocalResult> {
           });
         }
       } else {
-        syncByBranch.set(
-          node.branch,
-          await computeSyncStatus(dir, node.branch, node.parent),
+        syncProbes.push(
+          computeSyncStatus(dir, node.branch, node.parent).then(
+            (status) => [node.branch, status],
+          ),
         );
       }
     }
+  }
+  for (const [branch, status] of await Promise.all(syncProbes)) {
+    syncByBranch.set(branch, status);
   }
 
   // Worktree info is best-effort: a failure here (e.g. older git without

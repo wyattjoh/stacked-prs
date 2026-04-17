@@ -164,7 +164,10 @@ export interface GhPrListInfo {
   url: string;
   state: string;
   isDraft: boolean;
-  createdAt?: string;
+  createdAt: string;
+  title: string;
+  headRefName: string;
+  baseRefName: string;
 }
 
 export interface ListPrsForBranchOptions extends GhOptions {
@@ -178,22 +181,165 @@ export interface ListPrsForBranchOptions extends GhOptions {
  * pattern that otherwise lives in pr.ts, status.ts, loader.ts, and
  * land's cli fetch loop. Pass `{owner, repo}` to scope the query to a
  * specific repo (required when `gh` can't infer it from the cwd).
+ *
+ * When a repo-wide PR index is active (see `setActivePrIndex`), this
+ * function short-circuits to the in-memory lookup instead of spawning a
+ * fresh gh subprocess. CLI entry points set the index once per
+ * invocation so every downstream `listPrsForBranch` caller (status,
+ * submit-plan, nav, sync, land, the TUI loader) shares a single
+ * repo-wide `gh pr list` round-trip.
  */
 export async function listPrsForBranch(
   branch: string,
   opts: ListPrsForBranchOptions = {},
 ): Promise<GhPrListInfo | null> {
+  const index = getActivePrIndex();
+  if (index) {
+    const byHead = index.byHead.get(branch) ?? [];
+    return selectBestPr(byHead);
+  }
+
   const args = ["pr", "list", "--head", branch];
   if (opts.owner && opts.repo) {
     args.push("--repo", `${opts.owner}/${opts.repo}`);
   }
   args.push("--state", "all");
-  args.push("--json", "number,url,state,isDraft,createdAt");
+  args.push(
+    "--json",
+    "number,url,state,isDraft,createdAt,title,headRefName,baseRefName",
+  );
   const result = opts.signal
     ? await gh({ signal: opts.signal }, ...args)
     : await gh(...args);
   const parsed = JSON.parse(result) as GhPrListInfo[];
   return selectBestPr(parsed);
+}
+
+/**
+ * In-memory snapshot of every PR in a single repo. Built by one
+ * `gh pr list --state all` round-trip so any number of per-branch
+ * lookups in one CLI invocation share the same payload.
+ */
+export interface PrIndex {
+  /** Every PR returned by gh, grouped by `headRefName`. */
+  byHead: Map<string, GhPrListInfo[]>;
+}
+
+let _activePrIndex: PrIndex | null = null;
+
+/**
+ * Install a PR index so every subsequent `listPrsForBranch` call in this
+ * process reads from it instead of shelling out. Returns a disposer that
+ * clears the slot; CLI entry points should call it in a try/finally
+ * block. Nested calls are supported: the most recent `setActivePrIndex`
+ * wins until its disposer runs.
+ */
+export function setActivePrIndex(index: PrIndex | null): () => void {
+  const prev = _activePrIndex;
+  _activePrIndex = index;
+  return () => {
+    _activePrIndex = prev;
+  };
+}
+
+/** Current active index, or null if none. Exposed for tests and TUI code. */
+export function getActivePrIndex(): PrIndex | null {
+  return _activePrIndex;
+}
+
+/**
+ * Build a PR index by issuing ONE `gh pr list --repo owner/repo
+ * --state all --limit N --json ...`. Every caller that needs
+ * per-branch PR lookups in the same invocation should share this index
+ * via `setActivePrIndex`.
+ *
+ * Returns `null` when the query fails (gh not authenticated, network
+ * issue, etc.) so callers can degrade gracefully to per-branch queries.
+ */
+export async function createPrIndex(
+  owner: string,
+  repo: string,
+  opts: GhOptions & { limit?: number } = {},
+): Promise<PrIndex | null> {
+  const args = [
+    "pr",
+    "list",
+    "--repo",
+    `${owner}/${repo}`,
+    "--state",
+    "all",
+    "--limit",
+    String(opts.limit ?? 500),
+    "--json",
+    "number,url,state,isDraft,createdAt,title,headRefName,baseRefName",
+  ];
+  let raw: string;
+  try {
+    raw = opts.signal
+      ? await gh({ signal: opts.signal }, ...args)
+      : await gh(...args);
+  } catch {
+    return null;
+  }
+  let parsed: GhPrListInfo[];
+  try {
+    parsed = JSON.parse(raw) as GhPrListInfo[];
+  } catch {
+    return null;
+  }
+  const byHead = new Map<string, GhPrListInfo[]>();
+  for (const pr of parsed) {
+    const head = pr.headRefName;
+    if (!head) continue;
+    const list = byHead.get(head) ?? [];
+    list.push(pr);
+    byHead.set(head, list);
+  }
+  return { byHead };
+}
+
+/**
+ * Wrap the body of a CLI command so every `listPrsForBranch` call
+ * inside it shares a single repo-wide PR fetch. If the index cannot be
+ * built (offline, unauth, etc.), `fn` still runs -- callers fall back
+ * to per-branch gh queries. `fn`'s return value is forwarded unchanged.
+ */
+export async function withPrIndex<T>(
+  owner: string,
+  repo: string,
+  fn: () => Promise<T>,
+  opts?: GhOptions & { limit?: number },
+): Promise<T> {
+  const index = await createPrIndex(owner, repo, opts);
+  if (!index) return await fn();
+  const dispose = setActivePrIndex(index);
+  try {
+    return await fn();
+  } finally {
+    dispose();
+  }
+}
+
+/**
+ * Re-fetch the repo-wide PR list and replace the currently-installed
+ * PR index. Used after mutating operations (`gh pr create`, etc.) that
+ * invalidate the cached payload. Returns a disposer that restores the
+ * previous active index; callers should invoke it in a finally block.
+ *
+ * No-op (returns a do-nothing disposer) when no index is currently
+ * installed: callers that don't opt into batching shouldn't suddenly
+ * start seeing an active index mid-flight because that would break
+ * their per-branch `gh pr list` fixtures in tests and their per-branch
+ * network calls in production.
+ */
+export async function refreshActivePrIndex(
+  owner: string,
+  repo: string,
+  opts?: GhOptions & { limit?: number },
+): Promise<() => void> {
+  if (_activePrIndex === null) return () => {};
+  const fresh = await createPrIndex(owner, repo, opts);
+  return setActivePrIndex(fresh);
 }
 
 /**

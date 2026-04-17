@@ -1,4 +1,5 @@
 import {
+  effectiveParent,
   getAllNodes,
   getMergeStrategy,
   getStackTree,
@@ -6,7 +7,7 @@ import {
   tryResolveRef,
 } from "./stack.ts";
 import type { MergeStrategy } from "./stack.ts";
-import { gh, selectBestPr } from "./gh.ts";
+import { type GhPrListInfo, listPrsForBranch } from "./gh.ts";
 import { buildNavPlan } from "./nav.ts";
 import type { NavAction } from "./nav.ts";
 
@@ -14,7 +15,7 @@ export interface BranchSubmitPlan {
   branch: string;
   parent: string;
   isCurrent: boolean;
-  pr: GhPrInfo | null;
+  pr: GhPrListInfo | null;
   action: "create" | "update-base" | "none";
   /**
    * True when the local branch tip differs from `refs/remotes/origin/<branch>`
@@ -50,15 +51,6 @@ export interface SubmitPlan {
   branches: BranchSubmitPlan[];
   navComments: NavCommentPlan[];
   isNoOp: boolean;
-}
-
-interface GhPrInfo {
-  number: number;
-  url: string;
-  title: string;
-  state: string;
-  isDraft: boolean;
-  baseRefName: string;
 }
 
 async function computeNeedsPush(dir: string, branch: string): Promise<boolean> {
@@ -100,35 +92,34 @@ export async function computeSubmitPlan(
   // recreate, or modify PRs for already-landed branches.
   const nodes = getAllNodes(tree).filter((n) => !n.merged);
 
-  // Fetch PR info and compute push state for all nodes in parallel
+  // Fetch PR info and compute push state for all nodes in parallel.
+  // `listPrsForBranch` short-circuits to the active repo-wide PR index
+  // when a CLI handler has wrapped the call in `withPrIndex`, so this
+  // whole loop collapses to a single `gh pr list` round-trip per
+  // invocation instead of one per branch.
   const branchPlans = await Promise.all(
     nodes.map(async (b): Promise<BranchSubmitPlan> => {
-      const [prListResult, needsPush] = await Promise.all([
-        gh(
-          "pr",
-          "list",
-          "--head",
-          b.branch,
-          "--repo",
-          `${owner}/${repo}`,
-          "--json",
-          "number,url,title,state,isDraft,baseRefName",
-        ),
+      const [pr, needsPush] = await Promise.all([
+        listPrsForBranch(b.branch, { owner, repo }),
         computeNeedsPush(dir, b.branch),
       ]);
-      const prs = JSON.parse(prListResult) as GhPrInfo[];
-      const pr = selectBestPr(prs);
+
+      // If the recorded stack-parent is a tombstone, the PR's base on
+      // GitHub should target the first live ancestor (or the base
+      // branch). Walking through tombstones here keeps submitted PRs
+      // retargeted correctly after a land without requiring a sync run.
+      const effParent = effectiveParent(tree, b, undefined);
 
       let action: BranchSubmitPlan["action"];
       if (!pr) {
         action = "create";
-      } else if (pr.baseRefName !== b.parent) {
+      } else if (pr.baseRefName !== effParent) {
         action = "update-base";
       } else {
         action = "none";
       }
 
-      const desiredDraft = b.parent !== tree.baseBranch;
+      const desiredDraft = effParent !== tree.baseBranch;
 
       let draftAction: BranchSubmitPlan["draftAction"];
       if (!pr) {
@@ -141,7 +132,7 @@ export async function computeSubmitPlan(
 
       return {
         branch: b.branch,
-        parent: b.parent,
+        parent: effParent,
         isCurrent: b.branch === currentBranch,
         pr,
         action,

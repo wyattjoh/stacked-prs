@@ -153,10 +153,11 @@ describe("computeSyncPlan", () => {
     expect(s.pruneSteps).toHaveLength(1);
     expect(s.pruneSteps[0].branch).toBe("feat/b");
     expect(s.pruneSteps[0].prNumber).toBe(2);
-    expect(s.pruneSteps[0].childReparents).toEqual([
-      { branch: "feat/c", oldParent: "feat/b", newParent: "feat/a" },
-    ]);
 
+    // Child PR base still retargets from feat/b up to feat/a (past the
+    // about-to-be-tombstoned branch). The local stack-parent for feat/c
+    // stays pointing at the tombstone in git config; only the GitHub
+    // PR base changes.
     expect(s.prBaseUpdates).toHaveLength(1);
     expect(s.prBaseUpdates[0]).toMatchObject({
       branch: "feat/c",
@@ -261,13 +262,6 @@ describe("computeSyncPlan", () => {
               branch: "feat/b",
               prNumber: 2,
               isCurrentBranch: false,
-              childReparents: [
-                {
-                  branch: "feat/c",
-                  oldParent: "feat/b",
-                  newParent: "feat/a",
-                },
-              ],
             },
           ],
           prBaseUpdates: [
@@ -300,8 +294,11 @@ describe("computeSyncPlan", () => {
     const out = renderSyncPlan(plan);
     expect(out).toContain("Base branches:");
     expect(out).toContain("→ main (fast-forward from origin)");
-    expect(out).toContain("Delete feat/b (PR #2, merged)");
-    expect(out).toContain("feat/c: feat/b → feat/a");
+    expect(out).toContain("Tombstone feat/b (PR #2, merged)");
+    // Child reparenting no longer happens as a config mutation — live
+    // children stay pointing at the tombstone — so the renderer must not
+    // claim an ↳ oldParent -> newParent rewrite for them.
+    expect(out).not.toContain("feat/c: feat/b → feat/a");
     expect(out).toContain("Retarget PR #3: feat/b → feat/a");
     expect(out).toContain("Push (--force-with-lease): feat/c");
   });
@@ -501,13 +498,16 @@ describe("executeSync", () => {
     );
     expect(verifyCode).not.toBe(0);
 
-    // feat/c's recorded parent is now feat/a.
+    // feat/c's recorded stack-parent stays pointing at feat/b (the
+    // tombstone). The tree still shows feat/c nested under a merged
+    // feat/b, and restack walks through the tombstone to find the
+    // live effective parent for rebase targets.
     const { stdout: parentOut } = await runGitCommand(
       repo.dir,
       "config",
       "branch.feat/c.stack-parent",
     );
-    expect(parentOut.trim()).toBe("feat/a");
+    expect(parentOut.trim()).toBe("feat/b");
   });
 
   test("fetch failure short-circuits before running any stack work", async () => {

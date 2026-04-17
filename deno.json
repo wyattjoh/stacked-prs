@@ -22,7 +22,8 @@
     "@std/path": "jsr:@std/path@^1",
     "react": "npm:react@^18.3.1",
     "ink": "npm:ink@^5.0.1",
-    "ink-testing-library": "npm:ink-testing-library@^4.0.0"
+    "ink-testing-library": "npm:ink-testing-library@^4.0.0",
+    "dataloader": "npm:dataloader@^2.2.3"
   },
   "fmt": {
     "exclude": ["CHANGELOG.md", "docs/superpowers/**"]

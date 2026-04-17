@@ -1,5 +1,5 @@
 import { runGitCommand } from "../lib/stack.ts";
-import { gh } from "../lib/gh.ts";
+import { gh, refreshActivePrIndex } from "../lib/gh.ts";
 import { applyNavPlan, buildNavPlan } from "../lib/nav.ts";
 import type { SubmitPlan } from "../lib/submit-plan.ts";
 
@@ -145,8 +145,21 @@ export async function executeSubmit(
   // were absent from that initial plan. Rebuilding here picks them up and
   // also folds in any base/draft transitions that shift which branches are
   // reachable in the nav markdown.
-  const navActions = await buildNavPlan(dir, plan.stackName, owner, repo);
-  result.navCommentsApplied += await applyNavPlan(owner, repo, navActions);
+  //
+  // Refresh the active repo-wide PR index (if one is installed) before
+  // rebuilding the nav plan so newly-created PRs are visible to
+  // `listPrsForBranch`. Without the refresh, the stale index would mask
+  // the fresh PRs and nav comments would be missing entries. The
+  // refresh is a single batched `gh pr list`, not per-branch.
+  const disposeRefresh = result.prsCreated.length > 0
+    ? await refreshActivePrIndex(owner, repo)
+    : (() => {});
+  try {
+    const navActions = await buildNavPlan(dir, plan.stackName, owner, repo);
+    result.navCommentsApplied += await applyNavPlan(owner, repo, navActions);
+  } finally {
+    disposeRefresh();
+  }
 
   return result;
 }

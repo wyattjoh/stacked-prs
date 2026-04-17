@@ -1,5 +1,5 @@
 import { runGitCommand } from "../lib/stack.ts";
-import { gh } from "../lib/gh.ts";
+import { listPrsForBranch } from "../lib/gh.ts";
 
 export interface PrInfo {
   number: number;
@@ -184,24 +184,27 @@ export async function walkUp(
   return parentMap;
 }
 
-/** Query PR info for a branch. Returns undefined if no PR exists. */
+/**
+ * Query PR info for a branch. Returns undefined if no PR exists.
+ * Uses `listPrsForBranch` so that an active repo-wide PR index
+ * (installed by the caller via `withPrIndex`) short-circuits the
+ * per-branch `gh pr list` call.
+ */
 export async function queryPr(
   branch: string,
   owner: string,
   repo: string,
 ): Promise<PrInfo | undefined> {
-  const result = await gh(
-    "pr",
-    "list",
-    "--head",
-    branch,
-    "--repo",
-    `${owner}/${repo}`,
-    "--json",
-    "number,url,title,state,isDraft,baseRefName",
-  );
-  const prs = JSON.parse(result) as PrInfo[];
-  return prs.length > 0 ? prs[0] : undefined;
+  const pr = await listPrsForBranch(branch, { owner, repo });
+  if (!pr) return undefined;
+  return {
+    number: pr.number,
+    url: pr.url,
+    title: pr.title,
+    state: pr.state,
+    isDraft: pr.isDraft,
+    baseRefName: pr.baseRefName,
+  };
 }
 
 /**

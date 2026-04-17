@@ -3,7 +3,8 @@ import { Command } from "@cliffy/command";
 import { Confirm } from "@cliffy/prompt";
 import pluginMeta from "../.claude-plugin/plugin.json" with { type: "json" };
 import { getStackTree, renderTree, runGitCommand } from "./lib/stack.ts";
-import { gh, listPrsForBranch, resolveRepo } from "./lib/gh.ts";
+import { gh, listPrsForBranch, resolveRepo, withPrIndex } from "./lib/gh.ts";
+import { withRefLoader } from "./lib/loaders.ts";
 import { prStateFrom } from "./commands/land.ts";
 import { getStackStatus } from "./commands/status.ts";
 import { restack } from "./commands/restack.ts";
@@ -400,7 +401,25 @@ await new Command()
         // PR info will be unavailable, that's ok for status
       }
     }
-    const status = await getStackStatus(dir, stackName, owner, repo);
+
+    // Install a repo-wide PR index so per-branch `listPrsForBranch`
+    // calls inside `getStackStatus` all share one `gh pr list` fetch
+    // instead of N per-branch round-trips. If the repo can't be
+    // resolved (no gh auth, no remote), the call falls back to the
+    // per-branch path, which renders the tree without PR info.
+    //
+    // Also install a DataLoader-backed ref resolver so the per-branch
+    // `computeSyncStatus` / `tryResolveRef` calls coalesce into a
+    // single `git cat-file --batch-check` subprocess instead of one
+    // `git rev-parse` per ref. Status is read-only, so caching refs
+    // for the scope of this handler is safe.
+    const runStatus = () => getStackStatus(dir, stackName, owner, repo);
+    const status = owner && repo
+      ? await withRefLoader(
+        dir,
+        () => withPrIndex(owner as string, repo as string, runStatus),
+      )
+      : await withRefLoader(dir, runStatus);
     if (options.json) {
       logJson(status);
     } else {
@@ -577,29 +596,31 @@ await new Command()
   .action(async (options) => {
     const stackName = await resolveStackName(dir, options.stackName);
     const { owner, repo } = await resolveRepo(options.owner, options.repo);
-    const plan = await buildNavPlan(dir, stackName, owner, repo);
+    await withPrIndex(owner, repo, async () => {
+      const plan = await buildNavPlan(dir, stackName, owner, repo);
 
-    if (options.dryRun) {
-      logJson(plan);
-      return;
-    }
-
-    if (plan.length === 0) {
-      console.log("All nav comments are up to date. Nothing to do.");
-      return;
-    }
-
-    console.log(`Nav comments (${plan.length}):`);
-    for (const action of plan) {
-      await executeNavAction(owner, repo, action);
-      if (action.action === "create") {
-        console.log(`  ✓ #${action.prNumber} created`);
-      } else {
-        console.log(
-          `  ✓ #${action.prNumber} updated (comment ${action.commentId})`,
-        );
+      if (options.dryRun) {
+        logJson(plan);
+        return;
       }
-    }
+
+      if (plan.length === 0) {
+        console.log("All nav comments are up to date. Nothing to do.");
+        return;
+      }
+
+      console.log(`Nav comments (${plan.length}):`);
+      for (const action of plan) {
+        await executeNavAction(owner, repo, action);
+        if (action.action === "create") {
+          console.log(`  ✓ #${action.prNumber} created`);
+        } else {
+          console.log(
+            `  ✓ #${action.prNumber} updated (comment ${action.commentId})`,
+          );
+        }
+      }
+    });
   })
   // --- verify-refs ---
   .command("verify-refs", "Verify branch ancestry and detect duplicate patches")
@@ -630,7 +651,13 @@ await new Command()
         // Will proceed without PR data
       }
     }
-    const result = await discoverChain(dir, options.branch, owner, repo);
+    const result = owner && repo
+      ? await withPrIndex(
+        owner,
+        repo,
+        () => discoverChain(dir, options.branch, owner, repo),
+      )
+      : await discoverChain(dir, options.branch, owner, repo);
     logJson(result);
   })
   // --- clean ---
@@ -760,22 +787,46 @@ await new Command()
       import("./tui/types.ts").PrInfo
     >();
 
-    await Promise.all(
-      nodes.map(async (node) => {
-        const best = await listPrsForBranch(node.branch, {
-          owner,
-          repo: repoName,
-        });
-        if (best) {
-          prStateByBranch.set(node.branch, prStateFrom(best));
-          prInfoByBranch.set(node.branch, best);
-        } else {
-          prStateByBranch.set(node.branch, "NONE");
+    // Wrap the entire land body in a repo-wide PR index so every gh
+    // lookup (per-branch PR queries here, plus the nav recompute and
+    // any nested planners inside `executeLandFromCli`) hits one batch
+    // fetch instead of N per-branch round-trips.
+    const result: LandCliResult = await withPrIndex(
+      owner,
+      repoName,
+      async () => {
+        await Promise.all(
+          nodes.map(async (node) => {
+            const best = await listPrsForBranch(node.branch, {
+              owner,
+              repo: repoName,
+            });
+            if (best) {
+              prStateByBranch.set(node.branch, prStateFrom(best));
+              prInfoByBranch.set(node.branch, best);
+            } else {
+              prStateByBranch.set(node.branch, "NONE");
+            }
+          }),
+        );
+
+        if (options.dryRun) {
+          return { ok: true, dryRun: true } as unknown as LandCliResult;
         }
-      }),
+
+        return await executeLandFromCli(
+          dir,
+          stackName,
+          prStateByBranch,
+          prInfoByBranch,
+          { resume: options.resume },
+        );
+      },
     );
 
-    if (options.dryRun) {
+    // Handle dry-run separately: the closure returned a synthetic marker
+    // so the dry-run rendering stays outside the index (no fetches).
+    if ((result as unknown as { dryRun?: boolean }).dryRun) {
       const plan = await planLand(
         dir,
         stackName,
@@ -816,14 +867,6 @@ await new Command()
       }
       return;
     }
-
-    const result: LandCliResult = await executeLandFromCli(
-      dir,
-      stackName,
-      prStateByBranch,
-      prInfoByBranch,
-      { resume: options.resume },
-    );
 
     if (options.json) {
       logJson(result);
@@ -914,36 +957,43 @@ await new Command()
   .action(async (options) => {
     const stackName = await resolveStackName(dir, options.stackName);
     const { owner, repo } = await resolveRepo(options.owner, options.repo);
-    const plan = await computeSubmitPlan(dir, stackName, owner, repo);
 
-    if (options.dryRun) {
-      if (options.json) {
-        logJson(plan);
-      } else {
-        console.log(renderSubmitPlan(plan));
+    // Every `gh pr list --head` in the planner, the executor, and the
+    // final nav recompute piggybacks on a single repo-wide fetch.
+    const result = await withPrIndex(owner, repo, async () => {
+      const plan = await computeSubmitPlan(dir, stackName, owner, repo);
+
+      if (options.dryRun) {
+        if (options.json) {
+          logJson(plan);
+        } else {
+          console.log(renderSubmitPlan(plan));
+        }
+        return null;
       }
-      return;
-    }
 
-    if (plan.isNoOp) {
-      if (options.json) {
-        logJson({ ok: true, isNoOp: true });
-      } else {
-        console.log("All PRs are up to date. Nothing to do.");
+      if (plan.isNoOp) {
+        if (options.json) {
+          logJson({ ok: true, isNoOp: true });
+        } else {
+          console.log("All PRs are up to date. Nothing to do.");
+        }
+        return null;
       }
-      return;
-    }
 
-    if (
-      !(await confirmOrExit({
-        force: options.force ?? false,
-        render: () => console.log(renderSubmitPlan(plan)),
-      }))
-    ) {
-      return;
-    }
+      if (
+        !(await confirmOrExit({
+          force: options.force ?? false,
+          render: () => console.log(renderSubmitPlan(plan)),
+        }))
+      ) {
+        return null;
+      }
 
-    const result = await executeSubmit(dir, plan, owner, repo);
+      return await executeSubmit(dir, plan, owner, repo);
+    });
+
+    if (result === null) return;
 
     if (options.json) {
       logJson(result);
@@ -981,53 +1031,82 @@ await new Command()
   )
   .option("--json", "Output as JSON")
   .action(async (options) => {
-    const plan = await computeSyncPlan(dir, { filter: options.filter });
-
-    if (plan.filter && plan.stacks.length === 0) {
-      if (options.json) {
-        logJson(plan);
-      } else {
-        console.log(
-          `No stacks match --filter=${plan.filter}. Nothing to do.`,
-        );
+    // Resolve owner/repo once so every `listPrsForBranch` call (planner
+    // + executor + nav refresh, across every stack) piggybacks on a
+    // single repo-wide `gh pr list`. Graceful fallback when gh isn't
+    // authenticated: sync still plans and executes via per-branch
+    // queries, just slower.
+    const resolved = await (async () => {
+      try {
+        return await resolveRepo();
+      } catch {
+        return null;
       }
-      return;
-    }
+    })();
 
-    if (options.dryRun) {
-      if (options.json) {
-        logJson(plan);
-      } else {
-        console.log(renderSyncPlan(plan));
+    const run = async (): Promise<void> => {
+      const plan = await computeSyncPlan(dir, { filter: options.filter });
+
+      if (plan.filter && plan.stacks.length === 0) {
+        if (options.json) {
+          logJson(plan);
+        } else {
+          console.log(
+            `No stacks match --filter=${plan.filter}. Nothing to do.`,
+          );
+        }
+        return;
       }
-      return;
-    }
 
-    if (plan.isNoOp && plan.stacks.length > 0) {
-      if (options.json) {
-        logJson({ ok: true, isNoOp: true });
-      } else {
-        console.log(
-          "All stacks are already synced with origin. Nothing to do.",
-        );
+      if (options.dryRun) {
+        if (options.json) {
+          logJson(plan);
+        } else {
+          console.log(renderSyncPlan(plan));
+        }
+        return;
       }
-      // Still fetch, so the user's origin refs are up to date even on a no-op.
-      for (const base of plan.baseBranches) {
-        await runGitCommand(dir, "fetch", "origin", base);
+
+      if (plan.isNoOp && plan.stacks.length > 0) {
+        if (options.json) {
+          logJson({ ok: true, isNoOp: true });
+        } else {
+          console.log(
+            "All stacks are already synced with origin. Nothing to do.",
+          );
+        }
+        // Still fetch, so origin refs are up to date even on a no-op.
+        for (const base of plan.baseBranches) {
+          await runGitCommand(dir, "fetch", "origin", base);
+        }
+        return;
       }
-      return;
-    }
 
-    if (
-      !(await confirmOrExit({
-        force: options.force ?? false,
-        render: () => console.log(renderSyncPlan(plan)),
-      }))
-    ) {
-      return;
-    }
+      if (
+        !(await confirmOrExit({
+          force: options.force ?? false,
+          render: () => console.log(renderSyncPlan(plan)),
+        }))
+      ) {
+        return;
+      }
 
-    const result = await executeSync(dir, plan);
+      const result = await executeSync(dir, plan);
+      syncResultRef.result = result;
+    };
+
+    const syncResultRef: {
+      result: Awaited<ReturnType<typeof executeSync>> | null;
+    } = {
+      result: null,
+    };
+    if (resolved) {
+      await withPrIndex(resolved.owner, resolved.repo, run);
+    } else {
+      await run();
+    }
+    const result = syncResultRef.result;
+    if (!result) return;
 
     if (options.json) {
       logJson(result);

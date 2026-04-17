@@ -412,6 +412,48 @@ describe("buildNavPlan", () => {
     expect(plan[0].body).toContain("~~#101~~");
     expect(plan[0].body).toContain("**#102 👈 this PR**");
   });
+
+  test("preserves tombstone -> live-child hierarchy after a landed root", async () => {
+    // Regression: after land of feature/a, submit used to rebuild the nav
+    // with feature/a and feature/b as flat siblings at depth 0. The
+    // tombstone should stay the structural parent so the rendered graph
+    // keeps the parent/child shape from before the land.
+    await using repo = await createTestRepo();
+    await using mock = await makeMockDir();
+
+    await addBranch(repo.dir, "feature/b", "main");
+    await setBaseBranch(repo.dir, "my-stack", "main");
+    await setStackNode(repo.dir, "feature/b", "my-stack", "feature/a");
+    await addLandedBranch(repo.dir, "my-stack", "feature/a");
+    await addLandedPr(repo.dir, "my-stack", "feature/a", 101);
+    const { addLandedParent } = await import("./stack.ts");
+    await addLandedParent(repo.dir, "my-stack", "feature/a", "main");
+
+    await writeFixture(
+      mock.path,
+      ["pr", "list", "--head", "feature/b", "--repo", "o/r"],
+      [{
+        number: 102,
+        url: "...",
+        title: "feat: b",
+        state: "OPEN",
+        isDraft: false,
+      }],
+    );
+    await writeFixture(
+      mock.path,
+      ["api", "repos/o/r/issues/102/comments"],
+      [],
+    );
+
+    const plan = await buildNavPlan(repo.dir, "my-stack", "o", "r");
+
+    expect(plan).toHaveLength(1);
+    const body = plan[0].body;
+    // The tombstoned root is at depth 0, and the live child sits at
+    // depth 1 (two-space indent) directly below it.
+    expect(body).toContain("- ~~#101~~\n  - **#102 👈 this PR**");
+  });
 });
 
 describe("executeNavAction failure modes", () => {

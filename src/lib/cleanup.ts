@@ -1,5 +1,7 @@
 import {
   addLandedBranch,
+  addLandedParent,
+  addLandedPr,
   findNode,
   getAllNodes,
   getStackTree,
@@ -119,10 +121,11 @@ export interface TreeProjection {
 
 /**
  * Project the tree shape after removing every branch in `mergedSet`.
- * For each surviving node, climb past merged ancestors to find its new
- * parent. Roots are collected (promoted children of merged roots included),
- * and when more than one root remains we anticipate a split with generated
- * stack names. Writes nothing; all computation is in memory.
+ * For each surviving node, climb past the newly merged set AND any existing
+ * tombstones to find its new effective parent. Roots are collected
+ * (promoted children of merged roots included), and when more than one
+ * root remains we anticipate a split with generated stack names. Writes
+ * nothing; all computation is in memory.
  */
 export function projectTreeAfterRemoval(
   tree: StackTree,
@@ -131,13 +134,17 @@ export function projectTreeAfterRemoval(
   const base = tree.baseBranch;
   const nodes = getAllNodes(tree);
 
-  // Climb past merged ancestors to find the first non-merged parent (or base).
+  // Climb past both newly merged and already-tombstoned ancestors.
   const resolveLiveParent = (parent: string): string => {
     let ancestor = parent;
-    while (ancestor !== base && mergedSet.has(ancestor)) {
-      ancestor = findNode(tree, ancestor)?.parent ?? base;
+    while (ancestor !== base) {
+      const ancestorNode = findNode(tree, ancestor);
+      if (!ancestorNode) return base;
+      const isTombstoned = mergedSet.has(ancestor) || ancestorNode.merged;
+      if (!isTombstoned) return ancestor;
+      ancestor = ancestorNode.parent;
     }
-    return ancestor;
+    return base;
   };
 
   const newParents = new Map<string, string>();
@@ -212,16 +219,13 @@ export interface BranchCleanupResult {
 export interface ReparentAndRemoveOpts {
   /** Parent to assign every child of `branch`. Defaults to `branch`'s own parent. */
   newParentForChildren?: string;
-  /** When true, also record `branch` in `landed-branches` before removal. */
-  tombstone?: boolean;
 }
 
 /**
  * Reparent every direct child of `branch` to `newParentForChildren`
  * (default: the branch's own parent), then drop the branch's metadata.
- * Optionally tombstones the branch by adding it to `landed-branches`.
- * Shared by `configFoldBranch` (no tombstone) and `configBranchCleanup`
- * (tombstone + explicit new parent).
+ * Used by `configFoldBranch`: fold absorbs a branch into its parent, so its
+ * stack membership disappears and children reparent up one level.
  */
 export async function reparentAndRemove(
   dir: string,
@@ -239,29 +243,52 @@ export async function reparentAndRemove(
     }
   }
 
-  if (opts.tombstone) {
-    await addLandedBranch(dir, stackName, branch);
-  }
   await removeStackBranch(dir, branch);
 
   return { removed: branch, splitInto: [] };
 }
 
 /**
- * Generic per-branch cleanup used by both `land` and `sync`. Reparents every
- * direct child of `mergedBranch` to `newParentForChildren`, tombstones the
- * branch by adding it to `landed-branches` and dropping its branch-level
- * config. The caller is responsible for detecting multi-root splits if that
- * matters (today only `land` does, via the configSplitStack path).
+ * Tombstone `mergedBranch` by recording it in `stack.<n>.landed-branches`
+ * along with its original stack-parent in `stack.<n>.landed-parent` and
+ * (when supplied) its PR number in `stack.<n>.landed-pr`. The parent
+ * record survives `git branch -D` wiping `branch.<name>.stack-*`, so
+ * `getStackTree` can still place the tombstone as a structural node.
+ * Live descendants keep pointing at the tombstoned branch name and render
+ * as children of the merged node. Downstream operations (restack target
+ * resolution, submit PR base, etc.) walk up through tombstones to find
+ * the effective parent.
+ *
+ * The three writes are sequenced together so a crash part-way through
+ * leaves the tombstone either fully complete or fully absent; nav
+ * rendering is correct in either state. Throws if `mergedBranch` is not a
+ * member of the stack tree -- callers should validate via `classifyLandCase`
+ * or equivalent before invoking.
+ *
+ * All three writes are idempotent (first-write wins for `landed-parent`
+ * and `landed-pr`, de-duplication for `landed-branches`).
  */
 export async function configBranchCleanup(
   dir: string,
   stackName: string,
   mergedBranch: string,
-  newParentForChildren: string,
+  prNumber?: number,
 ): Promise<BranchCleanupResult> {
-  return await reparentAndRemove(dir, stackName, mergedBranch, {
-    newParentForChildren,
-    tombstone: true,
-  });
+  // Capture the branch's parent BEFORE tombstoning so the structural
+  // position is preserved even after `git branch -D` clears its live
+  // branch-level config.
+  const tree = await getStackTree(dir, stackName);
+  const node = findNode(tree, mergedBranch);
+  if (!node) {
+    throw new Error(
+      `configBranchCleanup: ${mergedBranch} is not a member of stack ${stackName}`,
+    );
+  }
+
+  await addLandedBranch(dir, stackName, mergedBranch);
+  await addLandedParent(dir, stackName, mergedBranch, node.parent);
+  if (prNumber !== undefined) {
+    await addLandedPr(dir, stackName, mergedBranch, prNumber);
+  }
+  return { removed: mergedBranch, splitInto: [] };
 }

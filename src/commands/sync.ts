@@ -41,11 +41,6 @@ export interface BaseFfPlan {
 export interface BranchPruneStep {
   branch: string;
   prNumber: number;
-  childReparents: Array<{
-    branch: string;
-    oldParent: string;
-    newParent: string;
-  }>;
   isCurrentBranch: boolean;
 }
 
@@ -233,17 +228,9 @@ async function planStackSync(
     if (!mergedSet.has(node.branch)) continue;
     const pr = prByBranch.get(node.branch);
     if (!pr) continue;
-    const childReparents = node.children
-      .filter((c) => !mergedSet.has(c.branch))
-      .map((c) => ({
-        branch: c.branch,
-        oldParent: c.parent,
-        newParent: newParentByBranch.get(c.branch) ?? c.parent,
-      }));
     pruneSteps.push({
       branch: node.branch,
       prNumber: pr.number,
-      childReparents,
       isCurrentBranch: currentBranch === node.branch,
     });
   }
@@ -284,12 +271,22 @@ async function planStackSync(
     .filter((r) => r.status === "planned")
     .map((r) => r.branch);
 
+  // Build the nav preview with `markMerged` so the rendered markdown
+  // matches what the executor's post-tombstone recompute will produce
+  // (merged branches render as `~~#N~~` with their live children nested
+  // beneath). Seed PR numbers from the state query for branches that
+  // aren't yet recorded in `landed-pr`.
+  const prOverrides = new Map<string, number>();
+  for (const branch of mergedSet) {
+    const pr = prByBranch.get(branch);
+    if (pr) prOverrides.set(branch, pr.number);
+  }
   let navUpdates: NavAction[] = [];
   if (owner && repo) {
     try {
       navUpdates = await buildNavPlan(dir, stackName, owner, repo, {
-        excludeBranches,
-        reparented,
+        markMerged: Array.from(mergedSet),
+        prOverrides,
       });
     } catch {
       navUpdates = [];
@@ -521,26 +518,11 @@ export async function executeSync(
       }
     }
 
-    // 2. Nav comment updates. Keep these before prune so merged tombstones
-    // in the old tree still exist when executeNavAction runs (mirrors the
-    // buildNavPlan input that produced these actions).
-    if (owner && repo) {
-      for (const action of stackPlan.navUpdates) {
-        try {
-          await executeNavAction(owner, repo, action);
-        } catch (err) {
-          return fail(
-            `nav ${action.action} for #${action.prNumber} failed: ${
-              (err as Error).message
-            }`,
-          );
-        }
-      }
-    }
-
-    // 3. Prune merged branches. If we're currently on one of them (or on
-    // any branch being rebased through), switch to the stack's base first.
-    // Do it once per stack rather than per branch.
+    // 2. Tombstone merged branches and delete their local refs. Tombstones
+    // retain their branch-level stack-name/stack-parent config so live
+    // children keep their recorded parent link; `getStackTree` now reads
+    // the merge marker from `stack.<n>.landed-branches` and renders them
+    // as structural merged nodes.
     let switchedToBase = false;
     for (const step of stackPlan.pruneSteps) {
       if (step.isCurrentBranch && !switchedToBase) {
@@ -557,16 +539,8 @@ export async function executeSync(
         switchedToBase = true;
       }
 
-      const newParentForChildren = step.childReparents.length > 0
-        ? step.childReparents[0].newParent
-        : stackPlan.baseBranch;
       try {
-        await configBranchCleanup(
-          dir,
-          stackPlan.stackName,
-          step.branch,
-          newParentForChildren,
-        );
+        await configBranchCleanup(dir, stackPlan.stackName, step.branch);
       } catch (err) {
         return fail(
           `configBranchCleanup(${step.branch}) failed: ${
@@ -584,12 +558,31 @@ export async function executeSync(
       stackResult.prunedBranches!.push(step.branch);
     }
 
-    // 4. Restack with the same options the planner used so rebase targets
-    // line up with the post-prune topology.
-    const restackResult = await restack(dir, stackPlan.stackName, {
-      excludeBranches: stackPlan.excludeBranches,
-      reparented: stackPlan.reparented,
-    });
+    // 3. Nav comment updates, recomputed against the post-tombstone tree
+    // so the rendered markdown shows newly-landed branches with their
+    // recorded children still nested beneath them.
+    if (owner && repo) {
+      try {
+        const freshNavActions = await buildNavPlan(
+          dir,
+          stackPlan.stackName,
+          owner,
+          repo,
+        );
+        for (const action of freshNavActions) {
+          await executeNavAction(owner, repo, action);
+        }
+      } catch (err) {
+        return fail(
+          `nav refresh failed: ${(err as Error).message}`,
+        );
+      }
+    }
+
+    // 4. Restack against the post-tombstone tree. `topologicalOrder`
+    // naturally skips merged nodes and `effectiveParent` walks through
+    // them, so no explicit overlay is needed here.
+    const restackResult = await restack(dir, stackPlan.stackName, {});
     stackResult.restack = restackResult;
     if (!restackResult.ok) {
       return fail(restackResult.error ?? "restack failed");
@@ -674,10 +667,7 @@ export function renderSyncPlan(plan: SyncPlan): string {
       continue;
     }
     for (const p of s.pruneSteps) {
-      lines.push(`  - Delete ${p.branch} (PR #${p.prNumber}, merged)`);
-      for (const r of p.childReparents) {
-        lines.push(`    ↳ ${r.branch}: ${r.oldParent} → ${r.newParent}`);
-      }
+      lines.push(`  - Tombstone ${p.branch} (PR #${p.prNumber}, merged)`);
     }
     for (const u of s.prBaseUpdates) {
       lines.push(

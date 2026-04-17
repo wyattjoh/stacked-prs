@@ -1,3 +1,5 @@
+import { getActiveRefLoader } from "./loaders.ts";
+
 export type MergeStrategy = "merge" | "squash";
 
 /** @deprecated Used only by migration tests to create old-format stack data. Do not use in new code. */
@@ -103,8 +105,18 @@ export async function detectDefaultBranch(dir: string): Promise<string> {
 /**
  * Run `git rev-parse <ref>` and return the trimmed SHA. Throws on failure.
  * Shared by restack and land to avoid duplicate implementations.
+ *
+ * When an active ref loader is installed (see `loaders.ts`), the lookup
+ * batches through it so parallel callers share one `git cat-file
+ * --batch-check` subprocess instead of forking per-ref.
  */
 export async function revParse(dir: string, ref: string): Promise<string> {
+  const loader = getActiveRefLoader();
+  if (loader) {
+    const sha = await loader.load(ref);
+    if (sha !== null) return sha;
+    throw new Error(`git rev-parse ${ref} failed: ref not found`);
+  }
   const { code, stdout, stderr } = await runGitCommand(dir, "rev-parse", ref);
   if (code !== 0) {
     throw new Error(`git rev-parse ${ref} failed: ${stderr}`);
@@ -152,11 +164,20 @@ export function resumeStore<T>(
  * Resolve a ref to its SHA, or return null if it does not exist. Uses
  * `git rev-parse --verify --quiet` so a missing ref is an expected outcome,
  * not an error. Shared probe for sync, submit-plan, restack, etc.
+ *
+ * When an active ref loader is installed, concurrent calls coalesce
+ * into a single `git cat-file --batch-check` subprocess. The loader
+ * returns `null` for refs git reports as missing, matching this
+ * function's no-ref-found contract.
  */
 export async function tryResolveRef(
   dir: string,
   ref: string,
 ): Promise<string | null> {
+  const loader = getActiveRefLoader();
+  if (loader) {
+    return await loader.load(ref);
+  }
   const { code, stdout } = await runGitCommand(
     dir,
     "rev-parse",
@@ -461,6 +482,64 @@ export async function addLandedPr(
   }
 }
 
+/**
+ * Read landed parent branches for a stack as a branch -> parent-branch map.
+ *
+ * Stored under the multi-value key `stack.<n>.landed-parent` with values of
+ * the form `<branch>:<parent>`. Written at tombstone time so tombstones
+ * keep their structural position in the tree after `git branch -D` wipes
+ * their `branch.<name>.stack-*` config.
+ */
+export async function getLandedParents(
+  dir: string,
+  stackName: string,
+): Promise<Map<string, string>> {
+  const { code, stdout } = await runGitCommand(
+    dir,
+    "config",
+    "--get-all",
+    `stack.${stackName}.landed-parent`,
+  );
+  const result = new Map<string, string>();
+  if (code !== 0 || !stdout) return result;
+  for (const line of stdout.split("\n")) {
+    const sep = line.indexOf(":");
+    if (sep === -1) continue;
+    const branch = line.slice(0, sep);
+    const parent = line.slice(sep + 1);
+    if (!branch || !parent) continue;
+    result.set(branch, parent);
+  }
+  return result;
+}
+
+/**
+ * Record the original stack-parent for a landed branch. Idempotent: the
+ * first recorded parent wins so split stacks and resumed lands don't
+ * overwrite the correct historical parent with a stale one.
+ */
+export async function addLandedParent(
+  dir: string,
+  stackName: string,
+  branch: string,
+  parent: string,
+): Promise<void> {
+  const existing = await getLandedParents(dir, stackName);
+  if (existing.has(branch)) return;
+  const { code, stderr } = await runGitCommand(
+    dir,
+    "config",
+    "--add",
+    `stack.${stackName}.landed-parent`,
+    `${branch}:${parent}`,
+  );
+  if (code !== 0) {
+    throw new Error(
+      `git config --add stack.${stackName}.landed-parent ${branch}:${parent} failed: ${stderr}`,
+    );
+  }
+}
+
 /** Get the base branch for a stack. Returns undefined if not set. */
 export async function getBaseBranch(
   dir: string,
@@ -492,6 +571,7 @@ export async function clearStackConfig(
     `stack.${stackName}.base-branch`,
     `stack.${stackName}.merge-strategy`,
     `stack.${stackName}.resume-state`,
+    `stack.${stackName}.color`,
   ];
   for (const key of singleValueKeys) {
     const { code, stderr } = await runGitCommand(dir, "config", "--unset", key);
@@ -499,10 +579,12 @@ export async function clearStackConfig(
       throw new Error(`git config --unset ${key} failed: ${stderr}`);
     }
   }
-  // landed-branches and landed-pr are multi-value; --unset-all removes all.
+  // landed-branches, landed-pr, and landed-parent are multi-value;
+  // --unset-all removes all.
   const multiValueKeys = [
     `stack.${stackName}.landed-branches`,
     `stack.${stackName}.landed-pr`,
+    `stack.${stackName}.landed-parent`,
   ];
   for (const key of multiValueKeys) {
     const { code, stderr } = await runGitCommand(
@@ -517,10 +599,51 @@ export async function clearStackConfig(
   }
 }
 
-/** Build a StackTree for the given stack name (or detect from current branch). */
+export interface BranchStackEntry {
+  stackName?: string;
+  parent?: string;
+  merged?: boolean;
+  order?: number;
+}
+
+/**
+ * Scan every `branch.<name>.stack-*` key in the repo in a single git
+ * subprocess and parse the result into a per-branch entry map. Cheap to
+ * call once at the top of a planner; callers that previously issued
+ * N parallel `git config branch.<b>.stack-*` lookups should use this
+ * instead.
+ */
+export async function readAllBranchStackConfig(
+  dir: string,
+): Promise<Map<string, BranchStackEntry>> {
+  const entries = await gitConfigGetRegexp(dir, "^branch\\..*\\.stack-");
+  const out = new Map<string, BranchStackEntry>();
+  for (const [key, value] of entries) {
+    const match = key.match(/^branch\.(.+)\.stack-(name|parent|merged|order)$/);
+    if (!match) continue;
+    const [, branch, field] = match;
+    const entry = out.get(branch) ?? {};
+    if (field === "name") entry.stackName = value;
+    else if (field === "parent") entry.parent = value;
+    else if (field === "merged") entry.merged = value === "true";
+    else if (field === "order") entry.order = Number(value);
+    out.set(branch, entry);
+  }
+  return out;
+}
+
+/**
+ * Build a StackTree for the given stack name (or detect from current branch).
+ *
+ * `preScan`, if supplied, is the output of a prior `readAllBranchStackConfig`
+ * call. Callers that build multiple trees in a row (e.g. `getAllStackTrees`,
+ * the TUI loader, `computeSyncPlan`) should scan once and pass the result
+ * to every `getStackTree` invocation to skip O(N)-per-tree fork overhead.
+ */
 export async function getStackTree(
   dir: string,
   stackName?: string,
+  preScan?: Map<string, BranchStackEntry>,
 ): Promise<StackTree> {
   let resolvedStackName = stackName;
 
@@ -550,40 +673,33 @@ export async function getStackTree(
 
   const mergeStrategy = await getMergeStrategy(dir, resolvedStackName);
 
-  const lines = await gitConfigGetRegexp(dir, "^branch\\..*\\.stack-name$");
+  // Single scan of every `branch.<name>.stack-*` key. One fork replaces
+  // what used to be O(N) per-key shell-outs (stack-name, stack-parent,
+  // stack-merged, stack-order) during tree construction. Reuse the
+  // caller-supplied pre-scan when available so multi-tree callers pay
+  // this cost once rather than per tree.
+  const branchConfig = preScan ?? await readAllBranchStackConfig(dir);
 
-  const matchingBranches = lines
-    .filter(([, value]) => value === resolvedStackName)
-    .map(([key]) => {
-      const match = key.match(/^branch\.(.+)\.stack-name$/);
-      return match ? match[1] : null;
-    })
-    .filter((branch): branch is string => branch !== null);
+  const matchingBranches: string[] = [];
+  for (const [branch, entry] of branchConfig) {
+    if (entry.stackName === resolvedStackName) matchingBranches.push(branch);
+  }
+  matchingBranches.sort();
 
   // Auto-migrate old linear format (stack-order keys) to tree format.
   // Only attempt migration when base-branch is missing, indicating an old stack.
   if (!baseBranch) {
-    const orderValues = await Promise.all(
-      matchingBranches.map((branch) =>
-        gitConfig(dir, `branch.${branch}.stack-order`)
-      ),
+    const hasOrderKeys = matchingBranches.some((b) =>
+      branchConfig.get(b)?.order !== undefined
     );
-    const hasOrderKeys = orderValues.some((v) => v !== undefined);
 
     if (hasOrderKeys) {
       // Read all parents to determine which branch's parent is NOT in the stack.
       // That parent is the base branch.
       const branchSet = new Set(matchingBranches);
-      const parents = await Promise.all(
-        matchingBranches.map(async (branch) => ({
-          branch,
-          parent: await gitConfig(dir, `branch.${branch}.stack-parent`),
-        })),
-      );
-
-      const detectedBase = parents.find(
-        ({ parent }) => parent !== undefined && !branchSet.has(parent),
-      )?.parent;
+      const detectedBase = matchingBranches
+        .map((b) => branchConfig.get(b)?.parent)
+        .find((p) => p !== undefined && !branchSet.has(p));
 
       if (detectedBase) {
         await setBaseBranch(dir, resolvedStackName, detectedBase);
@@ -610,20 +726,29 @@ export async function getStackTree(
   }
 
   const branchParents = new Map<string, string>();
-  await Promise.all(
-    matchingBranches.map(async (branch) => {
-      const parent = await gitConfig(dir, `branch.${branch}.stack-parent`);
-      if (parent) branchParents.set(branch, parent);
-    }),
-  );
-
   const mergedFlags = new Map<string, boolean>();
-  await Promise.all(
-    matchingBranches.map(async (branch) => {
-      const val = await gitConfig(dir, `branch.${branch}.stack-merged`);
-      if (val === "true") mergedFlags.set(branch, true);
-    }),
-  );
+  for (const branch of matchingBranches) {
+    const entry = branchConfig.get(branch);
+    if (entry?.parent) branchParents.set(branch, entry.parent);
+    if (entry?.merged) mergedFlags.set(branch, true);
+  }
+
+  // Stack-level tombstones mark landed branches. Their structural parent
+  // comes from `stack.<n>.landed-parent`, written at tombstone time so it
+  // survives `git branch -D` wiping `branch.<name>.stack-*`. When the
+  // record is missing (legacy stacks, post-split fallback), the tombstone
+  // synthesizes as a root-level merged node below.
+  const landedBranches = await getLandedBranches(dir, resolvedStackName);
+  const landedSet = new Set(landedBranches);
+  const landedParents = await getLandedParents(dir, resolvedStackName);
+  const matchingSet = new Set(matchingBranches);
+  for (const branch of landedSet) {
+    mergedFlags.set(branch, true);
+    const recordedParent = landedParents.get(branch);
+    if (recordedParent !== undefined && !branchParents.has(branch)) {
+      branchParents.set(branch, recordedParent);
+    }
+  }
 
   // Build parent -> children map
   const childrenMap = new Map<string, string[]>();
@@ -638,7 +763,9 @@ export async function getStackTree(
     siblings.sort();
   }
 
-  // Recursively build StackNode from a branch name
+  // Recursively build StackNode from a branch name. Tombstones read their
+  // parent from `branchParents` (which is seeded from landed-parent for
+  // branches whose live config was wiped on `branch -D`).
   const buildNode = (branch: string): StackNode => {
     const children = (childrenMap.get(branch) ?? []).map(buildNode);
     return {
@@ -650,35 +777,118 @@ export async function getStackTree(
     };
   };
 
-  // Roots are branches whose parent is the base branch
+  // Roots include live branches rooted at `baseBranch` plus any tombstone
+  // whose recorded parent is the base branch. `childrenMap.get(baseBranch)`
+  // already covers both when landed-parent has been seeded above.
   const rootBranches = childrenMap.get(baseBranch) ?? [];
   const roots = rootBranches.map(buildNode);
 
-  // Synthesize merged root nodes from stack-level tombstones.
-  // Skip any tombstone that already appears in the live tree (dedup guard).
-  // Use matchingBranches (all stack-name holders), not just tree nodes, so
-  // partially-configured live branches still suppress tombstones.
-  const liveBranches = new Set(matchingBranches);
-  const landedBranches = await getLandedBranches(dir, resolvedStackName);
-  const tombstoneRoots: StackNode[] = [];
-  for (const branch of landedBranches) {
-    if (liveBranches.has(branch)) continue;
-    tombstoneRoots.push({
+  // Legacy / post-split fallback: tombstones recorded in landed-branches
+  // with no parent record and no branch-level stack-name entry get
+  // synthesized as root-level merged nodes so nav and status can still
+  // render them. If a live descendant still references the legacy
+  // tombstone via its stack-parent (manual-edit / partial-write scenarios
+  // that a strict schema would disallow), attach that subtree to the
+  // synthesized tombstone so the descendant remains visible rather than
+  // being silently dropped.
+  const placedBranches = new Set<string>();
+  const collect = (node: StackNode): void => {
+    placedBranches.add(node.branch);
+    for (const c of node.children) collect(c);
+  };
+  for (const r of roots) collect(r);
+
+  const legacyTombstones: StackNode[] = [];
+  for (const branch of landedSet) {
+    if (placedBranches.has(branch)) continue;
+    if (matchingSet.has(branch)) continue;
+    const orphanChildren = (childrenMap.get(branch) ?? [])
+      .filter((c) => !placedBranches.has(c))
+      .map(buildNode);
+    for (const c of orphanChildren) collect(c);
+    legacyTombstones.push({
       branch,
       stackName: resolvedStackName,
       parent: baseBranch,
-      children: [],
+      children: orphanChildren,
       merged: true,
     });
   }
-  tombstoneRoots.sort((a, b) => a.branch.localeCompare(b.branch));
+  legacyTombstones.sort((a, b) => a.branch.localeCompare(b.branch));
 
   return {
     stackName: resolvedStackName,
     baseBranch,
     mergeStrategy,
-    roots: [...tombstoneRoots, ...roots],
+    roots: [...legacyTombstones, ...roots],
   };
+}
+
+/**
+ * Build a branch-name -> StackNode lookup for constant-time node queries.
+ * Callers that perform many `effectiveParent` / `findNode` lookups over
+ * the same tree should build the index once and reuse it rather than
+ * letting each call perform an O(N) DFS.
+ */
+export function indexTree(tree: StackTree): Map<string, StackNode> {
+  const index = new Map<string, StackNode>();
+  for (const n of getAllNodes(tree)) index.set(n.branch, n);
+  return index;
+}
+
+// Per-tree memoized index. Stored via WeakMap so the map is released when
+// the tree is garbage collected, and never mutated through the public
+// StackTree shape (keeps the tree a plain data struct for tests).
+const TREE_INDEX = new WeakMap<StackTree, Map<string, StackNode>>();
+function lookup(tree: StackTree, branch: string): StackNode | undefined {
+  let idx = TREE_INDEX.get(tree);
+  if (!idx) {
+    idx = indexTree(tree);
+    TREE_INDEX.set(tree, idx);
+  }
+  return idx.get(branch);
+}
+
+/**
+ * Walk up `node.parent` through tombstone (merged) ancestors until reaching
+ * a live branch or the base branch. Returns the first non-tombstone ancestor
+ * branch name, or the tree's base branch if the chain is entirely tombstones
+ * (or the parent cannot be resolved in the tree).
+ *
+ * `reparented` is an optional per-branch override: when present, the override
+ * short-circuits the walk. Sync uses this to feed a pre-execution projection
+ * into planners that read an un-tombstoned tree.
+ *
+ * Internally this uses a per-tree lookup table memoized on the input `tree`
+ * object, so repeated calls with the same tree share a single O(N) index
+ * build rather than doing an O(N) DFS per walk step.
+ */
+export function effectiveParent(
+  tree: StackTree,
+  node: StackNode,
+  reparented?: Record<string, string>,
+): string {
+  const override = reparented?.[node.branch];
+  if (override !== undefined) return override;
+  let p = node.parent;
+  while (p !== tree.baseBranch) {
+    const parentNode = lookup(tree, p);
+    if (!parentNode) return tree.baseBranch;
+    if (!parentNode.merged) return parentNode.branch;
+    p = parentNode.parent;
+  }
+  return tree.baseBranch;
+}
+
+/**
+ * Live branches whose effective parent (after walking past tombstones) is
+ * the base branch. Used to detect multi-subtree situations after a land,
+ * where a single merged root may leave several independent live branches.
+ */
+export function getLiveSubtreeRoots(tree: StackTree): StackNode[] {
+  return getAllNodes(tree)
+    .filter((n) => !n.merged)
+    .filter((n) => effectiveParent(tree, n) === tree.baseBranch);
 }
 
 /** Depth-first pre-order traversal of a single node. */
@@ -791,20 +1001,10 @@ export function findNode(
   tree: StackTree,
   branch: string,
 ): StackNode | undefined {
-  const search = (node: StackNode): StackNode | undefined => {
-    if (node.branch === branch) return node;
-    for (const child of node.children) {
-      const found = search(child);
-      if (found) return found;
-    }
-    return undefined;
-  };
-
-  for (const root of tree.roots) {
-    const found = search(root);
-    if (found) return found;
-  }
-  return undefined;
+  // Reuse the per-tree WeakMap index so repeated lookups over the same
+  // tree are O(1) after the first O(N) build, instead of paying O(N) DFS
+  // on every call.
+  return lookup(tree, branch);
 }
 
 /** Validate a tree's metadata consistency.
@@ -866,9 +1066,11 @@ export async function validateStackTree(
 
 /** Enumerate all configured stack names in the repo, sorted alphabetically. */
 export async function listAllStacks(dir: string): Promise<string[]> {
-  const lines = await gitConfigGetRegexp(dir, "^branch\\..*\\.stack-name$");
+  const branchConfig = await readAllBranchStackConfig(dir);
   const set = new Set<string>();
-  for (const [, value] of lines) set.add(value);
+  for (const entry of branchConfig.values()) {
+    if (entry.stackName) set.add(entry.stackName);
+  }
   return [...set].sort();
 }
 
@@ -878,13 +1080,21 @@ export async function listAllStacks(dir: string): Promise<string[]> {
  * skipped silently; only successfully loaded trees are returned. Callers
  * that need to distinguish "stack is broken" from "stack does not exist"
  * should call `getStackTree` directly per name from `listAllStacks`.
+ *
+ * One `branch.*.stack-*` config scan is shared across every per-stack
+ * `getStackTree` call so loading M stacks pays O(1) config-scan forks
+ * instead of O(M).
  */
 export async function getAllStackTrees(dir: string): Promise<StackTree[]> {
-  const names = await listAllStacks(dir);
+  const branchConfig = await readAllBranchStackConfig(dir);
+  const names = new Set<string>();
+  for (const entry of branchConfig.values()) {
+    if (entry.stackName) names.add(entry.stackName);
+  }
   const results = await Promise.all(
-    names.map(async (name) => {
+    [...names].sort().map(async (name) => {
       try {
-        return await getStackTree(dir, name);
+        return await getStackTree(dir, name, branchConfig);
       } catch {
         return undefined;
       }

@@ -22,6 +22,7 @@
     "jsr:@std/path@^1.1.4": "1.1.4",
     "jsr:@std/testing@1": "1.0.17",
     "jsr:@std/text@^1.0.17": "1.0.17",
+    "npm:dataloader@^2.2.3": "2.2.3",
     "npm:ink-testing-library@4": "4.0.0",
     "npm:ink@^5.0.1": "5.2.1_react@18.3.1",
     "npm:react@^18.3.1": "18.3.1",
@@ -170,6 +171,9 @@
     },
     "convert-to-spaces@2.0.1": {
       "integrity": "sha512-rcQ1bsQO9799wq24uE5AM2tAILy4gXGIK/njFWcVQkGNZ96edlpY+A7bjwvzjYvLDyzmG1MmMLZhpcsb+klNMQ=="
+    },
+    "dataloader@2.2.3": {
+      "integrity": "sha512-y2krtASINtPFS1rSDjacrFgn1dcUuoREVabwlOGOe4SdxenREqwjwjElAdwvbGM7kgZz9a3KVicWR7vcz8rnzA=="
     },
     "emoji-regex@10.6.0": {
       "integrity": "sha512-toUI84YS5YmxW219erniWD0CIVOo46xGKColeNQRgOzDorgBi1v4D71/OFzgD9GO2UGKIv1C3Sp8DAn0+j5w7A=="
@@ -391,6 +395,7 @@
       "jsr:@std/fmt@1",
       "jsr:@std/path@1",
       "jsr:@std/testing@1",
+      "npm:dataloader@^2.2.3",
       "npm:ink-testing-library@4",
       "npm:ink@^5.0.1",
       "npm:react@^18.3.1"

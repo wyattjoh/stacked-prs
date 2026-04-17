@@ -189,6 +189,7 @@ stack.<stack-name>.base-branch     # Base branch name, e.g. "main" or "master"
 stack.<stack-name>.resume-state    # Transient JSON for in-progress restack recovery
 stack.<stack-name>.landed-branches # Multi-value: branch names landed from this stack
 stack.<stack-name>.landed-pr       # Multi-value: "<branch>:<pr-number>" per landed branch, written at land time so nav comments can keep rendering merged PRs after the branch is deleted
+stack.<stack-name>.landed-parent   # Multi-value: "<branch>:<parent-branch>" per landed branch, written at land time so the tombstone keeps its structural position in the tree after `git branch -D` wipes its live branch-level config
 stack.<stack-name>.color           # (Optional) hex color override for TUI and clean output
 stack.default-merge-strategy       # (Optional) default for init/import/auto-init create; "merge" or "squash". Falls back to "squash" when unset. Read via getDefaultMergeStrategy(). Respects --local/--global/--system precedence.
 ```

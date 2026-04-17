@@ -206,11 +206,13 @@ import {
 import { gh, resolveRepo } from "../lib/gh.ts";
 import {
   addLandedBranch,
+  addLandedParent,
   addLandedPr,
   clearStackConfig,
   detachHeadIfIn,
   getAllNodes,
   getConflictFiles,
+  getLiveSubtreeRoots,
   getStackTree,
   removeStackBranch,
   resumeStore,
@@ -340,7 +342,9 @@ export function classifyLandCase(
     return "all-merged";
   }
 
-  const liveRoots = tree.roots.filter((n) => !n.merged);
+  // A "live root" is a live branch whose effective parent (after walking up
+  // through any existing tombstones) is the base branch.
+  const liveRoots = getLiveSubtreeRoots(tree);
   if (liveRoots.length !== 1) {
     throw new UnsupportedLandShape(
       "Cannot land a multi-root stack unless every branch is merged",
@@ -453,8 +457,12 @@ export async function planLand(
 ): Promise<LandPlan> {
   const tree = await getStackTree(dir, stackName);
 
-  // Merged nodes are historical; exclude them from rebase/push/PR steps
-  const liveRoots = tree.roots.filter((n) => !n.merged);
+  // Live subtree roots are the branches this land operates on. Existing
+  // tombstones in the tree are historical; exclude them from rebase/push/PR
+  // steps. `getLiveSubtreeRoots` walks past tombstones so a live branch
+  // nested under a previously-landed root is still recognised as a root
+  // of the in-flight plan.
+  const liveRoots = getLiveSubtreeRoots(tree);
   const liveTree: StackTree = { ...tree, roots: liveRoots };
 
   const landCase = classifyLandCase(tree, prStateByBranch);
@@ -948,25 +956,25 @@ async function executeCaseA(
 
   await executeCaseAPrCloses(dir, plan, hooks, state);
 
-  // Nav comment refresh. Computed after PR retargets so the rendered
-  // markdown reflects the post-land tree shape. Failures are non-fatal:
-  // the stack has already landed, rolling back nav is not meaningful.
-  emit(hooks, { kind: "nav" }, "running");
-  try {
-    const { owner, repo } = await resolveRepo();
-    const navActions = await buildNavPlan(dir, plan.stackName, owner, repo);
-    await applyNavPlan(owner, repo, navActions);
-    emit(hooks, { kind: "nav" }, navActions.length === 0 ? "skipped" : "ok");
-  } catch (err) {
-    emit(hooks, { kind: "nav" }, "failed", (err as Error).message);
-  }
-
-  // Config cleanup: reparent children of the merged root to the base branch.
+  // Config cleanup: tombstone the merged root so future reads render it
+  // with its live descendants nested beneath. All three tombstone records
+  // (`landed-branches` + `landed-parent` + `landed-pr`) commit together so
+  // a crash mid-call leaves the tombstone fully present or fully absent --
+  // never in the degenerate "no PR number" shape that collapses the nav
+  // tree back to flat siblings.
   emit(hooks, { kind: "config-cleanup" }, "running");
   const mergedRoot = plan.branchesToDelete[0];
+  const prByBranch = new Map(
+    plan.landedPrNumbers.map((e) => [e.branch, e.prNumber]),
+  );
   let cleanupResult;
   try {
-    cleanupResult = await configLandCleanup(dir, plan.stackName, mergedRoot);
+    cleanupResult = await configLandCleanup(
+      dir,
+      plan.stackName,
+      mergedRoot,
+      prByBranch.get(mergedRoot),
+    );
     state.configCleanupDone = true;
     emit(hooks, { kind: "config-cleanup" }, "ok");
   } catch (err) {
@@ -987,27 +995,48 @@ async function executeCaseA(
     );
   }
 
+  // Nav comment refresh. Runs AFTER configLandCleanup so buildNavPlan
+  // sees the tombstoned merged root as a structural merged node with its
+  // live descendants nested beneath, instead of seeing it as a live
+  // PR-less branch (which would collapse the tree back to flat siblings).
+  // Failures are non-fatal: the stack has already landed, rolling back
+  // nav is not meaningful.
+  emit(hooks, { kind: "nav" }, "running");
+  try {
+    const { owner, repo } = await resolveRepo();
+    const navActions = await buildNavPlan(dir, plan.stackName, owner, repo);
+    await applyNavPlan(owner, repo, navActions);
+    emit(hooks, { kind: "nav" }, navActions.length === 0 ? "skipped" : "ok");
+  } catch (err) {
+    emit(hooks, { kind: "nav" }, "failed", (err as Error).message);
+  }
+
   // Delete the merged root and any auto-merged branches. Deletion failures
   // are best-effort: the stack has already landed at this point.
   const toDelete = [mergedRoot, ...state.autoMerged];
-  const prByBranch = new Map(
-    plan.landedPrNumbers.map((e) => [e.branch, e.prNumber]),
-  );
+  const snapByBranch = new Map(plan.snapshot.map((s) => [s.branch, s]));
   await detachHeadIfIn(dir, toDelete);
   for (const branch of toDelete) {
     emit(hooks, { kind: "delete", branch }, "running");
 
     // Tombstone first so a crash between ref delete and config writes
-    // cannot silently drop the tombstone. Both writes are idempotent:
-    // addLandedBranch de-dupes, configLandCleanup already tombstoned
-    // mergedRoot earlier.
-    await addLandedBranch(dir, plan.stackName, branch);
-    const prNumber = prByBranch.get(branch);
-    if (prNumber !== undefined) {
-      await addLandedPr(dir, plan.stackName, branch, prNumber);
-    }
+    // cannot silently drop the tombstone. All writes are idempotent:
+    // addLandedBranch / addLandedPr / addLandedParent de-dupe, and
+    // configLandCleanup already tombstoned mergedRoot earlier. The
+    // landed-parent record survives `git branch -D` wiping the branch's
+    // live config so the tombstone remains a structural node. mergedRoot
+    // was already fully tombstoned by configLandCleanup and is skipped
+    // here so this loop only needs to handle auto-merged branches.
     if (branch !== mergedRoot) {
-      await removeStackBranch(dir, branch);
+      await addLandedBranch(dir, plan.stackName, branch);
+      const prNumber = prByBranch.get(branch);
+      if (prNumber !== undefined) {
+        await addLandedPr(dir, plan.stackName, branch, prNumber);
+      }
+      const recordedParent = snapByBranch.get(branch)?.recordedParent;
+      if (recordedParent !== undefined) {
+        await addLandedParent(dir, plan.stackName, branch, recordedParent);
+      }
     }
 
     const outcome = await deleteBranchIfExists(dir, branch);
@@ -1455,6 +1484,26 @@ export async function executeLandFromCli(
     await writeLandResumeState(dir, stackName, completed);
   }
 
+  const mergedRoot = plan.branchesToDelete[0];
+  const prByBranch = new Map(
+    plan.landedPrNumbers.map((e) => [e.branch, e.prNumber]),
+  );
+
+  if (!completed.configCleanupDone) {
+    await configLandCleanup(
+      dir,
+      stackName,
+      mergedRoot,
+      prByBranch.get(mergedRoot),
+    );
+    completed.configCleanupDone = true;
+    await writeLandResumeState(dir, stackName, completed);
+  }
+
+  // Nav refresh runs AFTER configLandCleanup so buildNavPlan sees the
+  // tombstoned merged root as a merged structural node with its live
+  // descendants nested beneath, instead of rendering flat siblings when
+  // the live-but-PR-less mergedRoot is skipped.
   if (!completed.navDone) {
     const { owner, repo } = await resolveRepo();
     const navActions = await buildNavPlan(dir, stackName, owner, repo);
@@ -1463,33 +1512,31 @@ export async function executeLandFromCli(
     await writeLandResumeState(dir, stackName, completed);
   }
 
-  if (!completed.configCleanupDone) {
-    const mergedRoot = plan.branchesToDelete[0];
-    await configLandCleanup(dir, stackName, mergedRoot);
-    completed.configCleanupDone = true;
-    await writeLandResumeState(dir, stackName, completed);
-  }
-
-  const mergedRoot = plan.branchesToDelete[0];
   const toDelete = [...plan.branchesToDelete, ...completed.autoMerged];
-  const prByBranch = new Map(
-    plan.landedPrNumbers.map((e) => [e.branch, e.prNumber]),
-  );
+  const snapByBranch = new Map(plan.snapshot.map((s) => [s.branch, s]));
   await detachHeadIfIn(dir, toDelete);
   for (const branch of toDelete) {
     if (completed.deletedBranches.includes(branch)) continue;
 
     // Tombstone first so a crash between the ref delete and the config
-    // writes cannot silently drop the tombstone. Both writes are
-    // idempotent: addLandedBranch is multi-value but de-dupes, and
-    // configLandCleanup already tombstoned mergedRoot earlier.
-    await addLandedBranch(dir, stackName, branch);
-    const prNumber = prByBranch.get(branch);
-    if (prNumber !== undefined) {
-      await addLandedPr(dir, stackName, branch, prNumber);
-    }
+    // writes cannot silently drop the tombstone. All writes are
+    // idempotent: addLandedBranch / addLandedPr / addLandedParent
+    // de-dupe, and configLandCleanup already tombstoned mergedRoot as
+    // an atomic unit earlier. The landed-parent record survives
+    // `git branch -D` wiping the branch's live config so the tombstone
+    // remains a structural node in the tree. mergedRoot's tombstone is
+    // fully written by configLandCleanup; skip the per-branch loop for
+    // it so we only handle auto-merged branches here.
     if (branch !== mergedRoot) {
-      await removeStackBranch(dir, branch);
+      await addLandedBranch(dir, stackName, branch);
+      const prNumber = prByBranch.get(branch);
+      if (prNumber !== undefined) {
+        await addLandedPr(dir, stackName, branch, prNumber);
+      }
+      const recordedParent = snapByBranch.get(branch)?.recordedParent;
+      if (recordedParent !== undefined) {
+        await addLandedParent(dir, stackName, branch, recordedParent);
+      }
     }
 
     const outcome = await deleteBranchIfExists(dir, branch);

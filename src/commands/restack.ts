@@ -1,4 +1,5 @@
 import {
+  effectiveParent,
   findNode,
   getConflictFiles,
   getStackTree,
@@ -186,14 +187,6 @@ function resolveTargetFor(parent: string, tree: StackTree): string {
   return parent;
 }
 
-/** Effective parent for a node under the current options (reparent overrides). */
-function effectiveParent(
-  node: StackNode,
-  reparented: Record<string, string> | undefined,
-): string {
-  return reparented?.[node.branch] ?? node.parent;
-}
-
 /**
  * Return branch names from `branches` whose local refs do not exist.
  * Uses `refs/heads/<branch>` so the probe is unambiguous (it won't match a
@@ -261,7 +254,7 @@ export async function planRestack(
   // accordingly.
   const oldParentSha = new Map<string, string>();
   for (const node of nodes) {
-    const parent = effectiveParent(node, reparented);
+    const parent = effectiveParent(tree, node, reparented);
     const sha = await revParse(dir, parent);
     oldParentSha.set(node.branch, sha);
   }
@@ -273,7 +266,7 @@ export async function planRestack(
   const plannedBranches = new Set<string>();
   const rebases: RebasePlan[] = [];
   for (const node of nodes) {
-    const parent = effectiveParent(node, reparented);
+    const parent = effectiveParent(tree, node, reparented);
     const target = resolveTargetFor(parent, tree);
     const branchSha = await revParse(dir, node.branch);
 

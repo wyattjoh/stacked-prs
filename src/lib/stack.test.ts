@@ -3,14 +3,18 @@ import { expect } from "@std/expect";
 import { addBranch, createTestRepo, runGit } from "./testdata/helpers.ts";
 import {
   addLandedBranch,
+  addLandedParent,
   addLandedPr,
+  effectiveParent,
   findNode,
   getAllNodes,
   getAllStackTrees,
   getBaseBranch,
   getLandedBranches,
+  getLandedParents,
   getLandedPrs,
   getLeaves,
+  getLiveSubtreeRoots,
   getMergeStrategy,
   getPathTo,
   getStackTree,
@@ -814,36 +818,68 @@ describe("addLandedBranch", () => {
     }
   });
 
-  test("getStackTree deduplicates: live branch takes precedence over tombstone", async () => {
+  test("legacy tombstone with live descendant attaches the descendant under the synthesized root", async () => {
+    // Regression for a manual-edit / partial-write scenario: the
+    // tombstone has only a `landed-branches` record (no branch-level
+    // config, no `landed-parent`), but a live descendant still points at
+    // it via stack-parent. Without the attachment fix the live branch
+    // would be silently dropped from the tree.
+    await using repo = await createTestRepo();
+    {
+      await addBranch(repo.dir, "feature/b", "main");
+      await setStackNode(repo.dir, "feature/b", "my-stack", "feature/a");
+      await setBaseBranch(repo.dir, "my-stack", "main");
+
+      // No branch-level config for feature/a, no landed-parent either.
+      await addLandedBranch(repo.dir, "my-stack", "feature/a");
+
+      const tree = await getStackTree(repo.dir, "my-stack");
+      expect(tree.roots).toHaveLength(1);
+      const [root] = tree.roots;
+      expect(root.branch).toBe("feature/a");
+      expect(root.merged).toBe(true);
+      expect(root.children.map((c) => c.branch)).toEqual(["feature/b"]);
+      expect(root.children[0].merged).toBeFalsy();
+    }
+  });
+
+  test("getStackTree deduplicates a tombstoned branch that still has live config", async () => {
     await using repo = await createTestRepo();
     {
       await addBranch(repo.dir, "feature/a", "main");
       await setStackNode(repo.dir, "feature/a", "my-stack", "main");
       await setBaseBranch(repo.dir, "my-stack", "main");
 
-      // Add tombstone for a branch that still exists as a live node
+      // Record the branch in landed-branches while its stack-name config
+      // is still present. This is the normal tombstone shape in the new
+      // model: branch-level config is preserved so the tombstone remains
+      // a structural node rather than being synthesized as a legacy root.
       await addLandedBranch(repo.dir, "my-stack", "feature/a");
 
       const tree = await getStackTree(repo.dir, "my-stack");
       const nodes = getAllNodes(tree);
 
-      // Should appear exactly once (live version, not merged)
       const matching = nodes.filter((n) => n.branch === "feature/a");
       expect(matching).toHaveLength(1);
-      expect(matching[0].merged).toBeUndefined();
+      // Marked merged because it's recorded as a tombstone.
+      expect(matching[0].merged).toBe(true);
+      expect(matching[0].parent).toBe("main");
     }
   });
 
-  test("getStackTree deduplicates: live non-root branch also present as tombstone", async () => {
+  test("getStackTree shows tombstoned non-root branches with their live children nested", async () => {
     await using repo = await createTestRepo();
     {
       await addBranch(repo.dir, "feature/a", "main");
       await addBranch(repo.dir, "feature/b", "feature/a");
+      await addBranch(repo.dir, "feature/c", "feature/b");
       await setStackNode(repo.dir, "feature/a", "my-stack", "main");
       await setStackNode(repo.dir, "feature/b", "my-stack", "feature/a");
+      await setStackNode(repo.dir, "feature/c", "my-stack", "feature/b");
       await setBaseBranch(repo.dir, "my-stack", "main");
 
-      // Tombstone a live non-root branch
+      // Tombstone a non-root branch; its live child should stay nested
+      // under it rather than being promoted or duplicated.
       await addLandedBranch(repo.dir, "my-stack", "feature/b");
 
       const tree = await getStackTree(repo.dir, "my-stack");
@@ -851,12 +887,15 @@ describe("addLandedBranch", () => {
         n.branch === "feature/b"
       );
       expect(matching).toHaveLength(1);
-      // Appears as the live child of feature/a, not as a merged root
-      expect(matching[0].merged).toBeUndefined();
+      expect(matching[0].merged).toBe(true);
       expect(matching[0].parent).toBe("feature/a");
-      // No tombstone root should appear for feature/b
+      // No duplicate tombstone root should appear for feature/b.
       const rootB = tree.roots.find((n) => n.branch === "feature/b");
       expect(rootB).toBeUndefined();
+      // feature/c keeps pointing at feature/b (the tombstone).
+      const nodeC = getAllNodes(tree).find((n) => n.branch === "feature/c");
+      expect(nodeC?.parent).toBe("feature/b");
+      expect(nodeC?.merged).toBeFalsy();
     }
   });
 
@@ -928,5 +967,295 @@ describe("addLandedPr / getLandedPrs", () => {
       const prs = await getLandedPrs(repo.dir, "my-stack");
       expect(prs.get("feature/a")).toBe(101);
     }
+  });
+});
+
+describe("addLandedParent / getLandedParents", () => {
+  test("records and reads the parent per landed branch", async () => {
+    await using repo = await createTestRepo();
+    {
+      await setBaseBranch(repo.dir, "my-stack", "main");
+      await addLandedParent(repo.dir, "my-stack", "feature/a", "main");
+      await addLandedParent(repo.dir, "my-stack", "feature/b", "feature/a");
+
+      const parents = await getLandedParents(repo.dir, "my-stack");
+      expect(parents.get("feature/a")).toBe("main");
+      expect(parents.get("feature/b")).toBe("feature/a");
+    }
+  });
+
+  test("returns an empty map when no parents are recorded", async () => {
+    await using repo = await createTestRepo();
+    const parents = await getLandedParents(repo.dir, "my-stack");
+    expect(parents.size).toBe(0);
+  });
+
+  test("first recorded parent wins on repeat calls", async () => {
+    await using repo = await createTestRepo();
+    {
+      await setBaseBranch(repo.dir, "my-stack", "main");
+      await addLandedParent(repo.dir, "my-stack", "feature/a", "main");
+      await addLandedParent(repo.dir, "my-stack", "feature/a", "other");
+
+      const parents = await getLandedParents(repo.dir, "my-stack");
+      expect(parents.get("feature/a")).toBe("main");
+    }
+  });
+
+  test("isolates values per stack", async () => {
+    await using repo = await createTestRepo();
+    {
+      await setBaseBranch(repo.dir, "stack-a", "main");
+      await setBaseBranch(repo.dir, "stack-b", "main");
+      await addLandedParent(repo.dir, "stack-a", "feature/x", "main");
+      await addLandedParent(repo.dir, "stack-b", "feature/y", "main");
+
+      const a = await getLandedParents(repo.dir, "stack-a");
+      const b = await getLandedParents(repo.dir, "stack-b");
+      expect(a.get("feature/x")).toBe("main");
+      expect(a.get("feature/y")).toBeUndefined();
+      expect(b.get("feature/y")).toBe("main");
+    }
+  });
+
+  test("survives a subsequent `git branch -D`", async () => {
+    await using repo = await createTestRepo();
+    {
+      await addBranch(repo.dir, "feature/a", "main");
+      await setBaseBranch(repo.dir, "my-stack", "main");
+      await addLandedParent(repo.dir, "my-stack", "feature/a", "main");
+
+      await runGit(repo.dir, "checkout", "main");
+      await runGit(repo.dir, "branch", "-D", "feature/a");
+
+      const parents = await getLandedParents(repo.dir, "my-stack");
+      expect(parents.get("feature/a")).toBe("main");
+    }
+  });
+});
+
+describe("effectiveParent", () => {
+  function makeTree(
+    baseBranch: string,
+    roots: StackNode[],
+  ): StackTree {
+    return {
+      stackName: "s",
+      baseBranch,
+      mergeStrategy: undefined,
+      roots,
+    };
+  }
+
+  test("returns the raw parent for live branches rooted at base", () => {
+    const root: StackNode = {
+      branch: "feat/a",
+      stackName: "s",
+      parent: "main",
+      children: [],
+    };
+    const tree = makeTree("main", [root]);
+    expect(effectiveParent(tree, root)).toBe("main");
+  });
+
+  test("returns the raw parent for live branches nested under a live parent", () => {
+    const child: StackNode = {
+      branch: "feat/b",
+      stackName: "s",
+      parent: "feat/a",
+      children: [],
+    };
+    const root: StackNode = {
+      branch: "feat/a",
+      stackName: "s",
+      parent: "main",
+      children: [child],
+    };
+    const tree = makeTree("main", [root]);
+    expect(effectiveParent(tree, child)).toBe("feat/a");
+  });
+
+  test("walks past a merged ancestor to the next live branch", () => {
+    const grandchild: StackNode = {
+      branch: "feat/c",
+      stackName: "s",
+      parent: "feat/b",
+      children: [],
+    };
+    const child: StackNode = {
+      branch: "feat/b",
+      stackName: "s",
+      parent: "feat/a",
+      children: [grandchild],
+      merged: true,
+    };
+    const root: StackNode = {
+      branch: "feat/a",
+      stackName: "s",
+      parent: "main",
+      children: [child],
+    };
+    const tree = makeTree("main", [root]);
+    expect(effectiveParent(tree, grandchild)).toBe("feat/a");
+  });
+
+  test("returns the base branch when the entire ancestor chain is merged", () => {
+    const live: StackNode = {
+      branch: "feat/b",
+      stackName: "s",
+      parent: "feat/a",
+      children: [],
+    };
+    const tombstone: StackNode = {
+      branch: "feat/a",
+      stackName: "s",
+      parent: "main",
+      children: [live],
+      merged: true,
+    };
+    const tree = makeTree("main", [tombstone]);
+    expect(effectiveParent(tree, live)).toBe("main");
+  });
+
+  test("explicit reparent overrides the walk", () => {
+    const child: StackNode = {
+      branch: "feat/b",
+      stackName: "s",
+      parent: "feat/a",
+      children: [],
+    };
+    const root: StackNode = {
+      branch: "feat/a",
+      stackName: "s",
+      parent: "main",
+      children: [child],
+    };
+    const tree = makeTree("main", [root]);
+    expect(effectiveParent(tree, child, { "feat/b": "main" })).toBe("main");
+  });
+
+  test("returns base when the parent branch is missing from the tree", () => {
+    const orphan: StackNode = {
+      branch: "feat/b",
+      stackName: "s",
+      parent: "feat/ghost",
+      children: [],
+    };
+    const tree = makeTree("main", [orphan]);
+    expect(effectiveParent(tree, orphan)).toBe("main");
+  });
+});
+
+describe("getLiveSubtreeRoots", () => {
+  function makeTree(
+    baseBranch: string,
+    roots: StackNode[],
+  ): StackTree {
+    return {
+      stackName: "s",
+      baseBranch,
+      mergeStrategy: undefined,
+      roots,
+    };
+  }
+
+  test("returns a single live root for a simple linear stack", () => {
+    const leaf: StackNode = {
+      branch: "feat/b",
+      stackName: "s",
+      parent: "feat/a",
+      children: [],
+    };
+    const root: StackNode = {
+      branch: "feat/a",
+      stackName: "s",
+      parent: "main",
+      children: [leaf],
+    };
+    const tree = makeTree("main", [root]);
+    const tops = getLiveSubtreeRoots(tree);
+    expect(tops.map((n) => n.branch)).toEqual(["feat/a"]);
+  });
+
+  test("excludes merged nodes from the result", () => {
+    const live: StackNode = {
+      branch: "feat/b",
+      stackName: "s",
+      parent: "feat/a",
+      children: [],
+    };
+    const merged: StackNode = {
+      branch: "feat/a",
+      stackName: "s",
+      parent: "main",
+      children: [live],
+      merged: true,
+    };
+    const tree = makeTree("main", [merged]);
+    const tops = getLiveSubtreeRoots(tree);
+    // feat/b's effective parent walks past feat/a to main.
+    expect(tops.map((n) => n.branch)).toEqual(["feat/b"]);
+  });
+
+  test("returns every live branch that sits directly under the base branch", () => {
+    const a: StackNode = {
+      branch: "feat/a",
+      stackName: "s",
+      parent: "main",
+      children: [],
+    };
+    const b: StackNode = {
+      branch: "feat/b",
+      stackName: "s",
+      parent: "main",
+      children: [],
+    };
+    const tree = makeTree("main", [a, b]);
+    const tops = getLiveSubtreeRoots(tree);
+    expect(tops.map((n) => n.branch).sort()).toEqual(["feat/a", "feat/b"]);
+  });
+
+  test("returns multiple live subtree roots that share a tombstoned parent", () => {
+    const leftLive: StackNode = {
+      branch: "feat/b",
+      stackName: "s",
+      parent: "feat/a",
+      children: [],
+    };
+    const rightLive: StackNode = {
+      branch: "feat/c",
+      stackName: "s",
+      parent: "feat/a",
+      children: [],
+    };
+    const merged: StackNode = {
+      branch: "feat/a",
+      stackName: "s",
+      parent: "main",
+      children: [leftLive, rightLive],
+      merged: true,
+    };
+    const tree = makeTree("main", [merged]);
+    const tops = getLiveSubtreeRoots(tree);
+    expect(tops.map((n) => n.branch).sort()).toEqual(["feat/b", "feat/c"]);
+  });
+
+  test("returns an empty list when every node is merged", () => {
+    const child: StackNode = {
+      branch: "feat/b",
+      stackName: "s",
+      parent: "feat/a",
+      children: [],
+      merged: true,
+    };
+    const root: StackNode = {
+      branch: "feat/a",
+      stackName: "s",
+      parent: "main",
+      children: [child],
+      merged: true,
+    };
+    const tree = makeTree("main", [root]);
+    expect(getLiveSubtreeRoots(tree)).toEqual([]);
   });
 });

@@ -287,13 +287,16 @@ describe("config", () => {
       expect(result.removed).toBe("feature/a");
       expect(result.splitInto).toHaveLength(0);
 
-      // Stack has 3 nodes: feature/a (merged), feature/b, feature/c
+      // Stack has 3 nodes: feature/a (merged), feature/b (live, nested
+      // under the tombstone), feature/c (live, nested under feature/b).
       const tree = await getStackTree(repo.dir, "my-stack");
       const nodes = getAllNodes(tree);
       expect(nodes).toHaveLength(3);
       const byBranch = Object.fromEntries(nodes.map((n) => [n.branch, n]));
       expect(byBranch["feature/a"].merged).toBe(true);
-      expect(byBranch["feature/b"].parent).toBe("main");
+      // Tombstone preserves the structural link: feature/b stays pointing
+      // at the tombstoned feature/a so nav rendering keeps the hierarchy.
+      expect(byBranch["feature/b"].parent).toBe("feature/a");
       expect(byBranch["feature/c"].parent).toBe("feature/b");
     });
 
@@ -335,10 +338,11 @@ describe("config", () => {
       }
     });
 
-    test("reparents direct children of landed root to base branch", async () => {
+    test("preserves children as structural descendants of the tombstone", async () => {
       await using repo = await createTestRepo();
       // Linear: main -> feature/a -> feature/b
-      // Land feature/a (marked merged); feature/b reparented to main
+      // Land feature/a; feature/b stays pointing at the tombstone so nav
+      // comments show the inherited graph shape.
       await addBranch(repo.dir, "feature/a", "main");
       await addBranch(repo.dir, "feature/b", "feature/a");
 
@@ -355,13 +359,16 @@ describe("config", () => {
       expect(result.removed).toBe("feature/a");
       expect(result.splitInto).toHaveLength(0);
 
-      // Both nodes remain: feature/a (merged root) and feature/b (live root)
+      // One root (the tombstone) with feature/b nested beneath it.
       const tree = await getStackTree(repo.dir, "my-stack");
-      expect(tree.roots).toHaveLength(2);
-      const liveRoots = tree.roots.filter((n) => !n.merged);
-      expect(liveRoots).toHaveLength(1);
-      expect(liveRoots[0].branch).toBe("feature/b");
-      expect(liveRoots[0].parent).toBe("main");
+      expect(tree.roots).toHaveLength(1);
+      const [root] = tree.roots;
+      expect(root.branch).toBe("feature/a");
+      expect(root.merged).toBe(true);
+      expect(root.children).toHaveLength(1);
+      expect(root.children[0].branch).toBe("feature/b");
+      expect(root.children[0].merged).toBeFalsy();
+      expect(root.children[0].parent).toBe("feature/a");
     });
 
     test("split-triggering land: each new split sees the landed branch as tombstone", async () => {
@@ -386,6 +393,7 @@ describe("config", () => {
       expect(stackNames).toContain("c");
 
       // Each split stack's tree must include feature/a as a merged root
+      // with its own live child nested beneath it.
       for (const name of stackNames) {
         const tree = await getStackTree(repo.dir, name);
         const tombstoneA = tree.roots.find((n) =>
@@ -393,7 +401,10 @@ describe("config", () => {
         );
         expect(tombstoneA).toBeDefined();
         expect(tombstoneA!.parent).toBe("main");
-        expect(tombstoneA!.children).toEqual([]);
+        expect(tombstoneA!.children.map((c) => c.branch)).toEqual([
+          `feature/${name}`,
+        ]);
+        expect(tombstoneA!.children[0].merged).toBeFalsy();
       }
     });
   });
@@ -418,13 +429,15 @@ describe("config", () => {
       );
       expect(stdout).toBe("feature/a");
 
-      // feature/b must have been reparented to main
+      // feature/b keeps pointing at the tombstoned parent so the tree
+      // renders feature/a -> feature/b after land.
       const tree = await getStackTree(repo.dir, "my-stack");
-      const nodeB = tree.roots.find((n) =>
-        n.branch === "feature/b" && !n.merged
-      );
-      expect(nodeB).toBeDefined();
-      expect(nodeB!.parent).toBe("main");
+      expect(tree.roots).toHaveLength(1);
+      const [root] = tree.roots;
+      expect(root.branch).toBe("feature/a");
+      expect(root.merged).toBe(true);
+      expect(root.children.map((c) => c.branch)).toEqual(["feature/b"]);
+      expect(root.children[0].merged).toBeFalsy();
     });
 
     test("does not split when only one live root remains after landing", async () => {
