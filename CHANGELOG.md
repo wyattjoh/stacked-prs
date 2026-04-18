@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.2.0](https://github.com/wyattjoh/stacked-prs/compare/stacked-prs-v2.1.0...stacked-prs-v2.2.0) (2026-04-18)
+
+
+### Features
+
+* **restack:** add confirmation gate and HEAD restore ([5abfe4e](https://github.com/wyattjoh/stacked-prs/commit/5abfe4e62b3f3b453b0f5c615e12acef4e161fcc))
+
 ## [2.1.0](https://github.com/wyattjoh/stacked-prs/compare/stacked-prs-v2.0.0...stacked-prs-v2.1.0) (2026-04-17)
 
 
