@@ -97,6 +97,12 @@ interface ResumeState {
   completed: string[];
   /** Branch that was mid-rebase when the last executeRestack hit a conflict. */
   conflictedBranch?: string;
+  /**
+   * Branch HEAD was pointed at when the original walk started. Restored on
+   * successful completion (including resume) so the user is not left stranded
+   * on the last-rebased leaf. Empty string when HEAD was detached at start.
+   */
+  startBranch?: string;
 }
 
 const resumeStateFor = (dir: string, stackName: string) =>
@@ -384,6 +390,14 @@ export async function executeRestack(
     ? existingState.opts
     : opts;
 
+  // The branch HEAD was on when the original walk started. On first entry we
+  // capture it now; on resume we inherit it from the persisted state. Restored
+  // after a successful walk so the user is not stranded on the last-rebased
+  // leaf after DFS ends there. Empty string means HEAD was detached at start,
+  // in which case we leave HEAD alone on completion.
+  const startBranch = existingState?.startBranch ??
+    ((await runGitCommand(dir, "branch", "--show-current")).stdout);
+
   const makeRecovery = (): RestackResult["recovery"] => ({
     resolve: "git add <conflicting files> && git rebase --continue",
     abort: "git rebase --abort",
@@ -458,6 +472,7 @@ export async function executeRestack(
         branchTipSha: existingState.branchTipSha ?? {},
         completed: Array.from(completed),
         conflictedBranch: undefined,
+        startBranch,
       });
     }
   }
@@ -525,6 +540,7 @@ export async function executeRestack(
       oldParentSha: initialOldParent,
       branchTipSha: initialBranchTip,
       completed: [],
+      startBranch,
     });
   }
 
@@ -640,6 +656,7 @@ export async function executeRestack(
           ),
         branchTipSha: Object.fromEntries(persistedBranchTip),
         completed: Array.from(completed),
+        startBranch,
       });
       continue;
     }
@@ -669,6 +686,7 @@ export async function executeRestack(
       branchTipSha: Object.fromEntries(persistedBranchTip),
       completed: Array.from(completed),
       conflictedBranch: entry.branch,
+      startBranch,
     });
     // Intentionally do NOT abort the rebase. Leave the working tree in its
     // conflicted state so the user can resolve and `git rebase --continue`.
@@ -707,6 +725,20 @@ export async function executeRestack(
   }
 
   await clearResumeState(dir, stackName);
+
+  // Restore HEAD to where the caller started. DFS traversal naturally ends on
+  // the last-rebased leaf, and callers (Claude, subagents, shell users) expect
+  // to land back on their original branch. Skip restoration when HEAD was
+  // detached at start, when it would be a no-op, or when the branch was
+  // removed during the walk. A failed checkout is non-fatal: the walk
+  // succeeded, so report success and let the user re-check out if needed.
+  if (startBranch) {
+    const head = await runGitCommand(dir, "branch", "--show-current");
+    if (head.code === 0 && head.stdout !== startBranch) {
+      await runGitCommand(dir, "checkout", startBranch);
+    }
+  }
+
   return { ok: true, rebases: executed };
 }
 

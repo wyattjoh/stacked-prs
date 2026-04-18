@@ -539,47 +539,102 @@ await new Command()
   .option("--only <branch:string>", "Rebase only this single branch")
   .option("--resume", "Resume after resolving conflicts")
   .option("--dry-run", "Report what would happen without touching git")
+  .option("--force", "Execute without the interactive confirmation prompt")
   .option("--json", "Output as JSON")
   .action(async (options) => {
     const stackName = await resolveStackName(dir, options.stackName);
-    const result = await restack(dir, stackName, {
+    const baseOpts = {
       upstackFrom: options.upstackFrom,
       downstackFrom: options.downstackFrom,
       only: options.only,
       resume: options.resume,
-      dryRun: options.dryRun,
-    });
+    };
+
+    const iconFor = (status: string): string =>
+      status === "rebased"
+        ? "✓"
+        : status === "skipped-clean"
+        ? "·"
+        : status === "planned"
+        ? "→"
+        : status === "conflict"
+        ? "✗"
+        : "⊘";
+
+    const renderRebases = async (
+      rebases: { branch: string; status: string }[],
+    ): Promise<string> => {
+      const tree = await getStackTree(dir, stackName);
+      const statusIcons = new Map<string, string>();
+      for (const r of rebases) statusIcons.set(r.branch, iconFor(r.status));
+      return `Stack: ${stackName} (base: ${tree.baseBranch})\n` +
+        renderTree(tree, { statusIcons });
+    };
+
+    const printConflict = (
+      result: Awaited<ReturnType<typeof restack>>,
+    ): void => {
+      if (result.ok || result.error !== "conflict") return;
+      const conflictBranch = result.rebases.find((r) =>
+        r.status === "conflict"
+      )?.branch ?? "unknown";
+      console.error(`\nConflict during rebase of ${conflictBranch}`);
+      console.error("\nTo resolve:");
+      console.error(`  ${result.recovery?.resolve}`);
+      console.error(`  Then: ${result.recovery?.resume}`);
+      console.error(`  Or abort: ${result.recovery?.abort}`);
+    };
+
+    // Resume bypasses the plan-and-confirm step: the user already approved
+    // the original plan, and the resume path inside executeRestack handles
+    // state recovery without needing a fresh plan render.
+    if (options.resume) {
+      const result = await restack(dir, stackName, baseOpts);
+      if (options.json) {
+        logJson(result);
+      } else {
+        console.log(await renderRebases(result.rebases));
+        printConflict(result);
+      }
+      if (!result.ok) Deno.exit(1);
+      return;
+    }
+
+    const plan = await restack(dir, stackName, { ...baseOpts, dryRun: true });
+
+    if (options.dryRun) {
+      if (options.json) logJson(plan);
+      else console.log(await renderRebases(plan.rebases));
+      return;
+    }
+
+    if (plan.rebases.every((r) => r.status === "skipped-clean")) {
+      if (options.json) {
+        logJson({ ok: true, isNoOp: true, rebases: plan.rebases });
+      } else {
+        console.log("Stack is already fully synced. Nothing to do.");
+      }
+      return;
+    }
+
+    const planText = await renderRebases(plan.rebases);
+
+    if (
+      !(await confirmOrExit({
+        force: options.force ?? false,
+        render: () => console.log(planText),
+      }))
+    ) {
+      return;
+    }
+
+    const result = await restack(dir, stackName, baseOpts);
 
     if (options.json) {
       logJson(result);
     } else {
-      const tree = await getStackTree(dir, stackName);
-      const statusIcons = new Map<string, string>();
-      for (const r of result.rebases) {
-        const icon = r.status === "rebased"
-          ? "✓"
-          : r.status === "skipped-clean"
-          ? "·"
-          : r.status === "planned"
-          ? "→"
-          : r.status === "conflict"
-          ? "✗"
-          : "⊘";
-        statusIcons.set(r.branch, icon);
-      }
-      console.log(`Stack: ${stackName} (base: ${tree.baseBranch})`);
-      console.log(renderTree(tree, { statusIcons }));
-
-      if (!result.ok && result.error === "conflict") {
-        const conflictBranch = result.rebases.find((r) =>
-          r.status === "conflict"
-        )?.branch ?? "unknown";
-        console.error(`\nConflict during rebase of ${conflictBranch}`);
-        console.error("\nTo resolve:");
-        console.error(`  ${result.recovery?.resolve}`);
-        console.error(`  Then: ${result.recovery?.resume}`);
-        console.error(`  Or abort: ${result.recovery?.abort}`);
-      }
+      console.log(await renderRebases(result.rebases));
+      printConflict(result);
     }
 
     if (!result.ok) Deno.exit(1);

@@ -136,3 +136,23 @@ git fetch origin && git checkout <branch> && git reset --hard origin/<branch>
 ```
 
 This ensures all machines stay synchronized.
+
+### Amended parent before restack
+
+When you `git commit --amend` on a parent branch and then run `cli.ts restack`,
+the per-branch walk replays each child's commits on top of the amended parent.
+If a child's only commit is the same patch that was just folded into the amended
+parent, the replay can produce a spurious conflict because the identical change
+is being applied on top of itself.
+
+The clean recovery is to abort the rebase and fast-forward the empty child over
+the amended parent directly:
+
+```bash
+git rebase --abort
+git branch -f <child> <parent>
+```
+
+Repeat for each child whose only delta was the amended commit, then re-run
+`cli.ts restack` to handle any remaining children that still carry their own
+commits. `cli.ts verify-refs` will confirm the resulting tree is clean.

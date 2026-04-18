@@ -411,18 +411,30 @@ reorganization before reviewing the diff.
 **Flags:** `--upstack-from=<branch>`, `--downstack-from=<branch>`,
 `--only=<branch>` (default: full stack)
 
+`cli.ts restack` has three modes:
+
+- `--dry-run`: compute and print the plan without mutating anything.
+- No flags: print the plan and prompt `[y/N]` before executing.
+- `--force`: execute without the prompt.
+
+On successful completion, HEAD is restored to the branch you were on when you
+started. On conflict, HEAD stays on the conflicted branch so you can resolve.
+
 1. Run `cli.ts verify-refs --stack-name=<name>` (read-only). If it reports
    structural problems, stop. If it reports drift, remember for the plan.
 2. Run `cli.ts restack --dry-run --json --stack-name=<name> [flags]`.
 3. **No-op check:** if every entry is `skipped-clean` and verify-refs was clean,
    report "Stack is already fully synced" and stop.
 4. Collect `planned` branches from the dry-run and run `checkWorktreeSafety`. If
-   any dirty worktrees, present and stop.
+   any dirty worktrees, present and stop. (The CLI repeats this check internally
+   before touching git; this step surfaces failures earlier in the plan output.)
 5. **Present plan** (tree with old-parent to new-target, drift notes if any).
 6. **Wait for confirmation.**
-7. Run `cli.ts restack --stack-name=<name> [flags]`. On conflict, the rebase
-   stops at the first conflicted branch; resolve the files and run
-   `git rebase --continue` or `cli.ts restack --stack-name=<name> --resume`.
+7. Run `cli.ts restack --force --stack-name=<name> [flags]` to execute. On
+   conflict, the rebase stops at the first conflicted branch; resolve the files
+   and run `git rebase --continue` or
+   `cli.ts restack --stack-name=<name> --resume`. `--resume` skips the prompt
+   since the original plan was already approved.
 8. Run `cli.ts verify-refs` (informational only, do not gate; there is no push
    step). If it reports problems, print them so the user can inspect.
 
@@ -653,6 +665,7 @@ ${CLAUDE_PLUGIN_ROOT}/skills/stacked-prs/scripts/stacked-prs restack \
   [--only=<branch>] \
   [--resume] \
   [--dry-run] \
+  [--force] \
   [--json]
 ```
 
@@ -661,11 +674,18 @@ snapshots each branch's parent SHA before any mutation, and rebases each branch
 individually with an explicit `git rebase --onto` call against the new target
 and the snapshotted old-parent SHA. Root branches target `origin/<base-branch>`;
 intermediate branches target their parent's current (possibly just-rewritten)
-tip. On the first conflicted branch the walk stops and leaves git mid-rebase;
-resolve the files and run `git rebase --continue` or re-invoke with `--resume`
-to pick up the remaining branches. Pass `--dry-run` to report the plan without
-touching git (combine with `--json` for structured output). Pass `--json` for
-structured output of an executed run.
+tip. On successful completion HEAD is restored to the branch the caller started
+on so the walk does not strand the user on the last-rebased leaf. On the first
+conflicted branch the walk stops and leaves git mid-rebase with HEAD on the
+conflicted branch; resolve the files and run `git rebase --continue` or
+re-invoke with `--resume` to pick up the remaining branches.
+
+Same three-mode shape as submit/sync: `--dry-run` prints the plan without
+mutating anything (combine with `--json` for structured output); with no flags
+the CLI prints the plan and prompts `[y/N]`; `--force` skips the prompt. When
+every entry is `skipped-clean`, the CLI prints
+`Stack is already fully synced. Nothing to do.` and exits without prompting.
+`--resume` skips the prompt since the original plan was already approved.
 
 ### `nav`
 

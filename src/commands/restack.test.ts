@@ -373,6 +373,101 @@ describe("executeRestack (clean cases)", () => {
   });
 });
 
+describe("executeRestack (HEAD restore)", () => {
+  test("successful walk returns HEAD to the branch the caller started on", async () => {
+    await using repo = await createTestRepo();
+    await addBranch(repo.dir, "a", "main");
+    await addBranch(repo.dir, "b", "a");
+    await addBranch(repo.dir, "c", "b");
+    await setBaseBranch(repo.dir, "test", "main");
+    await setStackNode(repo.dir, "a", "test", "main");
+    await setStackNode(repo.dir, "b", "test", "a");
+    await setStackNode(repo.dir, "c", "test", "b");
+
+    await using _bare = await setupFakeOrigin(repo.dir);
+    await runGit(repo.dir, "checkout", "main");
+    await commitFile(repo.dir, "main-extra.txt", "extra\n");
+    await runGit(repo.dir, "push", "origin", "main");
+    await runGit(repo.dir, "reset", "--hard", "HEAD~1");
+
+    // Start the walk from the root branch. DFS naturally ends on "c"; the
+    // walk must put HEAD back on "a" afterwards so the caller is not stranded
+    // on the leaf.
+    await runGit(repo.dir, "checkout", "a");
+
+    const result = await executeRestack(repo.dir, "test", {});
+
+    expect(result.ok).toBe(true);
+    const head = await runGit(repo.dir, "branch", "--show-current");
+    expect(head).toBe("a");
+  });
+
+  test("conflict leaves the rebase mid-flight (detached HEAD), not restored to the starting branch", async () => {
+    await using repo = await createTestRepo();
+    await addBranch(repo.dir, "root", "main");
+    await setStackNode(repo.dir, "root", "test", "main");
+    await setBaseBranch(repo.dir, "test", "main");
+
+    // Create a child that will conflict when rebased onto advanced main.
+    await runGit(repo.dir, "checkout", "-b", "conflict-child", "root");
+    await commitFile(repo.dir, "conflict.txt", "child-side\n");
+    await setStackNode(repo.dir, "conflict-child", "test", "root");
+
+    await using _bare = await setupFakeOrigin(repo.dir);
+    await runGit(repo.dir, "checkout", "main");
+    await commitFile(repo.dir, "conflict.txt", "main-side\n");
+    await runGit(repo.dir, "push", "origin", "main");
+    await runGit(repo.dir, "reset", "--hard", "HEAD~1");
+
+    await runGit(repo.dir, "checkout", "root");
+
+    const result = await executeRestack(repo.dir, "test", {});
+
+    expect(result.ok).toBe(false);
+    expect(result.error).toBe("conflict");
+    // Mid-rebase HEAD is detached (empty from `branch --show-current`). The
+    // critical invariant: we did NOT restore to "root", which would have
+    // silently aborted the rebase and stranded the user without a conflict
+    // to resolve.
+    const head = await runGit(repo.dir, "branch", "--show-current");
+    expect(head).not.toBe("root");
+  });
+
+  test("resume restores HEAD to the original starting branch after conflict is resolved", async () => {
+    await using repo = await createTestRepo();
+    await addBranch(repo.dir, "root", "main");
+    await setStackNode(repo.dir, "root", "test", "main");
+    await setBaseBranch(repo.dir, "test", "main");
+
+    await runGit(repo.dir, "checkout", "-b", "conflict-child", "root");
+    await commitFile(repo.dir, "conflict.txt", "child-side\n");
+    await setStackNode(repo.dir, "conflict-child", "test", "root");
+
+    await using _bare = await setupFakeOrigin(repo.dir);
+    await runGit(repo.dir, "checkout", "main");
+    await commitFile(repo.dir, "conflict.txt", "main-side\n");
+    await runGit(repo.dir, "push", "origin", "main");
+    await runGit(repo.dir, "reset", "--hard", "HEAD~1");
+
+    // Start the walk from "root" so resume can verify the restore lands there.
+    await runGit(repo.dir, "checkout", "root");
+
+    const first = await executeRestack(repo.dir, "test", {});
+    expect(first.ok).toBe(false);
+    expect(first.error).toBe("conflict");
+
+    // Resolve the conflict in favor of child-side.
+    await Deno.writeTextFile(`${repo.dir}/conflict.txt`, "resolved\n");
+    await runGit(repo.dir, "add", "conflict.txt");
+
+    const second = await executeRestack(repo.dir, "test", { resume: true });
+    expect(second.ok).toBe(true);
+
+    const head = await runGit(repo.dir, "branch", "--show-current");
+    expect(head).toBe("root");
+  });
+});
+
 describe("executeRestack (conflict handling)", () => {
   test("conflict stops the walk; siblings are deferred to resume", async () => {
     await using repo = await createTestRepo();

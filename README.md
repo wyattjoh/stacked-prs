@@ -193,7 +193,18 @@ branch-scoped rebase without fetching or pushing, use `/stacked-prs restack`.
 
 Same as `sync` but without fetching main or pushing to remote. Useful when you
 want to rebase locally before reviewing the diff. Accepts the same
-`--upstack-from`, `--downstack-from`, `--only` flags.
+`--upstack-from`, `--downstack-from`, `--only` flags. Has three modes:
+
+```
+/stacked-prs restack --dry-run     # preview plan
+/stacked-prs restack               # prompts [y/N] before executing
+/stacked-prs restack --force       # execute without prompting
+```
+
+On successful completion HEAD is restored to the branch you were on when you
+started so the DFS walk does not strand you on the last-rebased leaf. On
+conflict HEAD stays on the conflicted branch so you can resolve in place.
+`--resume` continues after a conflict without re-prompting.
 
 ### `/stacked-prs submit`
 
