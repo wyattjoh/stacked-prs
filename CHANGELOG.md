@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.2.1](https://github.com/wyattjoh/stacked-prs/compare/stacked-prs-v2.2.0...stacked-prs-v2.2.1) (2026-04-20)
+
+
+### Bug Fixes
+
+* **tui:** quit without triggering ink exit hooks ([2b221b4](https://github.com/wyattjoh/stacked-prs/commit/2b221b42a6e3f2e6995423d4a8e9433937b90197))
+
 ## [2.2.0](https://github.com/wyattjoh/stacked-prs/compare/stacked-prs-v2.1.0...stacked-prs-v2.2.0) (2026-04-18)
 
 
