@@ -90,5 +90,28 @@ describe(
         unmount();
       }
     });
+
+    test("pressing q calls the explicit exit callback", async () => {
+      await using repo = await createTestRepo();
+      await using _mock = await makeMockDir();
+      let exitCode: number | null = null;
+
+      const { stdin, unmount } = render(
+        <App
+          dir={repo.dir}
+          onRequestExit={(code = 0) => {
+            exitCode = code;
+          }}
+        />,
+      );
+      try {
+        await new Promise((r) => setTimeout(r, 200));
+        stdin.write("q");
+        await new Promise((r) => setTimeout(r, 50));
+        expect(exitCode).toBe(0);
+      } finally {
+        unmount();
+      }
+    });
   },
 );

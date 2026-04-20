@@ -365,12 +365,21 @@ await new Command()
         return origKill(pid, sig);
       };
 
+      let tuiExitCode = 0;
       try {
-        const { waitUntilExit } = render(
-          React.createElement(App, { dir, theme }),
+        let instance: ReturnType<typeof render> | null = null;
+        instance = render(
+          React.createElement(App, {
+            dir,
+            theme,
+            onRequestExit: (code = 0) => {
+              tuiExitCode = code;
+              instance?.unmount();
+            },
+          }),
           { stdout: process.stdout, stdin: process.stdin, exitOnCtrlC: true },
         );
-        await waitUntilExit();
+        await instance.waitUntilExit();
       } finally {
         try {
           Deno.removeSignalListener("SIGINT", onSignal);
@@ -386,7 +395,7 @@ await new Command()
         }
         restore();
       }
-      return;
+      Deno.exit(tuiExitCode);
     }
 
     const stackName = await resolveStackName(dir, options.stackName);

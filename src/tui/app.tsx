@@ -44,6 +44,7 @@ import type { PrInfo } from "./types.ts";
 export interface AppProps {
   dir: string;
   theme?: "light" | "dark";
+  onRequestExit?: (code?: number) => void;
 }
 
 /**
@@ -504,7 +505,11 @@ export function App(props: AppProps): React.ReactElement {
 
     if (input === "q" || key.escape) {
       abortRef.current?.abort();
-      exit();
+      if (props.onRequestExit) {
+        props.onRequestExit(0);
+      } else {
+        exit();
+      }
       return;
     }
     if (input === "?") {
