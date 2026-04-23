@@ -501,23 +501,27 @@ Open the pull request for a branch in the browser. Mirrors `gt pr`. Backed by
 
 Show current stack state. **No confirmation needed** (read-only).
 
-1. Run `cli.ts status --stack-name=<name>` to get tree output
-2. Display formatted (tree shape with box-drawing characters):
+1. On a non-default branch, run `cli.ts status --stack-name=<name>` to get
+   ladder output for that stack. On the default branch, plain `cli.ts status`
+   behaves like `--all`.
+2. Display formatted with the compact ladder renderer:
    ```
-   Stack: auth-rework (squash merge)
-
-     feature/auth              PR #101 (open)      up-to-date
-     ├── feature/auth-api      PR #103 (open)      up-to-date
-     └── feature/auth-tests    PR #102 (draft)     behind-parent  <- you are here
-         └── feature/auth-ui   (no PR)             up-to-date
+   │ ◯      feature/auth-ui     up-to-date
+   │ ◉      feature/auth-tests  #102 (draft)  behind-parent
+   ◯─┘      feature/auth-api    #103 (open)   up-to-date
+   ◯─┘      feature/auth        #101 (open)   up-to-date
    ```
+3. When the user wants every stack at once, run `cli.ts status --all`. It
+   renders every configured stack grouped by base branch.
 
 #### Interactive view
 
-Run `stacked-prs status -i` (or `--interactive`) to launch a TUI. The TUI
-renders every configured stack as a horizontal left-to-right tree with per-stack
-colors, shows PR state and sync status per branch, and provides arrow-key
-navigation plus a live commit detail pane for the focused branch.
+Run `stacked-prs status --interactive` (or `-i`) to launch a TUI. Without
+`--all`, it opens on the current stack tab by default, except on the default
+branch where it starts on the all-stacks tab. The TUI renders every configured
+stack as a horizontal left-to-right tree with per-stack colors, shows PR state
+and sync status per branch, and provides arrow-key navigation plus a live commit
+detail pane for the focused branch.
 
 Key bindings: `?` shows the full list. Press `L` on a branch whose stack is
 eligible to land (root PR merged, or every PR merged) to open the land modal,
@@ -609,7 +613,7 @@ full git-config schema.
 - `gh pr list`, `gh pr view`, `gh repo view`
 - `stacked-prs status`
 - `stacked-prs status --json`
-- `stacked-prs status -i` / `--interactive`
+- `stacked-prs status --interactive` / `-i`
 - `stacked-prs nav --dry-run`
 - `stacked-prs verify-refs`
 - `stacked-prs restack --dry-run` (with or without `--json`)
@@ -646,13 +650,19 @@ provided.
 
 ```bash
 ${CLAUDE_PLUGIN_ROOT}/skills/stacked-prs/scripts/stacked-prs status \
-  [--stack-name=<name>] [--owner=<owner> --repo=<repo>] [--json] [-i|--interactive] [--theme <theme>]
+  [--stack-name=<name>] [--owner=<owner> --repo=<repo>] [--json] [--pr|-p] [--all] [--interactive|-i] [--theme <theme>]
 ```
 
-Returns human-readable tree output by default. Pass `--json` for structured JSON
-with full stack state. Pass `-i` / `--interactive` to launch the read-only TUI
-that renders every stack as a horizontal tree with per-stack colors, PR state,
-sync status, and a live commit detail pane. Pass `--theme light` or
+Returns human-readable ladder output by default. Pass `--json` for structured
+JSON with full stack state. Pass `--all` to render every configured stack
+grouped by base branch in the terminal. On the default branch, plain `status`
+behaves like `--all`; on other branches it stays scoped to the current stack
+unless `--all` is passed. Pass `--interactive` / `-i` to launch the read-only
+TUI. Without `--all`, it starts on the current stack, except on the default
+branch where it starts on the all-stacks view. The TUI renders every stack as a
+horizontal tree with per-stack colors, PR state, sync status, and a live commit
+detail pane. PR metadata is opt-in: pass `--pr` / `-p` to load PRs from GitHub;
+otherwise status stays local-only and skips PR fetching. Pass `--theme light` or
 `--theme dark` to override auto-detection.
 
 ### `restack`

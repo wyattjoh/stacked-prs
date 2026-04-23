@@ -51,6 +51,63 @@ describe(
       }
     });
 
+    test("does not leave rows stuck in loading state when PR loading is disabled", async () => {
+      await using repo = await createTestRepo();
+      await using _mock = await makeMockDir();
+      await addBranch(repo.dir, "feat/a", "main");
+      await setStackNode(repo.dir, "feat/a", "alpha", "main");
+      await setBaseBranch(repo.dir, "alpha", "main");
+
+      const { lastFrame, unmount } = render(<App dir={repo.dir} />);
+      try {
+        await new Promise((r) => setTimeout(r, 300));
+
+        const frame = lastFrame() ?? "";
+        expect(frame).toContain("Stack: alpha");
+        expect(frame).toContain("feat/a");
+        expect(frame).toContain("no PR");
+        expect(frame).not.toContain("loading");
+      } finally {
+        unmount();
+      }
+    });
+
+    test("opens scoped to the requested stack tab", async () => {
+      await using repo = await createTestRepo();
+      await using mock = await makeMockDir();
+      await addBranch(repo.dir, "feat/a", "main");
+      await addBranch(repo.dir, "feat/b", "main");
+      await setStackNode(repo.dir, "feat/a", "alpha", "main");
+      await setStackNode(repo.dir, "feat/b", "beta", "main");
+      await setBaseBranch(repo.dir, "alpha", "main");
+      await setBaseBranch(repo.dir, "beta", "main");
+      await writeFixture(
+        mock.path,
+        ["pr", "list", "--head", "feat/a"],
+        [{ number: 1, url: "u1", state: "OPEN", isDraft: false }],
+      );
+      await writeFixture(
+        mock.path,
+        ["pr", "list", "--head", "feat/b"],
+        [{ number: 2, url: "u2", state: "OPEN", isDraft: false }],
+      );
+
+      const { lastFrame, unmount } = render(
+        <App dir={repo.dir} initialTab={{ stack: "alpha" }} />,
+      );
+      try {
+        await new Promise((r) => setTimeout(r, 400));
+
+        const frame = lastFrame() ?? "";
+        expect(frame).toContain("Stack: alpha");
+        expect(frame).toContain("feat/a");
+        expect(frame).not.toContain("Stack: beta");
+        expect(frame).not.toContain("feat/b");
+      } finally {
+        unmount();
+      }
+    });
+
     test("pressing L on a stack with a merged PR enters the land modal", async () => {
       await using repo = await createTestRepo();
       await using mock = await makeMockDir();
@@ -72,7 +129,9 @@ describe(
         ],
       );
 
-      const { stdin, lastFrame, unmount } = render(<App dir={repo.dir} />);
+      const { stdin, lastFrame, unmount } = render(
+        <App dir={repo.dir} loadPrs />,
+      );
       try {
         // Give the initial load a tick to populate PR data.
         await new Promise((r) => setTimeout(r, 300));

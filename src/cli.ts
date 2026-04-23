@@ -2,11 +2,16 @@
 import { Command } from "@cliffy/command";
 import { Confirm } from "@cliffy/prompt";
 import pluginMeta from "../.claude-plugin/plugin.json" with { type: "json" };
-import { getStackTree, renderTree, runGitCommand } from "./lib/stack.ts";
+import {
+  detectDefaultBranch,
+  getStackTree,
+  renderTree,
+  runGitCommand,
+} from "./lib/stack.ts";
 import { gh, listPrsForBranch, resolveRepo, withPrIndex } from "./lib/gh.ts";
 import { withRefLoader } from "./lib/loaders.ts";
 import { prStateFrom } from "./commands/land.ts";
-import { getStackStatus } from "./commands/status.ts";
+import { getAllStackStatuses, getStackStatus } from "./commands/status.ts";
 import { restack } from "./commands/restack.ts";
 import { buildNavPlan, executeNavAction } from "./lib/nav.ts";
 import { verifyRefs } from "./commands/verify-refs.ts";
@@ -108,6 +113,28 @@ async function resolveStackName(
   }
 
   return stackName;
+}
+
+async function shouldStatusAll(
+  dir: string,
+  explicitAll: boolean,
+  explicitStackName?: string,
+): Promise<boolean> {
+  if (explicitAll) return true;
+  if (explicitStackName) return false;
+
+  const { code, stdout: currentBranch } = await runGitCommand(
+    dir,
+    "branch",
+    "--show-current",
+  );
+  if (code !== 0 || !currentBranch) return false;
+
+  try {
+    return currentBranch === await detectDefaultBranch(dir);
+  } catch {
+    return false;
+  }
 }
 
 function renderCreatePlan(plan: CreatePlan): string {
@@ -246,13 +273,24 @@ await new Command()
   .option("--owner <owner:string>", "GitHub repo owner")
   .option("--repo <repo:string>", "GitHub repo name")
   .option("--json", "Output as JSON")
-  .option("-i, --interactive", "Launch the interactive TUI")
+  .option("--pr, -p", "Load PR data from GitHub")
+  .option("--all, -a", "Show all stacks grouped by base branch")
+  .option("--interactive, -i", "Launch the interactive TUI")
   .option(
     "--theme <theme:string>",
     "Force light or dark theme (auto-detected)",
   )
   .action(async (options) => {
+    const loadPrs = options.pr === true;
+    const statusAll = await shouldStatusAll(
+      dir,
+      options.all === true,
+      options.stackName,
+    );
     if (options.interactive) {
+      const initialTab = statusAll
+        ? "all"
+        : { stack: await resolveStackName(dir, options.stackName) } as const;
       const { render } = await import("ink");
       const React = await import("react");
       const { App } = await import("./tui/app.tsx");
@@ -371,6 +409,8 @@ await new Command()
         instance = render(
           React.createElement(App, {
             dir,
+            initialTab,
+            loadPrs,
             theme,
             onRequestExit: (code = 0) => {
               tuiExitCode = code;
@@ -398,10 +438,9 @@ await new Command()
       Deno.exit(tuiExitCode);
     }
 
-    const stackName = await resolveStackName(dir, options.stackName);
     let owner = options.owner;
     let repo = options.repo;
-    if (!owner || !repo) {
+    if (loadPrs && (!owner || !repo)) {
       try {
         const resolved = await resolveRepo(owner, repo);
         owner = resolved.owner;
@@ -412,18 +451,29 @@ await new Command()
     }
 
     // Install a repo-wide PR index so per-branch `listPrsForBranch`
-    // calls inside `getStackStatus` all share one `gh pr list` fetch
-    // instead of N per-branch round-trips. If the repo can't be
-    // resolved (no gh auth, no remote), the call falls back to the
-    // per-branch path, which renders the tree without PR info.
+    // calls inside `getStackStatus` / `getAllStackStatuses` all share
+    // one `gh pr list` fetch instead of N per-branch round-trips. If
+    // the repo can't be resolved (no gh auth, no remote), the call
+    // falls back to the per-branch path, which renders the tree
+    // without PR info.
     //
     // Also install a DataLoader-backed ref resolver so the per-branch
     // `computeSyncStatus` / `tryResolveRef` calls coalesce into a
     // single `git cat-file --batch-check` subprocess instead of one
     // `git rev-parse` per ref. Status is read-only, so caching refs
     // for the scope of this handler is safe.
-    const runStatus = () => getStackStatus(dir, stackName, owner, repo);
-    const status = owner && repo
+    const runStatus = async () => {
+      if (statusAll) {
+        return await getAllStackStatuses(dir, owner, repo, {
+          loadPrs,
+        });
+      }
+      const stackName = await resolveStackName(dir, options.stackName);
+      return await getStackStatus(dir, stackName, owner, repo, {
+        loadPrs,
+      });
+    };
+    const status = loadPrs && owner && repo
       ? await withRefLoader(
         dir,
         () => withPrIndex(owner as string, repo as string, runStatus),

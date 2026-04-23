@@ -43,7 +43,9 @@ import type { PrInfo } from "./types.ts";
 
 export interface AppProps {
   dir: string;
+  loadPrs?: boolean;
   theme?: "light" | "dark";
+  initialTab?: TabId;
   onRequestExit?: (code?: number) => void;
 }
 
@@ -77,7 +79,11 @@ function parentOf(state: State, branch: string): string | null {
 }
 
 export function App(props: AppProps): React.ReactElement {
-  const [state, dispatch] = useReducer(reducer, initialState());
+  const [state, dispatch] = useReducer(
+    reducer,
+    props.initialTab ?? "all",
+    initialState,
+  );
   const { exit } = useApp();
   const { stdout } = useStdout();
   const abortRef = useRef<AbortController | null>(null);
@@ -124,6 +130,13 @@ export function App(props: AppProps): React.ReactElement {
       currentBranch: local.currentBranch,
       totalBranches: local.allBranches.length,
     });
+
+    if (!props.loadPrs) {
+      for (const b of local.allBranches) {
+        dispatch({ type: "PR_LOADED", branch: b, pr: null });
+      }
+      return;
+    }
 
     const controller = new AbortController();
     abortRef.current?.abort();

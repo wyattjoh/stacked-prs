@@ -250,22 +250,26 @@ export async function computeSyncStatus(
   branch: string,
   parent: string,
 ): Promise<SyncStatus> {
-  const { code: fwd } = await runGitCommand(
+  // `rev-list --left-right --count A...B` classifies the relationship in a
+  // single subprocess:
+  //   left=0          => A is an ancestor of B (or equal)      => up-to-date
+  //   right=0         => B is an ancestor of A                 => behind-parent
+  //   otherwise       => both sides have unique commits        => diverged
+  const { code, stdout } = await runGitCommand(
     dir,
-    "merge-base",
-    "--is-ancestor",
-    parent,
-    branch,
+    "rev-list",
+    "--left-right",
+    "--count",
+    `${parent}...${branch}`,
   );
-  if (fwd === 0) return "up-to-date";
-  const { code: rev } = await runGitCommand(
-    dir,
-    "merge-base",
-    "--is-ancestor",
-    branch,
-    parent,
-  );
-  if (rev === 0) return "behind-parent";
+  if (code !== 0) return "diverged";
+
+  const [leftRaw, rightRaw] = stdout.split("\t");
+  const left = Number.parseInt(leftRaw ?? "", 10);
+  const right = Number.parseInt(rightRaw ?? "", 10);
+  if (Number.isNaN(left) || Number.isNaN(right)) return "diverged";
+  if (left === 0) return "up-to-date";
+  if (right === 0) return "behind-parent";
   return "diverged";
 }
 

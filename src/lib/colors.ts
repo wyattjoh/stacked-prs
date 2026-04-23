@@ -98,14 +98,27 @@ export async function readColorOverrides(
   ) => Promise<{ code: number; stdout: string }>,
 ): Promise<Map<string, string>> {
   const overrides = new Map<string, string>();
-  for (const name of stackNames) {
-    const { code, stdout } = await runGit(
-      "config",
-      `stack.${name}.color`,
-    );
-    if (code === 0 && stdout.trim()) {
-      overrides.set(name, stdout.trim());
-    }
+  if (stackNames.length === 0) return overrides;
+
+  const wanted = new Set(stackNames);
+  const { code, stdout } = await runGit(
+    "config",
+    "--get-regexp",
+    "^stack\\..*\\.color$",
+  );
+  if (code !== 0 || !stdout.trim()) return overrides;
+
+  for (const line of stdout.split("\n")) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    const spaceIndex = trimmed.indexOf(" ");
+    if (spaceIndex === -1) continue;
+    const key = trimmed.slice(0, spaceIndex);
+    const value = trimmed.slice(spaceIndex + 1).trim();
+    const match = /^stack\.(.+)\.color$/.exec(key);
+    const stackName = match?.[1];
+    if (!stackName || !wanted.has(stackName) || !value) continue;
+    overrides.set(stackName, value);
   }
   return overrides;
 }

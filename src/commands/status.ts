@@ -1,14 +1,21 @@
+import * as colors from "@std/fmt/colors";
 import {
   computeSyncStatus,
   getAllNodes,
+  getAllStackTrees,
   getStackTree,
-  renderTree,
   runGitCommand,
   type StackNode,
   type StackTree,
   type SyncStatus,
 } from "../lib/stack.ts";
 import { listPrsForBranch } from "../lib/gh.ts";
+import { ansiColor } from "../lib/ansi.ts";
+import {
+  assignColors,
+  detectTheme,
+  readColorOverrides,
+} from "../lib/colors.ts";
 
 export type { SyncStatus };
 
@@ -34,9 +41,27 @@ export interface BranchStatus {
 
 export interface StackStatus {
   stackName: string;
+  baseBranch: string;
   mergeStrategy: string | undefined;
   branches: BranchStatus[];
   display: string;
+}
+
+export interface AllStacksStatus {
+  stacks: StackStatus[];
+  display: string;
+}
+
+interface RenderRow {
+  branch: string;
+  stackName: string;
+  rootIndex: number;
+  pipeCount: number;
+  hasBranchingChildren: boolean;
+  pr: PrInfo | null;
+  syncStatus: SyncStatus;
+  isCurrent: boolean;
+  merged: boolean;
 }
 
 async function getCurrentBranch(dir: string): Promise<string> {
@@ -50,6 +75,10 @@ export async function queryPr(
   repo?: string,
 ): Promise<PrInfo | null> {
   return await listPrsForBranch(branch, { owner, repo });
+}
+
+export interface StatusOptions {
+  loadPrs?: boolean;
 }
 
 /** Walk the tree DFS and compute depth + isLastChild for each node. */
@@ -73,42 +102,316 @@ function computeDepths(
   return result;
 }
 
-function buildAnnotation(pr: PrInfo | null, syncStatus: SyncStatus): string {
-  const prPart = pr
-    ? `PR #${pr.number} (${pr.isDraft ? "draft" : pr.state.toLowerCase()})`
-    : "(no PR)";
-  return `${prPart.padEnd(24)}${syncStatus}`;
+function flattenPostorder(tree: StackTree): Array<{
+  branch: string;
+  stackName: string;
+  rootIndex: number;
+  pipeCount: number;
+  hasBranchingChildren: boolean;
+  merged: boolean;
+}> {
+  const out: Array<{
+    branch: string;
+    stackName: string;
+    rootIndex: number;
+    pipeCount: number;
+    hasBranchingChildren: boolean;
+    merged: boolean;
+  }> = [];
+
+  const visit = (
+    node: StackNode,
+    rowPipeCount: number,
+    rootIndex: number,
+  ): void => {
+    const [primaryChild, ...secondaryChildren] = node.children;
+
+    if (primaryChild) {
+      visit(primaryChild, rowPipeCount, rootIndex);
+    }
+
+    for (const child of secondaryChildren) {
+      visit(child, rowPipeCount + 1, rootIndex);
+    }
+
+    out.push({
+      branch: node.branch,
+      stackName: node.stackName,
+      rootIndex,
+      pipeCount: rowPipeCount,
+      hasBranchingChildren: secondaryChildren.length > 0,
+      merged: node.merged === true,
+    });
+  };
+
+  // Preserve StackTree root order so the compact renderer follows the same
+  // parent/child/root ordering the TUI gets from getStackTree/getAllStackTrees.
+  for (let i = 0; i < tree.roots.length; i++) {
+    visit(tree.roots[i], i, i);
+  }
+  return out;
 }
 
-function buildDisplayHeader(
-  stackName: string,
-  mergeStrategy: string | undefined,
+function colorGraphText(
+  text: string,
+  colorName: string,
+  dimmed = false,
 ): string {
-  const strategyPart = mergeStrategy ? ` (${mergeStrategy} merge)` : "";
-  return `Stack: ${stackName}${strategyPart}`;
+  const color = ansiColor(colorName);
+  return color(dimmed ? colors.dim(text) : text);
 }
 
-export async function getStackStatus(
+function ownerStackNameForColumn(
+  column: number,
+  rootIndex: number,
+  rowStackName: string,
+  rootStackNames: string[],
+): string {
+  return column < rootIndex
+    ? rootStackNames[column] ?? rowStackName
+    : rowStackName;
+}
+
+function renderPrefixColumns(
+  pipeCount: number,
+  rootIndex: number,
+  rowStackName: string,
+  rootStackNames: string[],
+  colorMap: Map<string, string>,
+  dimmed: boolean,
+): string {
+  let out = "";
+  for (let i = 0; i < pipeCount; i++) {
+    const ownerStack = ownerStackNameForColumn(
+      i,
+      rootIndex,
+      rowStackName,
+      rootStackNames,
+    );
+    out += colorGraphText(
+      "│ ",
+      colorMap.get(ownerStack) ?? "cyan",
+      dimmed,
+    );
+  }
+  return out;
+}
+
+function basePrefixText(
+  marker: string,
+  rootCount: number,
+): string {
+  return rootCount > 0
+    ? `${marker}${"─┴".repeat(Math.max(0, rootCount - 2))}─┘`
+    : marker;
+}
+
+function renderBasePrefix(
+  marker: string,
+  rootStackNames: string[],
+  colorMap: Map<string, string>,
+): string {
+  if (rootStackNames.length === 0) {
+    return colorGraphText(marker, colorMap.get("base") ?? "cyan");
+  }
+
+  const chars = basePrefixText(marker, rootStackNames.length);
+  let out = "";
+  for (let i = 0; i < chars.length; i++) {
+    const ownerIdx = Math.min(Math.floor(i / 2), rootStackNames.length - 1);
+    out += colorGraphText(
+      chars[i],
+      colorMap.get(rootStackNames[ownerIdx]) ?? "cyan",
+    );
+  }
+  return out;
+}
+
+async function resolveStackColors(
   dir: string,
-  stackName: string,
+  stackNames: string[],
+): Promise<Map<string, string>> {
+  const theme = detectTheme(Deno.env.get("COLORFGBG"));
+  const overrides = await readColorOverrides(
+    stackNames,
+    (...args) => runGitCommand(dir, ...args),
+  );
+  return assignColors(stackNames, overrides, theme);
+}
+
+function renderPrText(pr: PrInfo | null): string {
+  if (!pr) return "";
+  return `#${pr.number} (${pr.isDraft ? "draft" : pr.state.toLowerCase()})`;
+}
+
+function colorizePrText(text: string, pr: PrInfo | null): string {
+  if (!pr) return colors.dim(text);
+  if (pr.isDraft) return colors.yellow(text);
+  switch (pr.state.toUpperCase()) {
+    case "OPEN":
+      return colors.green(text);
+    case "MERGED":
+      return colors.magenta(text);
+    case "CLOSED":
+      return colors.dim(text);
+    default:
+      return text;
+  }
+}
+
+function colorizeSyncText(text: string, syncStatus: SyncStatus): string {
+  switch (syncStatus) {
+    case "up-to-date":
+      return colors.dim(text);
+    case "behind-parent":
+      return colors.yellow(text);
+    case "diverged":
+      return colors.red(text);
+    case "landed":
+      return colors.magenta(text);
+  }
+}
+
+function renderMetadata(
+  pr: PrInfo | null,
+  syncStatus: SyncStatus,
+): string {
+  const prText = renderPrText(pr);
+  if (!prText) return colorizeSyncText(syncStatus, syncStatus);
+  return `${colorizePrText(prText, pr)}  ${
+    colorizeSyncText(syncStatus, syncStatus)
+  }`;
+}
+
+function renderRow(
+  row: RenderRow,
+  colorMap: Map<string, string>,
+  rootStackNames: string[],
+  graphWidth: number,
+  branchWidth: number,
+): string {
+  const stackColor = ansiColor(colorMap.get(row.stackName) ?? "cyan");
+  const marker = row.isCurrent ? "◉" : "◯";
+  const trunk = renderPrefixColumns(
+    row.pipeCount,
+    row.rootIndex,
+    row.stackName,
+    rootStackNames,
+    colorMap,
+    row.merged,
+  );
+  const branchConnector = `${marker}${row.hasBranchingChildren ? "─┘" : ""}`;
+  const left = `${branchConnector.padEnd(graphWidth - row.pipeCount * 2)}`;
+  const leftColored = `${trunk}${
+    stackColor(row.merged ? colors.dim(left) : left)
+  }`;
+  const branchLabel = row.branch.padEnd(branchWidth);
+  const branchText = row.isCurrent ? colors.bold(branchLabel) : branchLabel;
+  const branchColored = stackColor(
+    row.merged ? colors.dim(branchText) : branchText,
+  );
+  const metadata = renderMetadata(row.pr, row.syncStatus);
+  return metadata
+    ? `${leftColored}${branchColored}  ${metadata}`
+    : `${leftColored}${branchColored}`;
+}
+
+function renderBaseRow(
+  baseBranch: string,
+  rootCount: number,
+  isCurrent: boolean,
+  rootStackNames: string[],
+  colorMap: Map<string, string>,
+  graphWidth: number,
+  branchWidth: number,
+): string {
+  const marker = isCurrent ? "◉" : "◯";
+  const leftText = `${renderBasePrefix(marker, rootStackNames, colorMap)}${
+    " ".repeat(
+      Math.max(0, graphWidth - (rootCount > 0 ? rootCount * 2 - 1 : 1)),
+    )
+  }`;
+  const branchLabel = baseBranch.padEnd(branchWidth);
+  const branchText = isCurrent ? colors.bold(branchLabel) : branchLabel;
+  return `${leftText}${colors.dim(branchText)}`;
+}
+
+function renderStackDisplay(
+  tree: StackTree,
+  branches: BranchStatus[],
+  colorMap: Map<string, string>,
+  currentBranch: string,
+): string {
+  const branchByName = new Map(
+    branches.map((branch) => [branch.branch, branch]),
+  );
+  const rows = flattenPostorder(tree).map((row): RenderRow => {
+    const branch = branchByName.get(row.branch);
+    if (!branch) {
+      throw new Error(`missing status row for ${row.branch}`);
+    }
+    return {
+      branch: branch.branch,
+      stackName: row.stackName,
+      rootIndex: row.rootIndex,
+      pipeCount: row.pipeCount,
+      hasBranchingChildren: row.hasBranchingChildren,
+      pr: branch.pr,
+      syncStatus: branch.syncStatus,
+      isCurrent: branch.isCurrent,
+      merged: row.merged,
+    };
+  });
+
+  const maxBranchWidth = rows.reduce(
+    (max, row) => Math.max(max, row.branch.length),
+    0,
+  );
+  const rootCount = tree.roots.length;
+  const rootStackNames = tree.roots.map((root) => root.stackName);
+  const graphWidth = Math.max(
+    ...rows.map((row) =>
+      `${"│ ".repeat(row.pipeCount)}◯${row.hasBranchingChildren ? "─┘" : ""}`
+        .length
+    ),
+    rootCount > 0 ? rootCount + 1 : 1,
+  ) + 2;
+  const branchWidth = Math.max(maxBranchWidth, tree.baseBranch.length);
+  const lines = rows.map((row) =>
+    renderRow(row, colorMap, rootStackNames, graphWidth, branchWidth)
+  );
+  lines.push(
+    renderBaseRow(
+      tree.baseBranch,
+      rootCount,
+      currentBranch === tree.baseBranch,
+      rootStackNames,
+      colorMap,
+      graphWidth,
+      branchWidth,
+    ),
+  );
+  return lines.join("\n");
+}
+
+async function buildStackStatus(
+  dir: string,
+  tree: StackTree,
+  currentBranch: string,
   owner?: string,
   repo?: string,
+  opts: StatusOptions = {},
 ): Promise<StackStatus> {
-  const [tree, currentBranch] = await Promise.all([
-    getStackTree(dir, stackName),
-    getCurrentBranch(dir),
-  ]);
-
-  const mergeStrategy = tree.mergeStrategy;
   const depthMap = computeDepths(tree);
   const nodes = getAllNodes(tree);
+  const loadPrs = opts.loadPrs === true;
 
   const branches = await Promise.all(
     nodes.map(async (node): Promise<BranchStatus> => {
       const syncStatus: SyncStatus = node.merged
         ? "landed"
         : await computeSyncStatus(dir, node.branch, node.parent);
-      const pr = await queryPr(node.branch, owner, repo);
+      const pr = loadPrs ? await queryPr(node.branch, owner, repo) : null;
 
       const { depth, isLastChild } = depthMap.get(node.branch) ?? {
         depth: 0,
@@ -128,19 +431,86 @@ export async function getStackStatus(
     }),
   );
 
-  // Build annotations map for renderTree
-  const annotations = new Map<string, string>();
-  for (const b of branches) {
-    annotations.set(b.branch, buildAnnotation(b.pr, b.syncStatus));
+  const colorMap = await resolveStackColors(dir, [tree.stackName]);
+  const display = renderStackDisplay(tree, branches, colorMap, currentBranch);
+
+  return {
+    stackName: tree.stackName,
+    baseBranch: tree.baseBranch,
+    mergeStrategy: tree.mergeStrategy,
+    branches,
+    display,
+  };
+}
+
+export async function getStackStatus(
+  dir: string,
+  stackName: string,
+  owner?: string,
+  repo?: string,
+  opts: StatusOptions = {},
+): Promise<StackStatus> {
+  const [tree, currentBranch] = await Promise.all([
+    getStackTree(dir, stackName),
+    getCurrentBranch(dir),
+  ]);
+
+  return await buildStackStatus(dir, tree, currentBranch, owner, repo, opts);
+}
+
+export async function getAllStackStatuses(
+  dir: string,
+  owner?: string,
+  repo?: string,
+  opts: StatusOptions = {},
+): Promise<AllStacksStatus> {
+  const [trees, currentBranch] = await Promise.all([
+    getAllStackTrees(dir),
+    getCurrentBranch(dir),
+  ]);
+  const stacks = await Promise.all(
+    trees.map((tree) =>
+      buildStackStatus(dir, tree, currentBranch, owner, repo, opts)
+    ),
+  );
+  if (stacks.length === 0) {
+    return { stacks, display: "No stacks found." };
+  }
+  const treeByStackName = new Map(
+    trees.map((tree) => [tree.stackName, tree] as const),
+  );
+  const colorMap = await resolveStackColors(
+    dir,
+    [...new Set(trees.map((tree) => tree.stackName))],
+  );
+
+  const sections = new Map<string, StackStatus[]>();
+  for (const stack of stacks) {
+    const group = sections.get(stack.baseBranch) ?? [];
+    group.push(stack);
+    sections.set(stack.baseBranch, group);
   }
 
-  const treeBody = renderTree(tree, {
-    annotations,
-    currentBranch,
-  });
+  const display = [...sections.entries()]
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([baseBranch, group]) => {
+      const combinedTree: StackTree = {
+        stackName: `base:${baseBranch}`,
+        baseBranch,
+        mergeStrategy: undefined,
+        roots: group.flatMap((stack) =>
+          treeByStackName.get(stack.stackName)?.roots ?? []
+        ),
+      };
+      const branches = group.flatMap((stack) => stack.branches);
+      return renderStackDisplay(
+        combinedTree,
+        branches,
+        colorMap,
+        currentBranch,
+      );
+    })
+    .join("\n\n");
 
-  const header = buildDisplayHeader(stackName, mergeStrategy);
-  const display = `${header}\n\n  ${treeBody.split("\n").join("\n  ")}`;
-
-  return { stackName, mergeStrategy, branches, display };
+  return { stacks, display };
 }

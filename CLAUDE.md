@@ -53,7 +53,7 @@ src/
 │   ├── fold.ts                 # Merge a branch into its parent and remove it from the stack
 │   ├── move.ts                 # Reparent a branch under a different parent + rebase --onto
 │   └── split.ts                # Split a branch --by-commit or --by-file into two branches
-└── tui/                        # Ink-based interactive view (status -i)
+└── tui/                        # Ink-based interactive view (status --interactive)
     ├── app.tsx
     ├── components/
     ├── state/
@@ -104,7 +104,7 @@ deno task compile:macos   # macOS (pbcopy clipboard support)
 deno task compile:linux   # Linux (xclip/wl-copy clipboard support)
 ```
 
-Subcommands: `status` (add `-i`/`--interactive` to launch the TUI), `create`,
+Subcommands: `status` (add `--interactive`/`-i` to launch the TUI), `create`,
 `restack`, `nav`, `verify-refs`, `import-discover`, `init`, `import`, `insert`,
 `fold`, `move`, `split`, `submit`, `sync`, `pr`, `land`, `clean`.
 `lib/config.ts` and `lib/submit-plan.ts` are libraries shared across commands;
@@ -196,7 +196,7 @@ can be continued across process invocations.
 | `src/commands/fold.ts`            | Merge a branch into its parent and remove it from the stack           | `cli.ts fold [flags]`                                                   |
 | `src/commands/move.ts`            | Reparent a branch + `git rebase --onto`                               | `cli.ts move --new-parent <name> [flags]`                               |
 | `src/commands/split.ts`           | Split a branch (--by-commit / --by-file) into two                     | `cli.ts split --new-branch <name> [flags]`                              |
-| `src/tui/app.tsx`                 | Root Ink component, owns reducer + effects                            | Launched by `cli.ts status -i`                                          |
+| `src/tui/app.tsx`                 | Root Ink component, owns reducer + effects                            | Launched by `cli.ts status --interactive`                               |
 
 ### Git config schema
 
@@ -222,10 +222,11 @@ branch rebase, and cleared on successful completion. If it exists,
 
 ### TUI layer (`src/tui/`)
 
-The TUI is an Ink + React app launched by `cli.ts status -i`. It reads the same
-data sources as non-interactive `status` (`getAllStackTrees`, `git merge-base`,
-`gh pr list`), and owns one write path: the `L` key (land). The code is split
-along a strict purity boundary so most of it is testable without Ink:
+The TUI is an Ink + React app launched by `cli.ts status --interactive`. It
+reads the same data sources as non-interactive `status` (`getAllStackTrees`,
+`git merge-base`, `gh pr list`), and owns one write path: the `L` key (land).
+The code is split along a strict purity boundary so most of it is testable
+without Ink:
 
 - Pure (`lib/layout.ts`, `lib/scroll.ts`, `state/reducer.ts`,
   `state/navigation.ts`) — unit tested with synthetic inputs, no Ink, no git.
@@ -236,9 +237,9 @@ along a strict purity boundary so most of it is testable without Ink:
   `ink-testing-library`, and `app.tsx` gets an integration test that spins up a
   real temp repo.
 
-`cli.ts` dynamically imports Ink/React/App only when `-i` is set so the
-non-interactive `status` path doesn't pay the Ink load cost. It also forces
-`process.stdout.isTTY = true` before calling `render()` because Deno's
+`cli.ts` dynamically imports Ink/React/App only when `--interactive` / `-i` is
+set so the non-interactive `status` path doesn't pay the Ink load cost. It also
+forces `process.stdout.isTTY = true` before calling `render()` because Deno's
 `node:process` compat layer doesn't always set it correctly, which otherwise
 makes Ink fall back to append-mode rendering.
 

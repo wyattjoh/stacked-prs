@@ -14,7 +14,12 @@ import {
   setStackNode,
 } from "../lib/stack.ts";
 import { writeFixture } from "../lib/gh.ts";
-import { getStackStatus } from "./status.ts";
+import { getAllStackStatuses, getStackStatus } from "./status.ts";
+
+function stripAnsi(text: string): string {
+  // deno-lint-ignore no-control-regex
+  return text.replaceAll(/\x1b\[[0-9;]*m/g, "");
+}
 
 describe("getStackStatus", () => {
   test("returns tree-structured status with depth info for a forked tree (a -> b + c)", async () => {
@@ -63,7 +68,7 @@ describe("getStackStatus", () => {
     expect(branchC!.isLastChild).toBe(true);
   });
 
-  test("formats human-readable tree output with Stack: header", async () => {
+  test("formats human-readable ladder output in postorder", async () => {
     await using repo = await createTestRepo();
     await using _mock = await makeMockDir();
     await addBranch(repo.dir, "feature/a", "main");
@@ -75,16 +80,66 @@ describe("getStackStatus", () => {
     await setMergeStrategy(repo.dir, "auth-rework", "squash");
 
     const status = await getStackStatus(repo.dir, "auth-rework");
+    const display = stripAnsi(status.display);
 
-    // Header must contain stack name and strategy
-    expect(status.display).toContain("Stack: auth-rework (squash merge)");
+    expect(display).not.toContain("Stack:");
+    expect(display).toMatch(/^◯\s+feature\/b\s+up-to-date$/m);
+    expect(display).toMatch(/^◯\s+feature\/a\s+up-to-date$/m);
+    expect(display).toMatch(/^◉─┘\s+main\s*$/m);
+    expect(display).not.toContain("─┴─┘");
+    expect(display.indexOf("feature/b")).toBeLessThan(
+      display.indexOf("feature/a"),
+    );
+    expect(display.indexOf("feature/a")).toBeLessThan(display.indexOf("main"));
+  });
 
-    // Both branches must appear in the display
-    expect(status.display).toContain("feature/a");
-    expect(status.display).toContain("feature/b");
+  test("keeps nested parent branches in the single connector column", async () => {
+    await using repo = await createTestRepo();
+    await using _mock = await makeMockDir();
+    await addBranch(repo.dir, "feature/a", "main");
+    await addBranch(repo.dir, "feature/b", "feature/a");
+    await addBranch(repo.dir, "feature/c", "feature/b");
 
-    // feature/b is the child, should have tree connector
-    expect(status.display).toContain("└──");
+    await setStackNode(repo.dir, "feature/a", "linear-stack", "main");
+    await setStackNode(repo.dir, "feature/b", "linear-stack", "feature/a");
+    await setStackNode(repo.dir, "feature/c", "linear-stack", "feature/b");
+    await setBaseBranch(repo.dir, "linear-stack", "main");
+
+    const status = await getStackStatus(repo.dir, "linear-stack");
+    const display = stripAnsi(status.display);
+
+    expect(display).toMatch(/^◯\s+feature\/c\s+up-to-date$/m);
+    expect(display).toMatch(/^◯\s+feature\/b\s+up-to-date$/m);
+    expect(display).not.toMatch(/^│ ◯─┘\s+feature\/b/m);
+    expect(display).toMatch(/^◯\s+feature\/a\s+up-to-date$/m);
+  });
+
+  test("preserves the tree root order instead of reordering by subtree size", async () => {
+    await using repo = await createTestRepo();
+    await using _mock = await makeMockDir();
+    await addBranch(repo.dir, "feature/a-root", "main");
+    await addBranch(repo.dir, "feature/z-root", "main");
+    await addBranch(repo.dir, "feature/z-child", "feature/z-root");
+
+    await setStackNode(repo.dir, "feature/a-root", "root-order", "main");
+    await setStackNode(repo.dir, "feature/z-root", "root-order", "main");
+    await setStackNode(
+      repo.dir,
+      "feature/z-child",
+      "root-order",
+      "feature/z-root",
+    );
+    await setBaseBranch(repo.dir, "root-order", "main");
+
+    const status = await getStackStatus(repo.dir, "root-order");
+    const display = stripAnsi(status.display);
+
+    expect(display.indexOf("feature/a-root")).toBeLessThan(
+      display.indexOf("feature/z-child"),
+    );
+    expect(display.indexOf("feature/z-child")).toBeLessThan(
+      display.indexOf("feature/z-root"),
+    );
   });
 
   test("correctly identifies current branch with isCurrent flag", async () => {
@@ -108,8 +163,75 @@ describe("getStackStatus", () => {
     expect(branchX!.isCurrent).toBe(false);
     expect(branchY!.isCurrent).toBe(true);
 
-    // Display should include the "you are here" marker for feature/y
-    expect(status.display).toContain("<- you are here");
+    // Display should mark the current branch with a filled circle.
+    expect(stripAnsi(status.display)).toMatch(
+      /^◉\s+feature\/y\s+up-to-date$/m,
+    );
+  });
+
+  test("renders the base branch as the last row and marks it current", async () => {
+    await using repo = await createTestRepo();
+    await using _mock = await makeMockDir();
+    await addBranch(repo.dir, "feature/root", "main");
+
+    await setStackNode(repo.dir, "feature/root", "base-stack", "main");
+    await setBaseBranch(repo.dir, "base-stack", "main");
+
+    await runGit(repo.dir, "checkout", "main");
+
+    const status = await getStackStatus(repo.dir, "base-stack");
+    const display = stripAnsi(status.display);
+
+    expect(display).toMatch(/^◯\s+feature\/root\s+up-to-date$/m);
+    expect(display).toMatch(/^◉─┘\s+main\s*$/m);
+    expect(display.indexOf("feature/root")).toBeLessThan(
+      display.indexOf("main"),
+    );
+  });
+
+  test("renders multiple root subtrees with deeper trunk columns like gt ls", async () => {
+    await using repo = await createTestRepo();
+    await using _mock = await makeMockDir();
+    await addBranch(repo.dir, "feature/a-root", "main");
+    await addBranch(repo.dir, "feature/a-leaf", "feature/a-root");
+    await addBranch(repo.dir, "feature/a-side", "feature/a-root");
+    await addBranch(repo.dir, "feature/b-root", "main");
+    await addBranch(repo.dir, "feature/b-leaf", "feature/b-root");
+    await addBranch(repo.dir, "feature/c-root", "main");
+
+    await setStackNode(repo.dir, "feature/a-root", "multi-root", "main");
+    await setStackNode(
+      repo.dir,
+      "feature/a-leaf",
+      "multi-root",
+      "feature/a-root",
+    );
+    await setStackNode(
+      repo.dir,
+      "feature/a-side",
+      "multi-root",
+      "feature/a-root",
+    );
+    await setStackNode(repo.dir, "feature/b-root", "multi-root", "main");
+    await setStackNode(
+      repo.dir,
+      "feature/b-leaf",
+      "multi-root",
+      "feature/b-root",
+    );
+    await setStackNode(repo.dir, "feature/c-root", "multi-root", "main");
+    await setBaseBranch(repo.dir, "multi-root", "main");
+
+    const status = await getStackStatus(repo.dir, "multi-root");
+    const display = stripAnsi(status.display);
+
+    expect(display).toMatch(/^◯\s+feature\/a-leaf\s+up-to-date$/m);
+    expect(display).toMatch(/^│ ◯\s+feature\/a-side\s+up-to-date$/m);
+    expect(display).toMatch(/^◯─┘\s+feature\/a-root\s+up-to-date$/m);
+    expect(display).toMatch(/^│ ◯\s+feature\/b-leaf\s+up-to-date$/m);
+    expect(display).toMatch(/^│ ◯\s+feature\/b-root\s+up-to-date$/m);
+    expect(display).toMatch(/^│ │ ◯\s+feature\/c-root\s+up-to-date$/m);
+    expect(display).toMatch(/^◉─┴─┘\s+main\s*$/m);
   });
 
   test("detects behind-parent sync status", async () => {
@@ -163,7 +285,7 @@ describe("getStackStatus", () => {
     expect(status.branches[0].pr).toBeNull();
   });
 
-  test("includes PR info in annotations and display", async () => {
+  test("does not load PR info unless explicitly enabled", async () => {
     await using repo = await createTestRepo();
     await using mock = await makeMockDir();
     await addBranch(repo.dir, "feature/pr1", "main");
@@ -184,6 +306,33 @@ describe("getStackStatus", () => {
 
     const status = await getStackStatus(repo.dir, "pr-stack", "test", "repo");
 
+    expect(status.branches[0].pr).toBeNull();
+    expect(stripAnsi(status.display)).not.toContain("#101");
+  });
+
+  test("includes PR info in annotations and display", async () => {
+    await using repo = await createTestRepo();
+    await using mock = await makeMockDir();
+    await addBranch(repo.dir, "feature/pr1", "main");
+
+    await setStackNode(repo.dir, "feature/pr1", "pr-stack", "main");
+    await setBaseBranch(repo.dir, "pr-stack", "main");
+
+    await writeFixture(
+      mock.path,
+      ["pr", "list", "--head", "feature/pr1", "--repo", "test/repo"],
+      [{
+        number: 101,
+        url: "https://github.com/test/repo/pull/101",
+        state: "OPEN",
+        isDraft: false,
+      }],
+    );
+
+    const status = await getStackStatus(repo.dir, "pr-stack", "test", "repo", {
+      loadPrs: true,
+    });
+
     expect(status.branches[0].pr).toEqual({
       number: 101,
       url: "https://github.com/test/repo/pull/101",
@@ -191,8 +340,11 @@ describe("getStackStatus", () => {
       isDraft: false,
     });
 
-    // Display should include the PR number
-    expect(status.display).toContain("#101");
+    // Display should include the PR number and sync metadata.
+    const display = stripAnsi(status.display);
+    expect(display).toContain("#101 (open)");
+    expect(display).toContain("up-to-date");
+    expect(display).not.toContain("PR #101");
   });
 
   test("surfaces merged PR when gh reports MERGED state", async () => {
@@ -220,6 +372,7 @@ describe("getStackStatus", () => {
       "landed-stack",
       "test",
       "repo",
+      { loadPrs: true },
     );
 
     expect(status.branches[0].pr).toMatchObject({
@@ -269,5 +422,76 @@ describe("getStackStatus with merged nodes", () => {
     // The live subtree still renders with computed sync status.
     const live = status.branches.find((b) => b.branch === "feature/live");
     expect(live?.syncStatus).toBe("up-to-date");
+  });
+});
+
+describe("getAllStackStatuses", () => {
+  test("renders all stacks grouped under their shared base branch", async () => {
+    await using repo = await createTestRepo();
+    await using _mock = await makeMockDir();
+    await addBranch(repo.dir, "feature/auth", "main");
+    await addBranch(repo.dir, "feature/auth-api", "feature/auth");
+    await addBranch(repo.dir, "feature/payments", "main");
+
+    await setStackNode(repo.dir, "feature/auth", "auth-stack", "main");
+    await setStackNode(
+      repo.dir,
+      "feature/auth-api",
+      "auth-stack",
+      "feature/auth",
+    );
+    await setBaseBranch(repo.dir, "auth-stack", "main");
+    await setMergeStrategy(repo.dir, "auth-stack", "squash");
+
+    await setStackNode(repo.dir, "feature/payments", "payments-stack", "main");
+    await setBaseBranch(repo.dir, "payments-stack", "main");
+
+    await runGit(repo.dir, "checkout", "feature/auth-api");
+
+    const status = await getAllStackStatuses(repo.dir);
+    const display = stripAnsi(status.display);
+
+    expect(status.stacks.map((stack) => stack.stackName)).toEqual([
+      "auth-stack",
+      "payments-stack",
+    ]);
+    expect(display).not.toContain("Base: ");
+    expect(display).toMatch(/^◉\s+feature\/auth-api\s+up-to-date$/m);
+    expect(display).toMatch(/^◯\s+feature\/auth\s+up-to-date$/m);
+    expect(display).toMatch(/^│ ◯\s+feature\/payments\s+up-to-date$/m);
+    expect(display).toMatch(/^◯─┘\s+main\s*$/m);
+    expect(display).not.toContain("─┴─┘");
+    expect(display).not.toContain("[auth-stack]");
+    expect(display).not.toContain("[payments-stack]");
+  });
+
+  test("renders separate sections for different base branches", async () => {
+    await using repo = await createTestRepo();
+    await using _mock = await makeMockDir();
+    await addBranch(repo.dir, "feature/main-root", "main");
+    await addBranch(repo.dir, "release/1.0", "main");
+    await addBranch(repo.dir, "feature/release-root", "release/1.0");
+
+    await setStackNode(repo.dir, "feature/main-root", "main-stack", "main");
+    await setBaseBranch(repo.dir, "main-stack", "main");
+
+    await setStackNode(
+      repo.dir,
+      "feature/release-root",
+      "release-stack",
+      "release/1.0",
+    );
+    await setBaseBranch(repo.dir, "release-stack", "release/1.0");
+
+    const status = await getAllStackStatuses(repo.dir);
+    const display = stripAnsi(status.display);
+
+    expect(display).not.toContain("Base: ");
+    expect(display).toMatch(/^◯\s+feature\/release-root\s+up-to-date$/m);
+    expect(display).toMatch(/^◯\s+feature\/main-root\s+up-to-date$/m);
+    expect(display).toMatch(/^◉─┘\s+main\s*$/m);
+    expect(display).toMatch(/^◯─┘\s+release\/1.0\s*$/m);
+    expect(display).not.toContain("[release-stack]");
+    expect(display).not.toContain("(no PR)");
   });
 });

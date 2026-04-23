@@ -1,8 +1,8 @@
-import type { Action, Cursor, State } from "../types.ts";
+import type { Action, Cursor, State, TabId } from "../types.ts";
 import { tabKey } from "../types.ts";
 import { buildGrid } from "../lib/layout.ts";
 
-export function initialState(): State {
+export function initialState(activeTab: TabId = "all"): State {
   return {
     trees: [],
     syncByBranch: new Map(),
@@ -11,7 +11,7 @@ export function initialState(): State {
     prData: new Map(),
     commits: new Map(),
     colorByStack: new Map(),
-    activeTab: "all",
+    activeTab,
     cursor: null,
     cursorByTab: new Map(),
     viewport: { scrollX: 0, scrollY: 0 },
@@ -39,12 +39,32 @@ function pushError(ring: string[], msg: string): string[] {
 export function reducer(state: State, action: Action): State {
   switch (action.type) {
     case "LOCAL_LOADED": {
+      let activeTab = state.activeTab;
+      if (state.activeTab !== "all") {
+        const stackName = state.activeTab.stack;
+        const stackExists = action.trees.some((tree) =>
+          tree.stackName === stackName
+        );
+        if (!stackExists) activeTab = "all";
+      }
       const initial: Cursor | null = action.currentBranch &&
           action.grid.byBranch.has(action.currentBranch)
         ? { branch: action.currentBranch }
         : (action.grid.cells[0]
           ? { branch: action.grid.cells[0].branch }
           : null);
+      let nextCursor = state.cursor ?? initial;
+      if (activeTab !== "all") {
+        const stackCells = action.grid.byStack.get(activeTab.stack) ?? [];
+        const firstCell = [...stackCells].sort((a, b) => a.row - b.row)[0];
+        const cursorCell = nextCursor
+          ? action.grid.byBranch.get(nextCursor.branch)
+          : undefined;
+        const cursorInStack = cursorCell?.stackName === activeTab.stack;
+        if (!cursorInStack) {
+          nextCursor = firstCell ? { branch: firstCell.branch } : null;
+        }
+      }
       return {
         ...state,
         trees: action.trees,
@@ -52,9 +72,10 @@ export function reducer(state: State, action: Action): State {
         worktreeByBranch: action.worktreeByBranch,
         grid: action.grid,
         colorByStack: action.colorByStack,
+        activeTab,
         currentBranch: action.currentBranch,
         totalLoadCount: action.totalBranches,
-        cursor: state.cursor ?? initial,
+        cursor: nextCursor,
       };
     }
     case "PR_LOAD_START": {

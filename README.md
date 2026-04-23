@@ -23,7 +23,7 @@ brew install stacked-prs
 After install, `stacked-prs` is in your PATH. Run the interactive TUI with:
 
 ```
-stacked-prs status -i
+stacked-prs status --interactive
 ```
 
 > The Homebrew binary gives you direct CLI access. For the AI-orchestrated
@@ -250,25 +250,40 @@ _Part of a stacked PR chain. Do not merge manually._
 Show current stack state (read-only):
 
 ```
-Stack: auth-rework (squash merge)
+│ ◯      feature/auth-ui     up-to-date
+│ ◉      feature/auth-tests  behind-parent
+◯─┘      feature/auth-api    up-to-date
+◯─┘      feature/auth        up-to-date
+```
 
-  feature/auth              PR #101 (open)      up-to-date
-  ├── feature/auth-api      PR #103 (open)      up-to-date
-  └── feature/auth-tests    PR #102 (draft)     behind-parent  <- you are here
-      └── feature/auth-ui   (no PR)             up-to-date
+Pass `--pr` / `-p` to load PR data from GitHub and include PR metadata in the
+output.
+
+When run from the repo's default branch (for example, `main`), `status` defaults
+to the all-stacks view. On any other branch, it defaults to that branch's stack
+only.
+
+Pass `--all` / `-a` to render every configured stack grouped by base branch:
+
+```
+│ ◯      feature/auth-api  up-to-date
+◯─┘      feature/auth      up-to-date
+◯        feature/payments  behind-parent
 ```
 
 ### Interactive view
 
 ```
 deno run --allow-run=git,gh,pbcopy,wl-copy,clip.exe --allow-env --allow-read \
-  src/cli.ts status -i
+  src/cli.ts status --interactive
 ```
 
 Launches a terminal UI that shows every stack in the repo as a horizontal tree,
 with per-stack colors, PR state glyphs, sync-status connectors, and a live
-commit detail pane. Mostly read-only: the only write operation is the `L`
-binding, which lands a stack whose root PR has been merged.
+commit detail pane. `--interactive` / `-i` opens the current stack by default,
+except on the default branch where it starts on the all-stacks view; add `--all`
+to force that view explicitly. Mostly read-only: the only write operation is the
+`L` binding, which lands a stack whose root PR has been merged.
 
 Key bindings:
 
@@ -363,7 +378,7 @@ deno run --allow-run=git,gh --allow-env --allow-read \
 
 | Subcommand                                    | Purpose                                                                |
 | --------------------------------------------- | ---------------------------------------------------------------------- |
-| `cli.ts status [--json]`                      | Tree output (or JSON) with PR info and sync status                     |
+| `cli.ts status [--json] [--all]`              | Ladder output (or JSON) with PR info and sync status                   |
 | `cli.ts create <branch> [--create-worktree]`  | Create a child branch; auto-inits stack when on default branch         |
 | `cli.ts restack [--json]`                     | Segment-based tree rebase; handles conflicts across segments           |
 | `cli.ts nav [--dry-run]`                      | Builds and executes navigation comment plans                           |
