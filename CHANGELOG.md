@@ -1,5 +1,13 @@
 # Changelog
 
+## [2.3.0](https://github.com/wyattjoh/stacked-prs/compare/stacked-prs-v2.2.1...stacked-prs-v2.3.0) (2026-04-27)
+
+
+### Features
+
+* **status:** redesign stack status views ([40b841a](https://github.com/wyattjoh/stacked-prs/commit/40b841ad02b5ce38ef322e737b83572b2283df37))
+* **submit:** add --only flag to scope submit to one branch ([d965456](https://github.com/wyattjoh/stacked-prs/commit/d9654565e5f6ea3e30dfe57c28a49fac130dc59f))
+
 ## [2.2.1](https://github.com/wyattjoh/stacked-prs/compare/stacked-prs-v2.2.0...stacked-prs-v2.2.1) (2026-04-20)
 
 
