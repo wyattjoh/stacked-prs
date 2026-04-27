@@ -171,6 +171,9 @@ export async function executeSubmit(
 export function renderSubmitPlan(plan: SubmitPlan): string {
   const lines: string[] = [];
   lines.push(`Stack: ${plan.stackName}`);
+  if (plan.scope?.only) {
+    lines.push(`  Scope: only ${plan.scope.only}`);
+  }
   if (plan.isNoOp) {
     lines.push(
       "  All PRs are up to date. Nothing to push, create, or update.",

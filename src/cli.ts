@@ -1067,6 +1067,10 @@ await new Command()
   .option("--repo <repo:string>", "GitHub repo name")
   .option("--dry-run", "Print the plan without executing")
   .option("--force", "Execute without the interactive confirmation prompt")
+  .option(
+    "--only <branch:string>",
+    "Restrict per-branch ops (push, create, edit, draft) to a single branch; nav comments still cover the full stack",
+  )
   .option("--json", "Output as JSON")
   .action(async (options) => {
     const stackName = await resolveStackName(dir, options.stackName);
@@ -1075,7 +1079,20 @@ await new Command()
     // Every `gh pr list --head` in the planner, the executor, and the
     // final nav recompute piggybacks on a single repo-wide fetch.
     const result = await withPrIndex(owner, repo, async () => {
-      const plan = await computeSubmitPlan(dir, stackName, owner, repo);
+      let plan;
+      try {
+        plan = await computeSubmitPlan(dir, stackName, owner, repo, {
+          only: options.only,
+        });
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        if (options.json) {
+          logJson({ ok: false, error: message });
+        } else {
+          console.error(message);
+        }
+        Deno.exit(1);
+      }
 
       if (options.dryRun) {
         if (options.json) {

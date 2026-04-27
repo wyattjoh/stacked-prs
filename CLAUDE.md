@@ -186,7 +186,7 @@ can be continued across process invocations.
 | `src/commands/nav.ts`             | Navigation comments                                                   | `cli.ts nav [--dry-run]`                                                |
 | `src/commands/verify-refs.ts`     | Post-rebase verification                                              | `cli.ts verify-refs`                                                    |
 | `src/commands/import-discover.ts` | Branch tree detection                                                 | `cli.ts import-discover`                                                |
-| `src/commands/submit.ts`          | Plan (with `--dry-run`) and execute submit                            | `cli.ts submit [--dry-run] [--force] [--json]`                          |
+| `src/commands/submit.ts`          | Plan (with `--dry-run`) and execute submit                            | `cli.ts submit [--only <branch>] [--dry-run] [--force] [--json]`        |
 | `src/commands/sync.ts`            | Fetch + ff base + prune merged PRs + restack + push across all stacks | `cli.ts sync [--dry-run] [--force] [--json]`                            |
 | `src/commands/pr.ts`              | Branch-to-PR lookup                                                   | `cli.ts pr [--branch=<name>] [--print] [--json]`                        |
 | `src/commands/land.ts`            | Land planning and execution (pure planLand + impure executeLand)      | `cli.ts land [--dry-run] [--json] [--resume]`; also imported by the TUI |

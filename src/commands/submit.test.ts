@@ -355,6 +355,73 @@ describe("executeSubmit", () => {
     await bare[Symbol.asyncDispose]();
   });
 
+  test("executeSubmit on a --only-scoped plan pushes and creates only the named branch", async () => {
+    await using repo = await createTestRepo();
+    await using mock = await makeMockDir();
+    await using log = makeCallLog();
+    await addBranch(repo.dir, "feat/a", "main");
+    await addBranch(repo.dir, "feat/b", "feat/a");
+    await addBranch(repo.dir, "feat/c", "feat/b");
+    await setBaseBranch(repo.dir, "my-stack", "main");
+    await setStackNode(repo.dir, "feat/a", "my-stack", "main");
+    await setStackNode(repo.dir, "feat/b", "my-stack", "feat/a");
+    await setStackNode(repo.dir, "feat/c", "my-stack", "feat/b");
+
+    // Only feat/b's pr-create fixture is needed; submit must not try the others.
+    await writeFixture(
+      mock.path,
+      [
+        "pr",
+        "create",
+        "--repo",
+        "o/r",
+        "--base",
+        "feat/a",
+        "--head",
+        "feat/b",
+        "--fill",
+        "--draft",
+      ],
+      "https://github.com/o/r/pull/202",
+    );
+
+    const bare = await makeTempDir("bare-");
+    await runGitCommand(repo.dir, "init", "--bare", "-q", bare.path);
+    await runGitCommand(repo.dir, "remote", "add", "origin", bare.path);
+
+    const plan = await computeSubmitPlan(repo.dir, "my-stack", "o", "r", {
+      only: "feat/b",
+    });
+    expect(plan.branches.map((b) => b.branch)).toEqual(["feat/b"]);
+    expect(plan.scope?.only).toBe("feat/b");
+
+    const result = await executeSubmit(repo.dir, plan, "o", "r");
+    expect(result.ok).toBe(true);
+    expect(result.pushedBranches).toEqual(["feat/b"]);
+    expect(result.prsCreated.map((p) => p.branch)).toEqual(["feat/b"]);
+
+    const createCalls = log.calls.filter((c) =>
+      c[0] === "pr" && c[1] === "create"
+    );
+    expect(createCalls).toHaveLength(1);
+    expect(createCalls[0]).toContain("feat/b");
+    expect(createCalls[0]).toContain("--draft");
+
+    await bare[Symbol.asyncDispose]();
+  });
+
+  test("renderSubmitPlan annotates a --only scope", () => {
+    const plan = {
+      stackName: "s",
+      mergeStrategy: "merge" as const,
+      branches: [],
+      navComments: [],
+      isNoOp: true,
+      scope: { only: "feat/b" },
+    };
+    expect(renderSubmitPlan(plan)).toContain("Scope: only feat/b");
+  });
+
   test("renderSubmitPlan handles the no-op case", () => {
     const plan = {
       stackName: "s",

@@ -331,6 +331,59 @@ describe("computeSubmitPlan", () => {
       .toBeUndefined();
   });
 
+  test("scopes branchPlans to a single branch when only is set", async () => {
+    await using repo = await createTestRepo();
+    await using _mock = await makeMockDir();
+    await addBranch(repo.dir, "feat/a", "main");
+    await addBranch(repo.dir, "feat/b", "feat/a");
+    await addBranch(repo.dir, "feat/c", "feat/b");
+
+    await setBaseBranch(repo.dir, "my-stack", "main");
+    await setStackNode(repo.dir, "feat/a", "my-stack", "main");
+    await setStackNode(repo.dir, "feat/b", "my-stack", "feat/a");
+    await setStackNode(repo.dir, "feat/c", "my-stack", "feat/b");
+
+    const plan = await computeSubmitPlan(repo.dir, "my-stack", "o", "r", {
+      only: "feat/b",
+    });
+
+    expect(plan.branches).toHaveLength(1);
+    expect(plan.branches[0].branch).toBe("feat/b");
+    expect(plan.scope?.only).toBe("feat/b");
+  });
+
+  test("computeSubmitPlan throws when --only branch is not in the stack", async () => {
+    await using repo = await createTestRepo();
+    await using _mock = await makeMockDir();
+    await addBranch(repo.dir, "feat/a", "main");
+
+    await setBaseBranch(repo.dir, "my-stack", "main");
+    await setStackNode(repo.dir, "feat/a", "my-stack", "main");
+
+    await expect(
+      computeSubmitPlan(repo.dir, "my-stack", "o", "r", {
+        only: "feat/missing",
+      }),
+    ).rejects.toThrow(/feat\/missing.*my-stack/);
+  });
+
+  test("computeSubmitPlan throws when --only targets a tombstoned branch", async () => {
+    await using repo = await createTestRepo();
+    await using _mock = await makeMockDir();
+    await addBranch(repo.dir, "feat/live", "main");
+
+    await setBaseBranch(repo.dir, "my-stack", "main");
+    await setStackNode(repo.dir, "feat/live", "my-stack", "main");
+    await addLandedBranch(repo.dir, "my-stack", "feat/landed");
+    await addLandedPr(repo.dir, "my-stack", "feat/landed", 99);
+
+    await expect(
+      computeSubmitPlan(repo.dir, "my-stack", "o", "r", {
+        only: "feat/landed",
+      }),
+    ).rejects.toThrow(/feat\/landed/);
+  });
+
   test("flips a base-targeted PR to ready when it is currently a draft", async () => {
     await using repo = await createTestRepo();
     await using mock = await makeMockDir();

@@ -51,6 +51,21 @@ export interface SubmitPlan {
   branches: BranchSubmitPlan[];
   navComments: NavCommentPlan[];
   isNoOp: boolean;
+  /**
+   * Optional scope filter. When `only` is set, `branches` is restricted to the
+   * single named branch; nav comments still cover the full stack so siblings
+   * stay correct.
+   */
+  scope?: { only?: string };
+}
+
+export interface ComputeSubmitPlanOptions {
+  /**
+   * Restrict per-branch ops (push, create, edit, draft flips) to a single
+   * branch. The branch must be a live (non-tombstoned) member of the stack;
+   * unknown or merged branches throw.
+   */
+  only?: string;
 }
 
 async function computeNeedsPush(dir: string, branch: string): Promise<boolean> {
@@ -77,6 +92,7 @@ export async function computeSubmitPlan(
   stackName: string,
   owner: string,
   repo: string,
+  options: ComputeSubmitPlanOptions = {},
 ): Promise<SubmitPlan> {
   const [tree, mergeStrategy, currentBranchResult] = await Promise.all([
     getStackTree(dir, stackName),
@@ -90,7 +106,22 @@ export async function computeSubmitPlan(
   // planner would otherwise fall through to `action: "create"` for a branch
   // that has already landed. Filter them out so submit never tries to push,
   // recreate, or modify PRs for already-landed branches.
-  const nodes = getAllNodes(tree).filter((n) => !n.merged);
+  const liveNodes = getAllNodes(tree).filter((n) => !n.merged);
+
+  if (options.only !== undefined) {
+    const match = liveNodes.find((n) => n.branch === options.only);
+    if (!match) {
+      const known = liveNodes.map((n) => n.branch).join(", ") || "(none)";
+      throw new Error(
+        `Branch '${options.only}' is not a live member of stack '${stackName}'. ` +
+          `Known live branches: ${known}.`,
+      );
+    }
+  }
+
+  const nodes = options.only !== undefined
+    ? liveNodes.filter((n) => n.branch === options.only)
+    : liveNodes;
 
   // Fetch PR info and compute push state for all nodes in parallel.
   // `listPrsForBranch` short-circuits to the active repo-wide PR index
@@ -158,5 +189,6 @@ export async function computeSubmitPlan(
     branches: branchPlans,
     navComments,
     isNoOp,
+    ...(options.only !== undefined ? { scope: { only: options.only } } : {}),
   };
 }

@@ -462,8 +462,14 @@ merged out of order. The submit plan reconciles drift on every run via the
 - No flags: print the plan and prompt `[y/N]` before executing.
 - `--force`: execute without the prompt.
 
+Add `--only=<branch>` to scope per-branch ops (push, create/edit, draft flips)
+to a single branch in the stack. Nav comments still rebuild stack-wide so
+sibling PRs reflect any newly-created PR. The CLI errors out if `<branch>` is
+not a live (non-tombstoned) member of the stack.
+
 1. Run `cli.ts submit --dry-run --stack-name=<name>` to inspect the plan. Add
-   `--json` to get the raw `SubmitPlan` shape.
+   `--json` to get the raw `SubmitPlan` shape. Add `--only=<branch>` to limit
+   per-branch actions to one branch.
 2. **No-op check:** if the plan reports `isNoOp: true`, report "All PRs are up
    to date with correct bases, draft state, and nav comments" and stop.
 3. **Present full plan:**
@@ -751,15 +757,18 @@ base branch, and any warnings (e.g., PR base mismatches).
 ```bash
 ${CLAUDE_PLUGIN_ROOT}/skills/stacked-prs/scripts/stacked-prs submit \
   [--stack-name=<name>] [--owner=<owner> --repo=<repo>] \
-  [--dry-run] [--force] [--json]
+  [--only=<branch>] [--dry-run] [--force] [--json]
 ```
 
 Runs the full submit flow: force-pushes branches, creates or edits PRs (with
 `--draft` derived from the stack's shape), flips draft state when needed, and
 applies the nav comment plan. `--dry-run` prints the plan without mutating
 (combine with `--json` for the raw `SubmitPlan` shape: per-branch actions, an
-`isNoOp` flag, and nav comment plan); with no flags the CLI prints the plan and
-prompts `[y/N]`; `--force` skips the prompt.
+`isNoOp` flag, an optional `scope.only` field, and nav comment plan); with no
+flags the CLI prints the plan and prompts `[y/N]`; `--force` skips the prompt.
+`--only=<branch>` restricts per-branch ops (push, create, edit, draft flips) to
+a single live branch in the stack while leaving the nav comment rebuild
+stack-wide; the CLI errors out if the branch is not a live member.
 
 ### `sync`
 
