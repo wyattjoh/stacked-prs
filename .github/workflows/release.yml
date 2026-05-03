@@ -63,8 +63,39 @@ jobs:
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
 
-  update-marketplace:
+  publish:
     needs: release-please
+    if: ${{ needs.release-please.outputs.releases_created == 'true' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Setup Deno
+        uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+
+      - name: Check formatting
+        run: deno fmt --check
+
+      - name: Lint code
+        run: deno lint
+
+      - name: Type check
+        run: deno check src/cli.ts
+
+      - name: Run tests
+        run: deno task test
+
+      - name: Publish to JSR
+        run: deno publish
+
+  update-marketplace:
+    needs: [release-please, publish]
     if: ${{ needs.release-please.outputs.releases_created == 'true' }}
     runs-on: ubuntu-latest
     steps:
@@ -78,7 +109,7 @@ jobs:
           token: ${{ secrets.MARKETPLACE_PAT }}
 
   homebrew-build:
-    needs: release-please
+    needs: [release-please, publish]
     if: ${{ needs.release-please.outputs.releases_created == 'true' }}
     runs-on: ubuntu-latest
     permissions:

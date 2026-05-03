@@ -5,9 +5,10 @@
 # stacked-prs
 
 A tool for managing stacked branches and pull requests. Available as a
-standalone CLI (via Homebrew) and as a Claude Code plugin that works _through_
-Claude: you issue natural language requests or `/stacked-prs <subcommand>`, and
-Claude orchestrates git, gh, and Deno helper scripts on your behalf.
+standalone CLI (via Homebrew or JSR) and as a Claude Code plugin that works
+_through_ Claude: you issue natural language requests or
+`/stacked-prs <subcommand>`, and Claude orchestrates git, gh, and Deno helper
+scripts on your behalf.
 
 ## Installation
 
@@ -21,6 +22,20 @@ brew install stacked-prs
 ```
 
 After install, `stacked-prs` is in your PATH. Run the interactive TUI with:
+
+```
+stacked-prs status --interactive
+```
+
+### JSR (standalone CLI)
+
+Install the Deno-based CLI from JSR:
+
+```
+deno install --global --allow-run=git,gh,pbcopy,xclip,wl-copy --allow-env --allow-read -n stacked-prs jsr:@wyattjoh/stacked-prs
+```
+
+This installs the same command name:
 
 ```
 stacked-prs status --interactive

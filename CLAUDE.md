@@ -102,6 +102,9 @@ deno task install
 # Compile a standalone binary (no Deno runtime needed at target)
 deno task compile:macos   # macOS (pbcopy clipboard support)
 deno task compile:linux   # Linux (xclip/wl-copy clipboard support)
+
+# Validate the JSR package without publishing
+deno publish --dry-run --allow-dirty
 ```
 
 Subcommands: `status` (add `--interactive`/`-i` to launch the TUI), `create`,
@@ -361,11 +364,14 @@ when editing the runbook.
 - **Release** (`.github/workflows/release.yml`) runs on push to `main`:
   release-please opens release PRs and tags new versions as
   `stacked-prs-v<version>`. On release, `wyattjoh/claude-code-marketplace@v1`
-  updates the listing in `wyattjoh/claude-code-marketplace`.
-- The only version source of truth is `.claude-plugin/plugin.json`. release-
-  please bumps it via the `extra-files` rule in `release-please-config.json`.
-- No JSR publishing. The skill always runs its source from
-  `${CLAUDE_PLUGIN_ROOT}/src/cli.ts`, so there is no library consumer.
+  updates the listing in `wyattjoh/claude-code-marketplace`, `deno publish`
+  publishes `@wyattjoh/stacked-prs` to JSR with GitHub OIDC, and the Homebrew
+  jobs build/upload release binaries.
+- Release versions are tracked in both `deno.json` (JSR package metadata) and
+  `.claude-plugin/plugin.json` (plugin metadata). release-please bumps both via
+  `extra-files` rules in `release-please-config.json`.
+- The JSR package exports `src/cli.ts` for `deno install`. Keep the CLI guarded
+  by `import.meta.main` so importing the package does not parse process args.
 
 ## Keeping docs in sync
 

@@ -2,11 +2,16 @@
   "$schema": "https://raw.githubusercontent.com/googleapis/release-please/main/schemas/config.json",
   "packages": {
     ".": {
-      "package-name": "stacked-prs",
-      "release-type": "simple",
+      "package-name": "@wyattjoh/stacked-prs",
+      "release-type": "node",
       "include-component-in-tag": true,
       "component": "stacked-prs",
       "extra-files": [
+        {
+          "type": "json",
+          "path": "deno.json",
+          "jsonpath": "$.version"
+        },
         {
           "type": "json",
           "path": ".claude-plugin/plugin.json",
