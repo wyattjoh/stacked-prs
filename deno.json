@@ -1,4 +1,23 @@
 {
+  "name": "@wyattjoh/stacked-prs",
+  "version": "2.3.0",
+  "license": "MIT",
+  "exports": "./src/cli.ts",
+  "publish": {
+    "include": [
+      "LICENSE",
+      "README.md",
+      "deno.json",
+      ".claude-plugin/plugin.json",
+      "src/**/*.ts",
+      "src/**/*.tsx"
+    ],
+    "exclude": ["**/*.test.ts", "**/*.test.tsx"]
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/wyattjoh/stacked-prs.git"
+  },
   "tasks": {
     "check": "deno fmt --check && deno lint && deno check src/cli.ts",
     "test": "deno test --allow-run --allow-env --allow-read --allow-write",
@@ -27,5 +46,10 @@
   },
   "fmt": {
     "exclude": ["CHANGELOG.md", "docs/superpowers/**"]
+  },
+  "lint": {
+    "rules": {
+      "exclude": ["verbatim-module-syntax"]
+    }
   }
 }

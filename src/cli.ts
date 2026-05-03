@@ -30,7 +30,7 @@ import {
   type CreatePlan,
   planCreate,
 } from "./commands/create.ts";
-import { type MergeStrategy } from "./lib/stack.ts";
+import type { MergeStrategy } from "./lib/stack.ts";
 import {
   executeLandFromCli,
   type LandCliResult,
@@ -260,7 +260,7 @@ function renderSplitPlan(plan: SplitPlan): string {
 
 const dir = Deno.cwd();
 
-await new Command()
+const command = new Command()
   .name("stacked-prs")
   .version(pluginMeta.version)
   .description("Manage stacked branches and pull requests")
@@ -737,7 +737,10 @@ await new Command()
     });
   })
   // --- verify-refs ---
-  .command("verify-refs", "Verify branch ancestry and detect duplicate patches")
+  .command(
+    "verify-refs",
+    "Verify branch ancestry and detect duplicate patches",
+  )
   .option(
     "--stack-name <name:string>",
     "Stack name (auto-detected from current branch)",
@@ -1565,7 +1568,9 @@ await new Command()
     "--branch <name:string>",
     "Branch to move (default: current)",
   )
-  .option("--new-parent <name:string>", "New parent branch", { required: true })
+  .option("--new-parent <name:string>", "New parent branch", {
+    required: true,
+  })
   .option("--force", "Skip the TTY confirmation prompt")
   .option("--dry-run", "Print plan without executing")
   .option("--json", "Output as JSON")
@@ -1680,7 +1685,9 @@ await new Command()
     }
 
     if (options.byCommit && options.byFile) {
-      console.error("Pass exactly one of --by-commit or --by-file, not both.");
+      console.error(
+        "Pass exactly one of --by-commit or --by-file, not both.",
+      );
       Deno.exit(1);
     }
     if (!options.byCommit && !options.byFile) {
@@ -1700,7 +1707,9 @@ await new Command()
         mode: "by-file" as const,
         stackName,
         branch,
-        files: options.byFile!.split(",").map((s) => s.trim()).filter(Boolean),
+        files: options.byFile!.split(",").map((s) => s.trim()).filter(
+          Boolean,
+        ),
         newBranch: options.newBranch,
         extractMessage: options.extractMessage ?? "extract",
         remainderMessage: options.remainderMessage ?? "remainder",
@@ -1738,5 +1747,13 @@ await new Command()
       console.error(`${result.error}: ${result.message ?? ""}`);
     }
     if (!result.ok) Deno.exit(1);
-  })
-  .parse(Deno.args);
+  });
+
+/** Run the stacked-prs command-line interface. */
+export async function main(args: string[] = Deno.args): Promise<void> {
+  await command.parse(args);
+}
+
+if (import.meta.main) {
+  await main();
+}
