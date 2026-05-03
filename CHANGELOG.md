@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.4.0](https://github.com/wyattjoh/stacked-prs/compare/stacked-prs-v2.3.0...stacked-prs-v2.4.0) (2026-05-03)
+
+
+### Features
+
+* publish stacked-prs to jsr ([#25](https://github.com/wyattjoh/stacked-prs/issues/25)) ([a7f1ebb](https://github.com/wyattjoh/stacked-prs/commit/a7f1ebb0bf9ef1db72416d108faa8143aab2c0df))
+
 ## [2.3.0](https://github.com/wyattjoh/stacked-prs/compare/stacked-prs-v2.2.1...stacked-prs-v2.3.0) (2026-04-27)
 
 
