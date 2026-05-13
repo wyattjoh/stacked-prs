@@ -255,7 +255,8 @@ references so GitHub auto-links each entry and shows the PR title on hover:
   - #103
   - **#102 👈 this PR**
 
-_Part of a stacked PR chain. Do not merge manually._
+Part of a [stacked-prs](https://github.com/wyattjoh/stacked-prs) chain. Do not
+merge manually.
 
 <!-- stack-nav:end -->
 ```
