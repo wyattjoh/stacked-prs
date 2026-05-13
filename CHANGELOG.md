@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.4.1](https://github.com/wyattjoh/stacked-prs/compare/stacked-prs-v2.4.0...stacked-prs-v2.4.1) (2026-05-13)
+
+
+### Bug Fixes
+
+* **nav:** update navigation comment footer ([#27](https://github.com/wyattjoh/stacked-prs/issues/27)) ([e02a6c2](https://github.com/wyattjoh/stacked-prs/commit/e02a6c29b424f66adc80739bd8d55687df9169f6))
+
 ## [2.4.0](https://github.com/wyattjoh/stacked-prs/compare/stacked-prs-v2.3.0...stacked-prs-v2.4.0) (2026-05-03)
 
 
