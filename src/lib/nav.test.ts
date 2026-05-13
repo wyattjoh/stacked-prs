@@ -165,7 +165,7 @@ describe("generateNavMarkdown", () => {
     expect(result).toContain("<!-- stack-nav:end -->");
   });
 
-  test("contains the Part of a stacked PR chain footer", () => {
+  test("contains the stacked-prs chain footer", () => {
     const tree = makeTree("my-stack", [
       { branch: "feature/a", parent: "main" },
     ]);
@@ -174,7 +174,9 @@ describe("generateNavMarkdown", () => {
 
     const result = generateNavMarkdown(tree, prMap, 200);
 
-    expect(result).toContain("Part of a stacked PR chain");
+    expect(result).toContain(
+      "Part of a [stacked-prs](https://github.com/wyattjoh/stacked-prs) chain. Do not merge manually.",
+    );
   });
 
   test("includes the stack name in the header", () => {

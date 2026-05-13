@@ -66,7 +66,7 @@ export function generateNavMarkdown(
 
   lines.push(
     "",
-    "*Part of a stacked PR chain. Do not merge manually.*",
+    "Part of a [stacked-prs](https://github.com/wyattjoh/stacked-prs) chain. Do not merge manually.",
     "<!-- stack-nav:end -->",
   );
 
