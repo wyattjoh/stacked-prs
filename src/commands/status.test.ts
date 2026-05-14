@@ -8,6 +8,7 @@ import {
   runGit,
 } from "../lib/testdata/helpers.ts";
 import {
+  addLandedParent,
   runGitCommand,
   setBaseBranch,
   setMergeStrategy,
@@ -85,7 +86,8 @@ describe("getStackStatus", () => {
     expect(display).not.toContain("Stack:");
     expect(display).toMatch(/^◯\s+feature\/b\s+up-to-date$/m);
     expect(display).toMatch(/^◯\s+feature\/a\s+up-to-date$/m);
-    expect(display).toMatch(/^◉─┘\s+main\s*$/m);
+    expect(display).toMatch(/^◉\s+main\s*$/m);
+    expect(display).not.toContain("─┘");
     expect(display).not.toContain("─┴─┘");
     expect(display.indexOf("feature/b")).toBeLessThan(
       display.indexOf("feature/a"),
@@ -183,7 +185,7 @@ describe("getStackStatus", () => {
     const display = stripAnsi(status.display);
 
     expect(display).toMatch(/^◯\s+feature\/root\s+up-to-date$/m);
-    expect(display).toMatch(/^◉─┘\s+main\s*$/m);
+    expect(display).toMatch(/^◉\s+main\s*$/m);
     expect(display.indexOf("feature/root")).toBeLessThan(
       display.indexOf("main"),
     );
@@ -404,6 +406,26 @@ describe("getStackStatus with merged nodes", () => {
     expect(branchA?.syncStatus).toBe("landed");
   });
 
+  test("walks past tombstoned ancestors when computing sync status", async () => {
+    // Reproduces the post-land state: `feature/landed` was squash-merged and
+    // its local ref deleted, but `feature/live` still records it as its
+    // stack-parent. computeSyncStatus would otherwise rev-list against a
+    // dangling ref and fall back to "diverged"; the fix should walk to the
+    // first live ancestor (main) and report up-to-date.
+    await using repo = await createTestRepo();
+    await using _mock = await makeMockDir();
+    await addBranch(repo.dir, "feature/live", "main");
+
+    await setStackNode(repo.dir, "feature/live", "s", "feature/landed");
+    await setBaseBranch(repo.dir, "s", "main");
+    await addLandedParent(repo.dir, "s", "feature/landed", "main");
+    await addTombstone(repo.dir, "s", "feature/landed", { prNumber: 42 });
+
+    const status = await getStackStatus(repo.dir, "s");
+    const live = status.branches.find((b) => b.branch === "feature/live");
+    expect(live?.syncStatus).toBe("up-to-date");
+  });
+
   test("renders stack-level tombstone root as a landed node", async () => {
     await using repo = await createTestRepo();
     await using _mock = await makeMockDir();
@@ -489,8 +511,8 @@ describe("getAllStackStatuses", () => {
     expect(display).not.toContain("Base: ");
     expect(display).toMatch(/^◯\s+feature\/release-root\s+up-to-date$/m);
     expect(display).toMatch(/^◯\s+feature\/main-root\s+up-to-date$/m);
-    expect(display).toMatch(/^◉─┘\s+main\s*$/m);
-    expect(display).toMatch(/^◯─┘\s+release\/1.0\s*$/m);
+    expect(display).toMatch(/^◉\s+main\s*$/m);
+    expect(display).toMatch(/^◯\s+release\/1.0\s*$/m);
     expect(display).not.toContain("[release-stack]");
     expect(display).not.toContain("(no PR)");
   });
