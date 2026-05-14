@@ -1,6 +1,7 @@
 import * as colors from "@std/fmt/colors";
 import {
   computeSyncStatus,
+  effectiveParent,
   getAllNodes,
   getAllStackTrees,
   getStackTree,
@@ -201,9 +202,11 @@ function basePrefixText(
   marker: string,
   rootCount: number,
 ): string {
-  return rootCount > 0
-    ? `${marker}${"─┴".repeat(Math.max(0, rootCount - 2))}─┘`
-    : marker;
+  // The `─┘` corner is the right side of a join glyph and only makes sense
+  // when two or more root trunks merge into the base row. A single root sits
+  // directly above the base label with no horizontal extension.
+  if (rootCount <= 1) return marker;
+  return `${marker}${"─┴".repeat(rootCount - 2)}─┘`;
 }
 
 function renderBasePrefix(
@@ -408,9 +411,18 @@ async function buildStackStatus(
 
   const branches = await Promise.all(
     nodes.map(async (node): Promise<BranchStatus> => {
+      // Walk past tombstoned ancestors so we compare against a parent ref
+      // that still exists. `land` deletes the local branch when a stack node
+      // is folded into the base, so the literal `node.parent` may be a
+      // dangling name; rev-list then fails and the old code returned a
+      // spurious "diverged". This matches the parent restack would target.
       const syncStatus: SyncStatus = node.merged
         ? "landed"
-        : await computeSyncStatus(dir, node.branch, node.parent);
+        : await computeSyncStatus(
+          dir,
+          node.branch,
+          effectiveParent(tree, node),
+        );
       const pr = loadPrs ? await queryPr(node.branch, owner, repo) : null;
 
       const { depth, isLastChild } = depthMap.get(node.branch) ?? {

@@ -12,10 +12,7 @@
       "src/**/*.ts",
       "src/**/*.tsx"
     ],
-    "exclude": [
-      "**/*.test.ts",
-      "**/*.test.tsx"
-    ]
+    "exclude": ["**/*.test.ts", "**/*.test.tsx"]
   },
   "repository": {
     "type": "git",
@@ -23,7 +20,7 @@
   },
   "tasks": {
     "check": "deno fmt --check && deno lint && deno check src/cli.ts",
-    "test": "deno test --allow-run --allow-env --allow-read --allow-write",
+    "test": "deno test --allow-run --allow-env --allow-read --allow-write --parallel src/",
     "tui": "deno run --allow-run=git,gh,pbcopy --allow-env --allow-read src/cli.ts status --interactive",
     "install": "deno install --global --force --config $(pwd)/deno.json --allow-run=git,gh,pbcopy --allow-env --allow-read -n stacked-prs $(pwd)/src/cli.ts",
     "compile:macos": "deno compile --config deno.json --allow-run=git,gh,pbcopy --allow-env --allow-read -o stacked-prs src/cli.ts",
@@ -33,10 +30,7 @@
     "jsx": "react",
     "jsxFactory": "React.createElement",
     "jsxFragmentFactory": "React.Fragment",
-    "lib": [
-      "deno.ns",
-      "dom"
-    ]
+    "lib": ["deno.ns", "dom"]
   },
   "imports": {
     "@cliffy/command": "jsr:@cliffy/command@^1",
@@ -51,16 +45,11 @@
     "dataloader": "npm:dataloader@^2.2.3"
   },
   "fmt": {
-    "exclude": [
-      "CHANGELOG.md",
-      "docs/superpowers/**"
-    ]
+    "exclude": ["CHANGELOG.md", "docs/superpowers/**"]
   },
   "lint": {
     "rules": {
-      "exclude": [
-        "verbatim-module-syntax"
-      ]
+      "exclude": ["verbatim-module-syntax"]
     }
   }
 }
