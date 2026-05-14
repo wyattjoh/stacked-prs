@@ -1,6 +1,6 @@
 {
   "name": "@wyattjoh/stacked-prs",
-  "version": "2.4.1",
+  "version": "2.4.2",
   "license": "MIT",
   "exports": "./src/cli.ts",
   "publish": {
@@ -12,7 +12,10 @@
       "src/**/*.ts",
       "src/**/*.tsx"
     ],
-    "exclude": ["**/*.test.ts", "**/*.test.tsx"]
+    "exclude": [
+      "**/*.test.ts",
+      "**/*.test.tsx"
+    ]
   },
   "repository": {
     "type": "git",
@@ -30,7 +33,10 @@
     "jsx": "react",
     "jsxFactory": "React.createElement",
     "jsxFragmentFactory": "React.Fragment",
-    "lib": ["deno.ns", "dom"]
+    "lib": [
+      "deno.ns",
+      "dom"
+    ]
   },
   "imports": {
     "@cliffy/command": "jsr:@cliffy/command@^1",
@@ -45,11 +51,16 @@
     "dataloader": "npm:dataloader@^2.2.3"
   },
   "fmt": {
-    "exclude": ["CHANGELOG.md", "docs/superpowers/**"]
+    "exclude": [
+      "CHANGELOG.md",
+      "docs/superpowers/**"
+    ]
   },
   "lint": {
     "rules": {
-      "exclude": ["verbatim-module-syntax"]
+      "exclude": [
+        "verbatim-module-syntax"
+      ]
     }
   }
 }
