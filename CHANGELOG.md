@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.4.2](https://github.com/wyattjoh/stacked-prs/compare/stacked-prs-v2.4.1...stacked-prs-v2.4.2) (2026-05-14)
+
+
+### Bug Fixes
+
+* **status:** drop trunk corner for single-root stacks and walk past tombstones ([#29](https://github.com/wyattjoh/stacked-prs/issues/29)) ([7b0c836](https://github.com/wyattjoh/stacked-prs/commit/7b0c836ed9f913af0dd1bd246224db9fb9fc06d0))
+
 ## [2.4.1](https://github.com/wyattjoh/stacked-prs/compare/stacked-prs-v2.4.0...stacked-prs-v2.4.1) (2026-05-13)
 
 
