@@ -49,7 +49,7 @@ describe("needsMigration", () => {
   });
 });
 
-describe("migrateLegacyConfig — single stack happy path", () => {
+describe("migrateLegacyConfig: single stack happy path", () => {
   test("converts one stack with three branches", async () => {
     await using repo = await createTestRepo();
     await addBranch(repo.dir, "feat/a", "main");
@@ -81,7 +81,7 @@ describe("migrateLegacyConfig — single stack happy path", () => {
   });
 });
 
-describe("migrateLegacyConfig — multi-stack with distinct bases", () => {
+describe("migrateLegacyConfig: multi-stack with distinct bases", () => {
   test("each branch gets its stack's base + strategy", async () => {
     await using repo = await createTestRepo();
     await addBranch(repo.dir, "feat/a", "main");
@@ -104,7 +104,7 @@ describe("migrateLegacyConfig — multi-stack with distinct bases", () => {
   });
 });
 
-describe("migrateLegacyConfig — resume-state", () => {
+describe("migrateLegacyConfig: resume-state", () => {
   test("moves single in-flight resume-state to repo-level", async () => {
     await using repo = await createTestRepo();
     await addBranch(repo.dir, "feat/a", "main");
@@ -138,7 +138,7 @@ describe("migrateLegacyConfig — resume-state", () => {
   });
 });
 
-describe("migrateLegacyConfig — default-merge-strategy", () => {
+describe("migrateLegacyConfig: default-merge-strategy", () => {
   test("renames stack.default-merge-strategy to stacked-prs.default-merge-strategy", async () => {
     await using repo = await createTestRepo();
     await setConfig(repo.dir, "stack.default-merge-strategy", "merge");
@@ -148,7 +148,7 @@ describe("migrateLegacyConfig — default-merge-strategy", () => {
   });
 });
 
-describe("migrateLegacyConfig — orphans and tombstones", () => {
+describe("migrateLegacyConfig: orphans and tombstones", () => {
   test("branch with stack-name pointing at a missing stack is left untracked", async () => {
     await using repo = await createTestRepo();
     await addBranch(repo.dir, "feat/a", "main");
@@ -181,7 +181,7 @@ describe("migrateLegacyConfig — orphans and tombstones", () => {
   });
 });
 
-describe("migrateLegacyConfig — idempotency", () => {
+describe("migrateLegacyConfig: idempotency", () => {
   test("re-running on already-migrated repo is a no-op", async () => {
     await using repo = await createTestRepo();
     await addBranch(repo.dir, "feat/a", "main");
