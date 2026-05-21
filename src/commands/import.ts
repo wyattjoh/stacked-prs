@@ -3,9 +3,8 @@ import {
   gitConfig,
   type MergeStrategy,
   runGitCommand,
-  setBaseBranch,
-  setMergeStrategy,
-  setStackNode,
+  setBranchBaseBranch,
+  setBranchMergeStrategy,
 } from "../lib/stack.ts";
 import {
   discoverChain,
@@ -16,7 +15,6 @@ import {
 export interface ImportOptions {
   /** Starting branch. Default: current. */
   branch?: string;
-  stackName?: string;
   mergeStrategy?: MergeStrategy;
   owner?: string;
   repo?: string;
@@ -29,6 +27,10 @@ export interface ImportPlanEntry {
 }
 
 export interface ImportPlan {
+  /**
+   * @deprecated Kept for printer compatibility; equals the root branch name.
+   * Renamed in a future task.
+   */
   stackName: string;
   mergeStrategy: MergeStrategy;
   baseBranch: string;
@@ -40,7 +42,6 @@ export interface ImportPlan {
 export type ImportError =
   | "nothing-discovered"
   | "already-in-stack"
-  | "stack-exists"
   | "git-failed";
 
 export interface ImportResult {
@@ -59,10 +60,6 @@ function gitCmd(...args: string[]): string {
   return ["git", ...args.map(shellQuote)].join(" ");
 }
 
-function escapeRegex(input: string): string {
-  return input.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
-
 function flatten(
   nodes: DiscoveredNode[],
   baseBranch: string,
@@ -79,23 +76,18 @@ function flatten(
 function commandsForPlan(plan: Omit<ImportPlan, "commands">): string[] {
   const cmds: string[] = [];
   for (const e of plan.entries) {
+    cmds.push(gitCmd("config", `branch.${e.branch}.stack-parent`, e.parent));
     cmds.push(
-      gitCmd("config", `branch.${e.branch}.stack-name`, plan.stackName),
+      gitCmd("config", `branch.${e.branch}.base-branch`, plan.baseBranch),
     );
     cmds.push(
-      gitCmd("config", `branch.${e.branch}.stack-parent`, e.parent),
+      gitCmd(
+        "config",
+        `branch.${e.branch}.merge-strategy`,
+        plan.mergeStrategy,
+      ),
     );
   }
-  cmds.push(
-    gitCmd("config", `stack.${plan.stackName}.base-branch`, plan.baseBranch),
-  );
-  cmds.push(
-    gitCmd(
-      "config",
-      `stack.${plan.stackName}.merge-strategy`,
-      plan.mergeStrategy,
-    ),
-  );
   return cmds;
 }
 
@@ -121,37 +113,24 @@ export async function planImport(
 
   const entries = flatten(discovered.roots, discovered.baseBranch);
 
-  // Reject if any discovered branch already has stack metadata.
+  // Reject if any discovered branch is already tracked (has a stack-parent).
   for (const e of entries) {
-    const existing = await gitConfig(dir, `branch.${e.branch}.stack-name`);
+    const existing = await gitConfig(dir, `branch.${e.branch}.stack-parent`);
     if (existing) {
       return {
         ok: false,
         error: "already-in-stack",
         message:
-          `branch "${e.branch}" is already part of stack "${existing}"; split or clean first`,
+          `branch "${e.branch}" is already tracked (stack-parent: "${existing}"); split or clean first`,
       };
     }
   }
 
-  const stackName = opts.stackName ?? entries[0].branch;
   const mergeStrategy: MergeStrategy = opts.mergeStrategy ??
     await getDefaultMergeStrategy(dir);
 
-  const preexisting = await runGitCommand(
-    dir,
-    "config",
-    "--get-regexp",
-    `^stack\\.${escapeRegex(stackName)}\\.`,
-  );
-  if (preexisting.code === 0 && preexisting.stdout) {
-    return {
-      ok: false,
-      error: "stack-exists",
-      message:
-        `stack "${stackName}" already has config entries; choose a different --stack-name`,
-    };
-  }
+  // stackName is the root branch name (kept for printer compatibility).
+  const stackName = entries[0].branch;
 
   const partial: Omit<ImportPlan, "commands"> = {
     stackName,
@@ -175,10 +154,15 @@ export async function executeImport(
   const plan = planResult.plan;
 
   for (const e of plan.entries) {
-    await setStackNode(dir, e.branch, plan.stackName, e.parent);
+    await runGitCommand(
+      dir,
+      "config",
+      `branch.${e.branch}.stack-parent`,
+      e.parent,
+    );
+    await setBranchBaseBranch(dir, e.branch, plan.baseBranch);
+    await setBranchMergeStrategy(dir, e.branch, plan.mergeStrategy);
   }
-  await setBaseBranch(dir, plan.stackName, plan.baseBranch);
-  await setMergeStrategy(dir, plan.stackName, plan.mergeStrategy);
 
   return { ok: true, plan };
 }

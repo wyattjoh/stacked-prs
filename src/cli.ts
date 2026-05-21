@@ -1334,10 +1334,6 @@ const command = new Command()
   )
   .option("--branch <name:string>", "Starting branch (default: current)")
   .option(
-    "--stack-name <name:string>",
-    "Stack name (default: root branch name)",
-  )
-  .option(
     "--merge-strategy <strategy:string>",
     "merge or squash (default: merge)",
   )
@@ -1360,7 +1356,6 @@ const command = new Command()
 
     const baseOpts = {
       branch: options.branch,
-      stackName: options.stackName,
       mergeStrategy,
       owner: options.owner,
       repo: options.repo,
@@ -1392,7 +1387,7 @@ const command = new Command()
     if (options.json) logJson(result);
     else if (result.ok && result.plan) {
       console.log(
-        `Imported ${result.plan.entries.length} branch(es) into stack ${result.plan.stackName}.`,
+        `Imported ${result.plan.entries.length} branch(es) rooted at ${result.plan.stackName}.`,
       );
     } else {
       console.error(`${result.error}: ${result.message ?? ""}`);
