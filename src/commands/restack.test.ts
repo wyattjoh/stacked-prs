@@ -589,7 +589,7 @@ describe("executeRestack (resume)", () => {
     // Resume state should be cleared after success.
     let resumeStateExists = false;
     try {
-      await runGit(repo.dir, "config", "stack.test.resume-state");
+      await runGit(repo.dir, "config", "stacked-prs.resume-state");
       resumeStateExists = true;
     } catch {
       // not set, good
@@ -612,6 +612,34 @@ describe("executeRestack (resume)", () => {
       expect((err as Error).message).toContain("No restack in progress");
     }
     expect(threw).toBe(true);
+  });
+
+  test("refuses fresh restack while a repo-level resume-state exists", async () => {
+    await using repo = await createTestRepo();
+    await addBranch(repo.dir, "a", "main");
+    await setBaseBranch(repo.dir, "test", "main");
+    await setStackNode(repo.dir, "a", "test", "main");
+    await using _bare = await setupFakeOrigin(repo.dir);
+
+    // Seed the repo-level resume-state as if a prior restack was interrupted.
+    await runGit(
+      repo.dir,
+      "config",
+      "stacked-prs.resume-state",
+      '{"stackName":"test","opts":{},"oldParentSha":{},"branchTipSha":{},"completed":[]}',
+    );
+
+    let threw = false;
+    let message = "";
+    try {
+      await executeRestack(repo.dir, "test", {});
+    } catch (err) {
+      threw = true;
+      message = (err as Error).message;
+    }
+    expect(threw).toBe(true);
+    expect(message).toContain("Restack already in progress");
+    expect(message).toContain("stacked-prs.resume-state");
   });
 });
 
@@ -778,7 +806,7 @@ describe("executeRestack (codex review fixes)", () => {
     const stateRaw = await runGit(
       repo.dir,
       "config",
-      "stack.test.resume-state",
+      "stacked-prs.resume-state",
     );
     const state = JSON.parse(stateRaw) as { conflictedBranch?: string };
     expect(state.conflictedBranch).toBe("c");
@@ -824,7 +852,7 @@ describe("executeRestack (codex review fixes)", () => {
     // resume-state must not have been persisted.
     let stateExists = false;
     try {
-      await runGit(repo.dir, "config", "stack.test.resume-state");
+      await runGit(repo.dir, "config", "stacked-prs.resume-state");
       stateExists = true;
     } catch {
       // not set, good
@@ -899,7 +927,7 @@ describe("executeRestack (codex review fixes)", () => {
     // Resume-state must be cleared so the user can start a fresh walk.
     let stateExists = false;
     try {
-      await runGit(repo.dir, "config", "stack.test.resume-state");
+      await runGit(repo.dir, "config", "stacked-prs.resume-state");
       stateExists = true;
     } catch {
       // cleared
@@ -952,7 +980,7 @@ describe("executeRestack (codex review fixes)", () => {
     // resume-state must be cleared.
     let stateExists = false;
     try {
-      await runGit(repo.dir, "config", "stack.test.resume-state");
+      await runGit(repo.dir, "config", "stacked-prs.resume-state");
       stateExists = true;
     } catch {
       // cleared
@@ -1108,7 +1136,7 @@ describe("executeRestack (deleted branches)", () => {
     const beforeState = await runGit(
       repo.dir,
       "config",
-      "stack.test.resume-state",
+      "stacked-prs.resume-state",
     ).catch(() => null);
     expect(beforeState).not.toBeNull();
 
@@ -1132,7 +1160,7 @@ describe("executeRestack (deleted branches)", () => {
     // Resume-state must be cleared.
     let stateExists = false;
     try {
-      await runGit(repo.dir, "config", "stack.test.resume-state");
+      await runGit(repo.dir, "config", "stacked-prs.resume-state");
       stateExists = true;
     } catch {
       // good, config not set

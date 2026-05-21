@@ -161,6 +161,35 @@ export function resumeStore<T>(
 }
 
 /**
+ * Build a JSON-backed resume-state store against `stacked-prs.<key>` (repo-level,
+ * single slot). Reads return null if the key is absent or fails to parse; writes
+ * overwrite; clear removes the key (swallowing "key absent" exit codes).
+ */
+export function repoResumeStore<T>(
+  dir: string,
+  key: string,
+): ResumeStore<T> {
+  const configKey = `stacked-prs.${key}`;
+  return {
+    async read() {
+      const { code, stdout } = await runGitCommand(dir, "config", configKey);
+      if (code !== 0) return null;
+      try {
+        return JSON.parse(stdout) as T;
+      } catch {
+        return null;
+      }
+    },
+    async write(state: T) {
+      await runGitCommand(dir, "config", configKey, JSON.stringify(state));
+    },
+    async clear() {
+      await runGitCommand(dir, "config", "--unset", configKey);
+    },
+  };
+}
+
+/**
  * Resolve a ref to its SHA, or return null if it does not exist. Uses
  * `git rev-parse --verify --quiet` so a missing ref is an expected outcome,
  * not an error. Shared probe for sync, submit-plan, restack, etc.

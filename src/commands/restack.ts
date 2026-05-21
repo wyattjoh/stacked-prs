@@ -4,7 +4,7 @@ import {
   getConflictFiles,
   getStackTree,
   rebaseInProgress,
-  resumeStore,
+  repoResumeStore,
   revParse,
   runGitCommand,
   type StackNode,
@@ -105,29 +105,26 @@ interface ResumeState {
   startBranch?: string;
 }
 
-const resumeStateFor = (dir: string, stackName: string) =>
-  resumeStore<ResumeState>(dir, stackName, "resume-state");
+const resumeStateFor = (dir: string) =>
+  repoResumeStore<ResumeState>(dir, "resume-state");
 
 async function readResumeState(
   dir: string,
-  stackName: string,
 ): Promise<ResumeState | null> {
-  return await resumeStateFor(dir, stackName).read();
+  return await resumeStateFor(dir).read();
 }
 
 async function writeResumeState(
   dir: string,
-  stackName: string,
   state: ResumeState,
 ): Promise<void> {
-  await resumeStateFor(dir, stackName).write(state);
+  await resumeStateFor(dir).write(state);
 }
 
 async function clearResumeState(
   dir: string,
-  stackName: string,
 ): Promise<void> {
-  await resumeStateFor(dir, stackName).clear();
+  await resumeStateFor(dir).clear();
 }
 
 /**
@@ -371,14 +368,14 @@ export async function executeRestack(
   stackName: string,
   opts: RestackOptions,
 ): Promise<RestackResult> {
-  const existingState = await readResumeState(dir, stackName);
+  const existingState = await readResumeState(dir);
   if (opts.resume && !existingState) {
     throw new Error("No restack in progress to resume");
   }
   if (!opts.resume && existingState) {
     throw new Error(
       `Restack already in progress for stack "${stackName}". ` +
-        `Run with --resume or clear stack.${stackName}.resume-state manually.`,
+        `Run with --resume or clear stacked-prs.resume-state manually.`,
     );
   }
 
@@ -402,7 +399,7 @@ export async function executeRestack(
     resolve: "git add <conflicting files> && git rebase --continue",
     abort: "git rebase --abort",
     resume:
-      `deno run --allow-run=git,gh --allow-env --allow-read src/cli.ts restack --stack-name=${stackName} --resume`,
+      `deno run --allow-run=git,gh --allow-env --allow-read src/cli.ts restack --resume`,
   });
 
   // Defensive check: if any branch referenced by the persisted walk no longer
@@ -414,7 +411,7 @@ export async function executeRestack(
       Object.keys(existingState.oldParentSha),
     );
     if (missing.length > 0) {
-      await clearResumeState(dir, stackName);
+      await clearResumeState(dir);
       const lines = missing.map((b) => `  - ${b}`).join("\n");
       throw new Error(
         `Cannot resume restack for stack "${stackName}": ${missing.length} branch(es) from the\n` +
@@ -438,7 +435,7 @@ export async function executeRestack(
       // because the user ran `git rebase --abort` or `git reset` manually.
       const inProgress = await rebaseInProgress(dir);
       if (!inProgress) {
-        await clearResumeState(dir, stackName);
+        await clearResumeState(dir);
         throw new Error(
           "No rebase in progress. The previous restack appears to have been " +
             "aborted (git rebase --abort or git reset). " +
@@ -463,7 +460,7 @@ export async function executeRestack(
     justContinuedBranch = existingState.conflictedBranch;
     if (justContinuedBranch !== undefined) {
       completed.add(justContinuedBranch);
-      await writeResumeState(dir, stackName, {
+      await writeResumeState(dir, {
         stackName,
         opts: effectiveOpts,
         oldParentSha: persistedOldParent
@@ -534,7 +531,7 @@ export async function executeRestack(
       initialOldParent[entry.branch] = entry.oldParentSha;
       initialBranchTip[entry.branch] = await revParse(dir, entry.branch);
     }
-    await writeResumeState(dir, stackName, {
+    await writeResumeState(dir, {
       stackName,
       opts: effectiveOpts,
       oldParentSha: initialOldParent,
@@ -555,7 +552,7 @@ export async function executeRestack(
     }
   } else {
     // Re-read what we just persisted.
-    const current = await readResumeState(dir, stackName);
+    const current = await readResumeState(dir);
     if (current?.branchTipSha) {
       for (const [k, v] of Object.entries(current.branchTipSha)) {
         persistedBranchTip.set(k, v);
@@ -646,7 +643,7 @@ export async function executeRestack(
     if (result.ok) {
       executed.push({ ...entry, status: "rebased" });
       completed.add(entry.branch);
-      await writeResumeState(dir, stackName, {
+      await writeResumeState(dir, {
         stackName,
         opts: effectiveOpts,
         oldParentSha: persistedOldParent
@@ -675,7 +672,7 @@ export async function executeRestack(
 
     // Persist the conflicted branch name so resume can identify it
     // unambiguously rather than inferring from plan order.
-    await writeResumeState(dir, stackName, {
+    await writeResumeState(dir, {
       stackName,
       opts: effectiveOpts,
       oldParentSha: persistedOldParent
@@ -706,7 +703,7 @@ export async function executeRestack(
   // Ancestry failure is a structural problem the user must resolve manually.
   // Clear resume-state since this isn't a resumable conflict.
   if (ancestryFailure) {
-    await clearResumeState(dir, stackName);
+    await clearResumeState(dir);
     return {
       ok: false,
       error: "other",
@@ -724,7 +721,7 @@ export async function executeRestack(
     };
   }
 
-  await clearResumeState(dir, stackName);
+  await clearResumeState(dir);
 
   // Restore HEAD to where the caller started. DFS traversal naturally ends on
   // the last-rebased leaf, and callers (Claude, subagents, shell users) expect
