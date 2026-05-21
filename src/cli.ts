@@ -1265,7 +1265,6 @@ const command = new Command()
   // --- init ---
   .command("init", "Initialize the current branch as a new stack")
   .option("--branch <name:string>", "Branch to register (default: current)")
-  .option("--stack-name <name:string>", "Stack name (default: branch name)")
   .option(
     "--merge-strategy <strategy:string>",
     "merge or squash (default: merge)",
@@ -1288,7 +1287,6 @@ const command = new Command()
 
     const baseOpts = {
       branch: options.branch,
-      stackName: options.stackName,
       mergeStrategy,
       baseBranch: options.baseBranch,
     };
@@ -1322,7 +1320,7 @@ const command = new Command()
     if (options.json) logJson(result);
     else if (result.ok && result.plan) {
       console.log(
-        `Initialized stack ${result.plan.stackName} on ${result.plan.branch} (base: ${result.plan.baseBranch}).`,
+        `Initialized ${result.plan.branch} as a new stack (base: ${result.plan.baseBranch}).`,
       );
     } else {
       console.error(`${result.error}: ${result.message ?? ""}`);

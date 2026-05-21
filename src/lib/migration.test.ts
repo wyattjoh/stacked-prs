@@ -1,17 +1,16 @@
 import { describe, it as test } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import {
-  addBranch,
-  createTestRepo,
-  runGit,
-} from "./testdata/helpers.ts";
+import { addBranch, createTestRepo, runGit } from "./testdata/helpers.ts";
 import { migrateLegacyConfig, needsMigration } from "./migration.ts";
 
 async function setConfig(dir: string, key: string, value: string) {
   await runGit(dir, "config", key, value);
 }
 
-async function getConfig(dir: string, key: string): Promise<string | undefined> {
+async function getConfig(
+  dir: string,
+  key: string,
+): Promise<string | undefined> {
   try {
     const v = await runGit(dir, "config", "--get", key);
     return v;
@@ -22,7 +21,13 @@ async function getConfig(dir: string, key: string): Promise<string | undefined> 
 
 async function listMatching(dir: string, pattern: string): Promise<string[]> {
   try {
-    const out = await runGit(dir, "config", "--name-only", "--get-regexp", pattern);
+    const out = await runGit(
+      dir,
+      "config",
+      "--name-only",
+      "--get-regexp",
+      pattern,
+    );
     return out.split("\n").filter(Boolean);
   } catch {
     return [];
@@ -69,14 +74,21 @@ describe("migrateLegacyConfig: single stack happy path", () => {
     expect(result).toEqual({ branches: 3, stacks: 1 });
 
     expect(await getConfig(repo.dir, "branch.feat/a.base-branch")).toBe("main");
-    expect(await getConfig(repo.dir, "branch.feat/a.merge-strategy")).toBe("merge");
+    expect(await getConfig(repo.dir, "branch.feat/a.merge-strategy")).toBe(
+      "merge",
+    );
     expect(await getConfig(repo.dir, "branch.feat/b.base-branch")).toBe("main");
-    expect(await getConfig(repo.dir, "branch.feat/b.merge-strategy")).toBe("merge");
+    expect(await getConfig(repo.dir, "branch.feat/b.merge-strategy")).toBe(
+      "merge",
+    );
     expect(await getConfig(repo.dir, "branch.feat/c.base-branch")).toBe("main");
-    expect(await getConfig(repo.dir, "branch.feat/c.merge-strategy")).toBe("merge");
+    expect(await getConfig(repo.dir, "branch.feat/c.merge-strategy")).toBe(
+      "merge",
+    );
 
     // Old keys all gone
-    expect(await getConfig(repo.dir, "branch.feat/a.stack-name")).toBeUndefined();
+    expect(await getConfig(repo.dir, "branch.feat/a.stack-name"))
+      .toBeUndefined();
     expect(await listMatching(repo.dir, "^stack\\.")).toEqual([]);
   });
 });
@@ -98,9 +110,15 @@ describe("migrateLegacyConfig: multi-stack with distinct bases", () => {
     await migrateLegacyConfig(repo.dir);
 
     expect(await getConfig(repo.dir, "branch.feat/a.base-branch")).toBe("main");
-    expect(await getConfig(repo.dir, "branch.feat/a.merge-strategy")).toBe("merge");
-    expect(await getConfig(repo.dir, "branch.bugfix/x.base-branch")).toBe("develop");
-    expect(await getConfig(repo.dir, "branch.bugfix/x.merge-strategy")).toBe("squash");
+    expect(await getConfig(repo.dir, "branch.feat/a.merge-strategy")).toBe(
+      "merge",
+    );
+    expect(await getConfig(repo.dir, "branch.bugfix/x.base-branch")).toBe(
+      "develop",
+    );
+    expect(await getConfig(repo.dir, "branch.bugfix/x.merge-strategy")).toBe(
+      "squash",
+    );
   });
 });
 
@@ -116,7 +134,9 @@ describe("migrateLegacyConfig: resume-state", () => {
 
     await migrateLegacyConfig(repo.dir);
 
-    expect(await getConfig(repo.dir, "stacked-prs.resume-state")).toBe(stateJson);
+    expect(await getConfig(repo.dir, "stacked-prs.resume-state")).toBe(
+      stateJson,
+    );
   });
 
   test("refuses when more than one stack has resume-state", async () => {
@@ -143,8 +163,10 @@ describe("migrateLegacyConfig: default-merge-strategy", () => {
     await using repo = await createTestRepo();
     await setConfig(repo.dir, "stack.default-merge-strategy", "merge");
     await migrateLegacyConfig(repo.dir);
-    expect(await getConfig(repo.dir, "stacked-prs.default-merge-strategy")).toBe("merge");
-    expect(await getConfig(repo.dir, "stack.default-merge-strategy")).toBeUndefined();
+    expect(await getConfig(repo.dir, "stacked-prs.default-merge-strategy"))
+      .toBe("merge");
+    expect(await getConfig(repo.dir, "stack.default-merge-strategy"))
+      .toBeUndefined();
   });
 });
 
@@ -155,9 +177,13 @@ describe("migrateLegacyConfig: orphans and tombstones", () => {
     await setConfig(repo.dir, "branch.feat/a.stack-name", "ghost");
     await setConfig(repo.dir, "branch.feat/a.stack-parent", "main");
     await migrateLegacyConfig(repo.dir);
-    expect(await getConfig(repo.dir, "branch.feat/a.stack-name")).toBeUndefined();
-    expect(await getConfig(repo.dir, "branch.feat/a.stack-parent")).toBe("main");
-    expect(await getConfig(repo.dir, "branch.feat/a.base-branch")).toBeUndefined();
+    expect(await getConfig(repo.dir, "branch.feat/a.stack-name"))
+      .toBeUndefined();
+    expect(await getConfig(repo.dir, "branch.feat/a.stack-parent")).toBe(
+      "main",
+    );
+    expect(await getConfig(repo.dir, "branch.feat/a.base-branch"))
+      .toBeUndefined();
   });
 
   test("orphan stack.* keys (no branch references them) are deleted", async () => {
@@ -174,8 +200,20 @@ describe("migrateLegacyConfig: orphans and tombstones", () => {
     await setConfig(repo.dir, "branch.feat/a.stack-name", "feat/a");
     await setConfig(repo.dir, "branch.feat/a.stack-parent", "main");
     await setConfig(repo.dir, "stack.feat/a.base-branch", "main");
-    await runGit(repo.dir, "config", "--add", "stack.feat/a.landed-branches", "old-feat");
-    await runGit(repo.dir, "config", "--add", "stack.feat/a.landed-pr", "old-feat:42");
+    await runGit(
+      repo.dir,
+      "config",
+      "--add",
+      "stack.feat/a.landed-branches",
+      "old-feat",
+    );
+    await runGit(
+      repo.dir,
+      "config",
+      "--add",
+      "stack.feat/a.landed-pr",
+      "old-feat:42",
+    );
     await migrateLegacyConfig(repo.dir);
     expect(await listMatching(repo.dir, "^stack\\.")).toEqual([]);
   });

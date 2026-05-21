@@ -4,15 +4,13 @@ import {
   gitConfig,
   type MergeStrategy,
   runGitCommand,
-  setBaseBranch,
-  setMergeStrategy,
-  setStackNode,
+  setBranchBaseBranch,
+  setBranchMergeStrategy,
 } from "../lib/stack.ts";
 
 export interface InitOptions {
   /** Branch to register as the root of the new stack. Defaults to current branch. */
   branch?: string;
-  stackName?: string;
   mergeStrategy?: MergeStrategy;
   /** Base branch to record. Defaults to the detected default branch. */
   baseBranch?: string;
@@ -21,6 +19,7 @@ export interface InitOptions {
 
 export interface InitPlan {
   branch: string;
+  /** @deprecated kept for printer compatibility; equals `branch`. Renamed in a future task. */
   stackName: string;
   baseBranch: string;
   mergeStrategy: MergeStrategy;
@@ -31,7 +30,6 @@ export type InitError =
   | "detached"
   | "on-base-branch"
   | "already-in-stack"
-  | "stack-exists"
   | "git-failed";
 
 export interface InitResult {
@@ -48,10 +46,6 @@ function shellQuote(arg: string): string {
 
 function gitCmd(...args: string[]): string {
   return ["git", ...args.map(shellQuote)].join(" ");
-}
-
-function escapeRegex(input: string): string {
-  return input.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 async function currentBranch(dir: string): Promise<string | undefined> {
@@ -97,46 +91,29 @@ export async function planInit(
     };
   }
 
-  const existingStack = await gitConfig(dir, `branch.${branch}.stack-name`);
-  if (existingStack) {
+  // Guard: branch is already tracked if it already has a stack-parent.
+  const existingParent = await gitConfig(dir, `branch.${branch}.stack-parent`);
+  if (existingParent) {
     return {
       ok: false,
       error: "already-in-stack",
       message:
-        `branch "${branch}" is already part of stack "${existingStack}"; use \`status\` to inspect`,
+        `branch "${branch}" is already tracked (stack-parent: "${existingParent}"); use \`status\` to inspect`,
     };
   }
 
-  const stackName = opts.stackName ?? branch;
   const mergeStrategy: MergeStrategy = opts.mergeStrategy ??
     await getDefaultMergeStrategy(dir);
 
-  // Guard against a pre-existing stack with the chosen name.
-  const existing = await runGitCommand(
-    dir,
-    "config",
-    "--get-regexp",
-    `^stack\\.${escapeRegex(stackName)}\\.`,
-  );
-  if (existing.code === 0 && existing.stdout) {
-    return {
-      ok: false,
-      error: "stack-exists",
-      message:
-        `stack "${stackName}" already has config entries; choose a different --stack-name`,
-    };
-  }
-
   const commands: string[] = [
-    gitCmd("config", `branch.${branch}.stack-name`, stackName),
     gitCmd("config", `branch.${branch}.stack-parent`, baseBranch),
-    gitCmd("config", `stack.${stackName}.base-branch`, baseBranch),
-    gitCmd("config", `stack.${stackName}.merge-strategy`, mergeStrategy),
+    gitCmd("config", `branch.${branch}.base-branch`, baseBranch),
+    gitCmd("config", `branch.${branch}.merge-strategy`, mergeStrategy),
   ];
 
   return {
     ok: true,
-    plan: { branch, stackName, baseBranch, mergeStrategy, commands },
+    plan: { branch, stackName: branch, baseBranch, mergeStrategy, commands },
   };
 }
 
@@ -148,9 +125,14 @@ export async function executeInit(
   if (!planResult.ok || !planResult.plan) return planResult;
   const plan = planResult.plan;
 
-  await setStackNode(dir, plan.branch, plan.stackName, plan.baseBranch);
-  await setBaseBranch(dir, plan.stackName, plan.baseBranch);
-  await setMergeStrategy(dir, plan.stackName, plan.mergeStrategy);
+  await runGitCommand(
+    dir,
+    "config",
+    `branch.${plan.branch}.stack-parent`,
+    plan.baseBranch,
+  );
+  await setBranchBaseBranch(dir, plan.branch, plan.baseBranch);
+  await setBranchMergeStrategy(dir, plan.branch, plan.mergeStrategy);
 
   return { ok: true, plan };
 }

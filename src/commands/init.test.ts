@@ -6,11 +6,11 @@ import {
   createTestRepo,
   runGit,
 } from "../lib/testdata/helpers.ts";
-import { setBaseBranch } from "../lib/stack.ts";
+import { setBranchBaseBranch } from "../lib/stack.ts";
 import { init, planInit } from "./init.ts";
 
 describe("init — plan", () => {
-  test("plans init for current branch, defaulting stack name and merge strategy", async () => {
+  test("plans init for current branch, defaulting merge strategy", async () => {
     await using repo = await createTestRepo();
     await addBranch(repo.dir, "feat/a", "main");
     await runGit(repo.dir, "checkout", "feat/a");
@@ -22,10 +22,9 @@ describe("init — plan", () => {
     expect(result.plan?.baseBranch).toBe("main");
     expect(result.plan?.mergeStrategy).toBe("squash");
     expect(result.plan?.commands).toEqual([
-      "git config branch.feat/a.stack-name feat/a",
       "git config branch.feat/a.stack-parent main",
-      "git config stack.feat/a.base-branch main",
-      "git config stack.feat/a.merge-strategy squash",
+      "git config branch.feat/a.base-branch main",
+      "git config branch.feat/a.merge-strategy squash",
     ]);
   });
 
@@ -45,17 +44,14 @@ describe("init — plan", () => {
     expect(result.plan?.mergeStrategy).toBe("merge");
   });
 
-  test("honors --stack-name and --merge-strategy", async () => {
+  test("honors --merge-strategy", async () => {
     await using repo = await createTestRepo();
     await addBranch(repo.dir, "feat/a", "main");
     await runGit(repo.dir, "checkout", "feat/a");
 
-    const result = await planInit(repo.dir, {
-      stackName: "my-stack",
-      mergeStrategy: "squash",
-    });
+    const result = await planInit(repo.dir, { mergeStrategy: "squash" });
     expect(result.ok).toBe(true);
-    expect(result.plan?.stackName).toBe("my-stack");
+    expect(result.plan?.stackName).toBe("feat/a");
     expect(result.plan?.mergeStrategy).toBe("squash");
   });
 
@@ -66,26 +62,15 @@ describe("init — plan", () => {
     expect(result.error).toBe("on-base-branch");
   });
 
-  test("rejects when branch already in a stack", async () => {
+  test("rejects when branch already tracked", async () => {
     await using repo = await createTestRepo();
     await addBranch(repo.dir, "feat/a", "main");
     await runGit(repo.dir, "checkout", "feat/a");
-    await runGit(repo.dir, "config", "branch.feat/a.stack-name", "existing");
+    await runGit(repo.dir, "config", "branch.feat/a.stack-parent", "main");
 
     const result = await planInit(repo.dir, {});
     expect(result.ok).toBe(false);
     expect(result.error).toBe("already-in-stack");
-  });
-
-  test("rejects when stack name already exists", async () => {
-    await using repo = await createTestRepo();
-    await addBranch(repo.dir, "feat/a", "main");
-    await runGit(repo.dir, "checkout", "feat/a");
-    await runGit(repo.dir, "config", "stack.taken.base-branch", "main");
-
-    const result = await planInit(repo.dir, { stackName: "taken" });
-    expect(result.ok).toBe(false);
-    expect(result.error).toBe("stack-exists");
   });
 });
 
@@ -95,23 +80,17 @@ describe("init — execute (real git)", () => {
     await addBranch(repo.dir, "feat/a", "main");
     await runGit(repo.dir, "checkout", "feat/a");
 
-    const result = await init(repo.dir, {
-      stackName: "my-stack",
-      mergeStrategy: "squash",
-    });
+    const result = await init(repo.dir, { mergeStrategy: "squash" });
     expect(result.ok).toBe(true);
 
-    expect(
-      await runGit(repo.dir, "config", "branch.feat/a.stack-name"),
-    ).toBe("my-stack");
     expect(
       await runGit(repo.dir, "config", "branch.feat/a.stack-parent"),
     ).toBe("main");
     expect(
-      await runGit(repo.dir, "config", "stack.my-stack.base-branch"),
+      await runGit(repo.dir, "config", "branch.feat/a.base-branch"),
     ).toBe("main");
     expect(
-      await runGit(repo.dir, "config", "stack.my-stack.merge-strategy"),
+      await runGit(repo.dir, "config", "branch.feat/a.merge-strategy"),
     ).toBe("squash");
   });
 
@@ -126,23 +105,23 @@ describe("init — execute (real git)", () => {
     const probe = await runGit(
       repo.dir,
       "config",
-      "branch.feat/a.stack-name",
+      "branch.feat/a.stack-parent",
     ).catch(() => "");
     expect(probe).toBe("");
   });
 
   test("initializes a new stack while an unrelated stack has tombstones", async () => {
     await using repo = await createTestRepo();
-    await setBaseBranch(repo.dir, "old-stack", "main");
+    await setBranchBaseBranch(repo.dir, "feat/old", "main");
     await addTombstone(repo.dir, "old-stack", "feat/old", { prNumber: 81 });
 
     await addBranch(repo.dir, "feat/new", "main");
     await runGit(repo.dir, "checkout", "feat/new");
 
-    const result = await init(repo.dir, { stackName: "new-stack" });
+    const result = await init(repo.dir, {});
     expect(result.ok).toBe(true);
     expect(
-      await runGit(repo.dir, "config", "branch.feat/new.stack-name"),
-    ).toBe("new-stack");
+      await runGit(repo.dir, "config", "branch.feat/new.stack-parent"),
+    ).toBe("main");
   });
 });

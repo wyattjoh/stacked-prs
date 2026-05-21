@@ -24,8 +24,7 @@
 
 import { runGitCommand } from "./stack.ts";
 
-const LEGACY_PROBE_REGEX =
-  "^(branch\\.[^.]+\\.stack-name|stack\\.)";
+const LEGACY_PROBE_REGEX = "^(branch\\.[^.]+\\.stack-name|stack\\.)";
 
 export interface MigrationResult {
   branches: number;
@@ -107,8 +106,9 @@ async function snapshot(dir: string): Promise<LegacySnapshot> {
       defaultMergeStrategy = value;
       continue;
     }
-    m = /^stack\.(.+)\.(base-branch|merge-strategy|resume-state|land-resume-state)$/
-      .exec(key);
+    m =
+      /^stack\.(.+)\.(base-branch|merge-strategy|resume-state|land-resume-state)$/
+        .exec(key);
     if (m) {
       const [, sn, field] = m;
       const existing = stacks.get(sn) ?? {};
@@ -216,9 +216,9 @@ export async function migrateLegacyConfig(
   await deleteKeysMatching(dir, "^branch\\..*\\.stack-name$");
 
   // Step 5: emit one stderr line.
-  const branchesCount = [...snap.branches.values()].filter((e) =>
-    snap.stacks.has(e.stackName)
-  ).length;
+  const branchesCount =
+    [...snap.branches.values()].filter((e) => snap.stacks.has(e.stackName))
+      .length;
   const stacksCount = snap.stacks.size;
   console.error(
     `stacked-prs: migrated git config to v3 schema (${branchesCount} branches across ${stacksCount} stacks)`,
