@@ -12,11 +12,7 @@ import {
 } from "../lib/stack.ts";
 import { listPrsForBranch } from "../lib/gh.ts";
 import { ansiColor } from "../lib/ansi.ts";
-import {
-  assignColors,
-  detectTheme,
-  readColorOverrides,
-} from "../lib/colors.ts";
+import { assignColors, detectTheme } from "../lib/colors.ts";
 
 export type { SyncStatus };
 
@@ -230,16 +226,11 @@ function renderBasePrefix(
   return out;
 }
 
-async function resolveStackColors(
-  dir: string,
+function resolveStackColors(
   stackNames: string[],
-): Promise<Map<string, string>> {
+): Map<string, string> {
   const theme = detectTheme(Deno.env.get("COLORFGBG"));
-  const overrides = await readColorOverrides(
-    stackNames,
-    (...args) => runGitCommand(dir, ...args),
-  );
-  return assignColors(stackNames, overrides, theme);
+  return assignColors(stackNames, theme);
 }
 
 function renderPrText(pr: PrInfo | null): string {
@@ -443,7 +434,7 @@ async function buildStackStatus(
     }),
   );
 
-  const colorMap = await resolveStackColors(dir, [tree.stackName]);
+  const colorMap = resolveStackColors([tree.stackName]);
   const display = renderStackDisplay(tree, branches, colorMap, currentBranch);
 
   return {
@@ -491,8 +482,7 @@ export async function getAllStackStatuses(
   const treeByStackName = new Map(
     trees.map((tree) => [tree.stackName, tree] as const),
   );
-  const colorMap = await resolveStackColors(
-    dir,
+  const colorMap = resolveStackColors(
     [...new Set(trees.map((tree) => tree.stackName))],
   );
 

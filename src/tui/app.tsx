@@ -5,11 +5,7 @@ import type { StackTree } from "../lib/stack.ts";
 import { initialState, reducer } from "./state/reducer.ts";
 import { loadCommits, loadLocal, loadPrsProgressive } from "./state/loader.ts";
 import { buildGrid } from "./lib/layout.ts";
-import {
-  assignColors,
-  detectTheme,
-  readColorOverrides,
-} from "../lib/colors.ts";
+import { assignColors, detectTheme } from "../lib/colors.ts";
 import {
   branchNameContentX,
   computeScrollX,
@@ -25,7 +21,6 @@ import {
 } from "./state/navigation.ts";
 import { copyToClipboard } from "./lib/clipboard.ts";
 import { gh, listPrsForBranch } from "../lib/gh.ts";
-import { runGitCommand } from "../lib/stack.ts";
 import { HeaderBox } from "./components/header-box.tsx";
 import { StackMap } from "./components/stack-map.tsx";
 import { DetailPane } from "./components/detail-pane.tsx";
@@ -102,21 +97,11 @@ export function App(props: AppProps): React.ReactElement {
   const theme = props.theme ?? detectTheme(Deno.env.get("COLORFGBG"));
   const primaryColor = theme === "light" ? "black" : "white";
 
-  const runRunGit = (
-    ...args: string[]
-  ): Promise<{ code: number; stdout: string }> =>
-    runGitCommand(props.dir, ...args);
-
   async function doInitialLoad(): Promise<void> {
     const theme = props.theme ?? detectTheme(Deno.env.get("COLORFGBG"));
     const local = await loadLocal(props.dir);
-    const overrides = await readColorOverrides(
-      local.trees.map((t) => t.stackName),
-      runRunGit,
-    );
     const colorByStack = assignColors(
       local.trees.map((t) => t.stackName),
-      overrides,
       theme,
     );
     const grid = buildGrid(local.trees, local.syncByBranch);

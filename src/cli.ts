@@ -43,7 +43,7 @@ import { split, type SplitPlan } from "./commands/split.ts";
 import { init as initStack, type InitPlan } from "./commands/init.ts";
 import { type ImportPlan, importStack } from "./commands/import.ts";
 import { getAllNodes } from "./lib/stack.ts";
-import { assignColors, detectTheme, readColorOverrides } from "./lib/colors.ts";
+import { assignColors, detectTheme } from "./lib/colors.ts";
 import { ansiColor } from "./lib/ansi.ts";
 
 /** Pretty-print a value as JSON with 2-space indent on stdout. */
@@ -809,8 +809,8 @@ const command = new Command()
 
     if (!options.json) {
       // Build a per-stack color map matching the TUI's palette so the CLI's
-      // visual identity stays consistent. Reads `stack.<name>.color` overrides
-      // from git config and falls back to deterministic FNV-1a assignment.
+      // visual identity stays consistent. Colors are hash-derived from the
+      // stack name via FNV-1a.
       const stackNames = Array.from(
         new Set(
           report.findings
@@ -819,14 +819,7 @@ const command = new Command()
         ),
       ).sort();
       const theme = detectTheme(Deno.env.get("COLORFGBG"));
-      const overrides = await readColorOverrides(
-        stackNames,
-        async (...args: string[]) => {
-          const r = await runGitCommand(dir, ...args);
-          return { code: r.code, stdout: r.stdout };
-        },
-      );
-      const colorMap = assignColors(stackNames, overrides, theme);
+      const colorMap = assignColors(stackNames, theme);
       const colorize = (
         stackName: string | undefined,
         text: string,

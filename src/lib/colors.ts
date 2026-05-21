@@ -44,32 +44,24 @@ export function detectTheme(colorfgbg: string | undefined): ThemeName {
 }
 
 /**
- * Assign a color to each stack name.
+ * Assign a color to each name (typically a root branch name).
  *
- * 1. Overrides from git config are applied first and their colors marked taken.
- * 2. Remaining stacks (sorted alphabetically) hash to a starting slot via FNV-1a,
- *    and linear-probe forward if the slot is taken.
- * 3. If all slots are taken (9+ stacks, no overrides), accept the collision.
+ * Names are sorted alphabetically before assignment so the mapping is stable
+ * regardless of input order. Each name hashes to a starting palette slot via
+ * FNV-1a and linear-probes forward to avoid collisions. When all slots are
+ * taken (more names than palette entries), the collision is accepted and the
+ * hash slot is reused.
  */
 export function assignColors(
-  stackNames: string[],
-  overrides: Map<string, string>,
+  names: string[],
   theme: ThemeName,
 ): Map<string, string> {
   const palette = theme === "light" ? LIGHT_PALETTE : DARK_PALETTE;
   const result = new Map<string, string>();
   const used = new Set<string>();
 
-  for (const [name, color] of overrides) {
-    if (stackNames.includes(name)) {
-      result.set(name, color);
-      used.add(color);
-    }
-  }
-
-  const remaining = stackNames.filter((n) => !result.has(n)).slice().sort();
-
-  for (const name of remaining) {
+  const sorted = names.slice().sort();
+  for (const name of sorted) {
     const start = fnv1a(name) % palette.length;
     let picked: string | undefined;
     for (let i = 0; i < palette.length; i++) {
@@ -88,37 +80,4 @@ export function assignColors(
   }
 
   return result;
-}
-
-/** Read color overrides from git config: `stack.<name>.color = <color>`. */
-export async function readColorOverrides(
-  stackNames: string[],
-  runGit: (
-    ...args: string[]
-  ) => Promise<{ code: number; stdout: string }>,
-): Promise<Map<string, string>> {
-  const overrides = new Map<string, string>();
-  if (stackNames.length === 0) return overrides;
-
-  const wanted = new Set(stackNames);
-  const { code, stdout } = await runGit(
-    "config",
-    "--get-regexp",
-    "^stack\\..*\\.color$",
-  );
-  if (code !== 0 || !stdout.trim()) return overrides;
-
-  for (const line of stdout.split("\n")) {
-    const trimmed = line.trim();
-    if (!trimmed) continue;
-    const spaceIndex = trimmed.indexOf(" ");
-    if (spaceIndex === -1) continue;
-    const key = trimmed.slice(0, spaceIndex);
-    const value = trimmed.slice(spaceIndex + 1).trim();
-    const match = /^stack\.(.+)\.color$/.exec(key);
-    const stackName = match?.[1];
-    if (!stackName || !wanted.has(stackName) || !value) continue;
-    overrides.set(stackName, value);
-  }
-  return overrides;
 }
