@@ -126,12 +126,11 @@ stack membership) and suggest the most appropriate action.
 
 Start a new stack from the current branch. Backed by `cli.ts init`.
 
-1. Run
-   `cli.ts init --dry-run [--stack-name <name>] [--merge-strategy
-   merge|squash]`
-   to compute the plan (the CLI guards against running on the base branch,
-   against a branch already in a stack, and against a stack-name collision).
-2. **Present plan:** stack name, merge strategy, base branch, and the exact
+1. Run `cli.ts init --dry-run [--merge-strategy
+   merge|squash]` to compute the
+   plan (the CLI guards against running on the base branch and against a branch
+   already in a stack).
+2. **Present plan:** root branch, merge strategy, base branch, and the exact
    config writes.
 3. **Wait for confirmation.**
 4. Run `cli.ts init --force [...same flags]` to apply. `--force` skips the CLI's
@@ -141,7 +140,7 @@ Full invocation:
 
 ```bash
 ${CLAUDE_PLUGIN_ROOT}/skills/stacked-prs/scripts/stacked-prs init \
-  [--branch <name>] [--stack-name <name>] [--merge-strategy merge|squash] \
+  [--branch <name>] [--merge-strategy merge|squash] \
   [--base-branch <name>] [--force] [--dry-run] [--json]
 ```
 
@@ -150,14 +149,12 @@ ${CLAUDE_PLUGIN_ROOT}/skills/stacked-prs/scripts/stacked-prs init \
 Discover and register an existing chain of branches/PRs as a stack. Backed by
 `cli.ts import`, which wraps `import-discover` with a config-write step.
 
-1. Run
-   `cli.ts import --dry-run [--stack-name <name>] [--merge-strategy
-   merge|squash]`
-   to compute the plan (calls `import-discover` under the hood and guards
-   against already-in-stack branches + stack-name collisions).
-2. **Present plan:** every discovered branch and its parent, the chosen stack
-   name and merge strategy, plus any PR-base-mismatch warnings surfaced by the
-   discoverer.
+1. Run `cli.ts import --dry-run [--merge-strategy
+   merge|squash]` to compute
+   the plan (calls `import-discover` under the hood and guards against
+   already-tracked branches).
+2. **Present plan:** every discovered branch and its parent, the chosen merge
+   strategy, plus any PR-base-mismatch warnings surfaced by the discoverer.
 3. **Wait for confirmation.**
 4. Run `cli.ts import --force [...same flags]` to apply.
 5. Offer to run `submit` to add nav comments to the now-imported PRs.
@@ -166,7 +163,7 @@ Full invocation:
 
 ```bash
 ${CLAUDE_PLUGIN_ROOT}/skills/stacked-prs/scripts/stacked-prs import \
-  [--branch <name>] [--stack-name <name>] [--merge-strategy merge|squash] \
+  [--branch <name>] [--merge-strategy merge|squash] \
   [--owner <owner> --repo <repo>] \
   [--force] [--dry-run] [--json]
 ```
@@ -207,7 +204,7 @@ Full invocation:
 ```bash
 ${CLAUDE_PLUGIN_ROOT}/skills/stacked-prs/scripts/stacked-prs create <branch> \
   [-m <message>] [--create-worktree <dir>] \
-  [--stack-name <name>] [--merge-strategy merge|squash] \
+  [--merge-strategy merge|squash] \
   [--force] [--dry-run] [--json]
 ```
 
@@ -217,8 +214,8 @@ Insert a new branch between a branch and its parent. Backed by
 `cli.ts
 insert <new-branch> --child <selected>`.
 
-1. Run `cli.ts status --stack-name=<name> --json` to display the tree and help
-   the user pick the child to insert before.
+1. Run `cli.ts status --json` to display the tree and help the user pick the
+   child to insert before.
 2. Run `cli.ts insert <new-branch> --child <selected> --dry-run` to compute the
    plan (branch created off the child's current parent; child reparented under
    the new branch).
@@ -232,7 +229,7 @@ Full invocation:
 
 ```bash
 ${CLAUDE_PLUGIN_ROOT}/skills/stacked-prs/scripts/stacked-prs insert <branch> \
-  [--stack-name <name>] [--child <name>] [--force] [--dry-run] [--json]
+  [--child <name>] [--force] [--dry-run] [--json]
 ```
 
 ### `split`
@@ -244,9 +241,8 @@ supports two modes via `--by-commit <sha>` or `--by-file <paths>`.
 
 Original branch keeps earlier commits; new branch above gets later commits.
 
-1. Run `cli.ts status --stack-name=<name> --json` and
-   `git log --oneline <parent>..<current-branch>` to help the user pick the last
-   SHA to keep on the original branch.
+1. Run `cli.ts status --json` and `git log --oneline <parent>..<current-branch>`
+   to help the user pick the last SHA to keep on the original branch.
 2. Run
    `cli.ts split --branch <current> --new-branch <upper> --by-commit
    <sha> --dry-run`
@@ -280,7 +276,7 @@ Full invocation:
 
 ```bash
 ${CLAUDE_PLUGIN_ROOT}/skills/stacked-prs/scripts/stacked-prs split \
-  [--stack-name <name>] [--branch <name>] --new-branch <name> \
+  [--branch <name>] --new-branch <name> \
   (--by-commit <sha> | --by-file <f1,f2,...>) \
   [--extract-message <msg>] [--remainder-message <msg>] \
   [--force] [--dry-run] [--json]
@@ -307,7 +303,7 @@ Full invocation:
 
 ```bash
 ${CLAUDE_PLUGIN_ROOT}/skills/stacked-prs/scripts/stacked-prs fold \
-  [--stack-name <name>] [--branch <name>] [--strategy ff|squash] \
+  [--branch <name>] [--strategy ff|squash] \
   [--message <msg>] [--force] [--dry-run] [--json]
 ```
 
@@ -316,8 +312,8 @@ ${CLAUDE_PLUGIN_ROOT}/skills/stacked-prs/scripts/stacked-prs fold \
 Detach a branch and reattach it as a child of a different parent. Backed by
 `cli.ts move`.
 
-1. Run `cli.ts status --stack-name=<name> --json` and help the user pick the
-   branch to move and its new parent.
+1. Run `cli.ts status --json` and help the user pick the branch to move and its
+   new parent.
 2. Run `cli.ts move --branch <branch> --new-parent <parent> --dry-run` (the CLI
    guards against no-ops, cycle creation, and non-stack new parents).
 3. **Present plan:** the moved branch's old and new parent, any children being
@@ -332,7 +328,7 @@ Full invocation:
 
 ```bash
 ${CLAUDE_PLUGIN_ROOT}/skills/stacked-prs/scripts/stacked-prs move \
-  [--stack-name <name>] [--branch <name>] --new-parent <name> \
+  [--branch <name>] --new-parent <name> \
   [--force] [--dry-run] [--json]
 ```
 
@@ -357,9 +353,9 @@ Backed by `cli.ts sync`, which has three modes:
 - `--force`: execute without the prompt (non-interactive or trusted automation).
 
 Optionally restrict the run to a subset of stacks with `--filter=<globs>`: a
-comma-separated list of stack-name globs where any entry starting with `!` is a
-negation. A filter with only negations (e.g. `--filter="!di*"`) includes every
-stack except those matching the excludes. A filter with any positive glob
+comma-separated list of root-branch-name globs where any entry starting with `!`
+is a negation. A filter with only negations (e.g. `--filter="!di*"`) includes
+every stack except those matching the excludes. A filter with any positive glob
 narrows to those matches (minus any negations). When the filter matches no
 configured stacks, `cli.ts sync` prints `No stacks match --filter=...` and exits
 without fetching or prompting. The dry-run plan's `filter` and `filteredOut`
@@ -374,9 +370,9 @@ Claude can report them to the user.
 2. **No-op check:** if `plan.isNoOp` is true, report "All stacks are already
    synced with origin" and stop. The CLI still fetches base branches in this
    path so the user's origin refs stay current.
-3. For each non-no-op stack, run `cli.ts verify-refs --stack-name=<name>`
-   (read-only). If any stack reports duplicate patches or structural drift that
-   the per-branch rebase cannot fix, stop and ask the user to resolve manually.
+3. For each non-no-op stack, run `cli.ts verify-refs` (read-only). If any stack
+   reports duplicate patches or structural drift that the per-branch rebase
+   cannot fix, stop and ask the user to resolve manually.
 4. Collect every branch with status `planned` across all stacks. Run
    `checkWorktreeSafety` on the union. If any dirty worktrees are returned,
    present them with cleanup commands and stop.
@@ -395,11 +391,10 @@ Claude can report them to the user.
    `git push --force-with-lease`. On the first conflict or push failure it stops
    and reports `failedAt: <stackName>`.
    - If a conflict: resolve the files in the stack that failed, then run
-     `cli.ts restack --stack-name=<failed> --resume`. Re-run
-     `cli.ts sync [--filter=<globs>]` to finish the remaining stacks.
-8. Run `cli.ts verify-refs --stack-name=<name>` per synced stack as a
-   post-flight check. If it is not clean on any stack, print the report and ask
-   the user to inspect.
+     `cli.ts restack --resume`. Re-run `cli.ts sync [--filter=<globs>]` to
+     finish the remaining stacks.
+8. Run `cli.ts verify-refs` per synced stack as a post-flight check. If it is
+   not clean on any stack, print the report and ask the user to inspect.
 9. Report per-stack results: fast-forwarded bases, pruned branches, pushed
    branches.
 
@@ -420,9 +415,9 @@ reorganization before reviewing the diff.
 On successful completion, HEAD is restored to the branch you were on when you
 started. On conflict, HEAD stays on the conflicted branch so you can resolve.
 
-1. Run `cli.ts verify-refs --stack-name=<name>` (read-only). If it reports
-   structural problems, stop. If it reports drift, remember for the plan.
-2. Run `cli.ts restack --dry-run --json --stack-name=<name> [flags]`.
+1. Run `cli.ts verify-refs` (read-only). If it reports structural problems,
+   stop. If it reports drift, remember for the plan.
+2. Run `cli.ts restack --dry-run --json [flags]`.
 3. **No-op check:** if every entry is `skipped-clean` and verify-refs was clean,
    report "Stack is already fully synced" and stop.
 4. Collect `planned` branches from the dry-run and run `checkWorktreeSafety`. If
@@ -430,11 +425,10 @@ started. On conflict, HEAD stays on the conflicted branch so you can resolve.
    before touching git; this step surfaces failures earlier in the plan output.)
 5. **Present plan** (tree with old-parent to new-target, drift notes if any).
 6. **Wait for confirmation.**
-7. Run `cli.ts restack --force --stack-name=<name> [flags]` to execute. On
-   conflict, the rebase stops at the first conflicted branch; resolve the files
-   and run `git rebase --continue` or
-   `cli.ts restack --stack-name=<name> --resume`. `--resume` skips the prompt
-   since the original plan was already approved.
+7. Run `cli.ts restack --force [flags]` to execute. On conflict, the rebase
+   stops at the first conflicted branch; resolve the files and run
+   `git rebase --continue` or `cli.ts restack --resume`. `--resume` skips the
+   prompt since the original plan was already approved.
 8. Run `cli.ts verify-refs` (informational only, do not gate; there is no push
    step). If it reports problems, print them so the user can inspect.
 
@@ -465,11 +459,11 @@ merged out of order. The submit plan reconciles drift on every run via the
 Add `--only=<branch>` to scope per-branch ops (push, create/edit, draft flips)
 to a single branch in the stack. Nav comments still rebuild stack-wide so
 sibling PRs reflect any newly-created PR. The CLI errors out if `<branch>` is
-not a live (non-tombstoned) member of the stack.
+not a member of the stack.
 
-1. Run `cli.ts submit --dry-run --stack-name=<name>` to inspect the plan. Add
-   `--json` to get the raw `SubmitPlan` shape. Add `--only=<branch>` to limit
-   per-branch actions to one branch.
+1. Run `cli.ts submit --dry-run` to inspect the plan. Add `--json` to get the
+   raw `SubmitPlan` shape. Add `--only=<branch>` to limit per-branch actions to
+   one branch.
 2. **No-op check:** if the plan reports `isNoOp: true`, report "All PRs are up
    to date with correct bases, draft state, and nav comments" and stop.
 3. **Present full plan:**
@@ -486,11 +480,11 @@ not a live (non-tombstoned) member of the stack.
      action `"create"` will also get a nav comment posted after its PR is
      opened, even though the dry-run plan doesn't list it.
 4. **Wait for confirmation.**
-5. Run `cli.ts submit --force --stack-name=<name>` to execute. The CLI pushes
-   with `--force-with-lease`, then creates/edits PRs via `gh pr create|edit`,
-   flips draft state via `gh pr ready` / `gh pr ready --undo`, and finally
-   rebuilds the nav plan against the live PR set (so freshly-created PRs are
-   included) and posts/updates nav comments.
+5. Run `cli.ts submit --force` to execute. The CLI pushes with
+   `--force-with-lease`, then creates/edits PRs via `gh pr create|edit`, flips
+   draft state via `gh pr ready` / `gh pr ready --undo`, and finally rebuilds
+   the nav plan against the live PR set (so freshly-created PRs are included)
+   and posts/updates nav comments.
 6. Report the PR URLs from the CLI output.
 
 ### `pr`
@@ -507,9 +501,8 @@ Open the pull request for a branch in the browser. Mirrors `gt pr`. Backed by
 
 Show current stack state. **No confirmation needed** (read-only).
 
-1. On a non-default branch, run `cli.ts status --stack-name=<name>` to get
-   ladder output for that stack. On the default branch, plain `cli.ts status`
-   behaves like `--all`.
+1. On a non-default branch, run `cli.ts status` to get ladder output for that
+   stack. On the default branch, plain `cli.ts status` behaves like `--all`.
 2. Display formatted with the compact ladder renderer:
    ```
    │ ◯      feature/auth-ui     up-to-date
@@ -553,7 +546,7 @@ Two supported shapes are handled by `executeLandFromCli` (in
 
 **Claude-orchestrated steps:**
 
-1. Run `cli.ts land --stack-name=<name> --json`
+1. Run `cli.ts land --json`
 2. If `ok: true`: report landed branches and any splits shown in the output.
 3. If `error: "conflict"`:
    - Show the user the `conflictFiles` list and `recovery.resolve` command.
@@ -569,35 +562,22 @@ confirmation step -- the plan is built and executed in one call.
 
 ### `clean`
 
-Detect and remove stale stack/branch config entries (orphaned branches, missing
-parents, empty stacks, stale resume-state, legacy `stack-merged` flags on live
-branches).
+Detect and remove stale stack/branch config entries (orphaned branches whose ref
+no longer exists, missing parents, stale resume-state). In v3 there are no
+tombstones: merged branches are deleted outright and their children are
+reparented to the surviving ancestor at land time. See `CLAUDE.md` for the full
+git-config schema.
 
-`clean` also understands `stack.<name>.landed-branches`,
-`stack.<name>.landed-pr`, and `stack.<name>.landed-parent`: multi-value keys
-that act as the stack-level tombstone list for branches that have been landed
-and deleted (the second records the PR number as `<branch>:<number>` so nav
-comments can keep showing merged PRs after the branch ref is gone, and the third
-records the branch's stack-parent as `<branch>:<parent>` so the tombstone keeps
-its structural position in the tree). Entries in any of these keys are expected
-and are not stale. A branch with a live stack-name entry whose ref is missing is
-ALSO not stale when that branch appears in `landed-branches` - the tombstone's
-structural placement is preserved intentionally. The branch-level
-`branch.<name>.stack-merged = true` key is the legacy pre-migration form; when
-it appears on a live branch with a live `stack-name`, `clean` reports a
-`legacy-merged-flag` finding and `--force` removes it. See `CLAUDE.md` for the
-full git-config schema.
+**Flags:** `--force`, `--json`
 
-**Flags:** `--stack-name=<name>`, `--force`, `--json`
-
-1. Run `cli.ts clean [--stack-name=<name>] --json` (read-only, no gate needed)
-   to get the structured report.
+1. Run `cli.ts clean --json` (read-only, no gate needed) to get the structured
+   report.
 2. **No-op check:** if `findings` is empty, report "No stale config found" and
    stop.
 3. **Present plan:** show each finding with its kind, subject (branch or stack),
    details, and the config keys that would be removed.
 4. **Wait for confirmation.**
-5. Run `cli.ts clean [--stack-name=<name>] --force` to apply.
+5. Run `cli.ts clean --force` to apply.
 6. Report the removed keys.
 
 ## Confirmation Gate Rules
@@ -648,15 +628,16 @@ All scripts are accessed through a single unified CLI entry point:
 ${CLAUDE_PLUGIN_ROOT}/skills/stacked-prs/scripts/stacked-prs <subcommand> [flags]
 ```
 
-`--stack-name` is auto-detected from the current branch's git config when not
-provided. `--owner` and `--repo` are auto-detected from `gh repo view` when not
-provided.
+Stacks are identified by their root branch (the first branch off the base).
+Subcommands derive the stack from the current branch by walking `stack-parent`
+pointers, so no name argument is required. `--owner` and `--repo` are
+auto-detected from `gh repo view` when not provided.
 
 ### `status`
 
 ```bash
 ${CLAUDE_PLUGIN_ROOT}/skills/stacked-prs/scripts/stacked-prs status \
-  [--stack-name=<name>] [--owner=<owner> --repo=<repo>] [--json] [--pr|-p] [--all] [--interactive|-i] [--theme <theme>]
+  [--owner=<owner> --repo=<repo>] [--json] [--pr|-p] [--all] [--interactive|-i] [--theme <theme>]
 ```
 
 Returns human-readable ladder output by default. Pass `--json` for structured
@@ -675,7 +656,7 @@ otherwise status stays local-only and skips PR fetching. Pass `--theme light` or
 
 ```bash
 ${CLAUDE_PLUGIN_ROOT}/skills/stacked-prs/scripts/stacked-prs restack \
-  [--stack-name=<name>] \
+  \
   [--upstack-from=<branch>] \
   [--downstack-from=<branch>] \
   [--only=<branch>] \
@@ -707,7 +688,7 @@ every entry is `skipped-clean`, the CLI prints
 
 ```bash
 ${CLAUDE_PLUGIN_ROOT}/skills/stacked-prs/scripts/stacked-prs nav \
-  [--stack-name=<name>] [--owner=<owner> --repo=<repo>] [--dry-run]
+  [--owner=<owner> --repo=<repo>] [--dry-run]
 ```
 
 Creates or updates stack navigation comments on PRs. Use `--dry-run` to preview
@@ -717,7 +698,6 @@ without writing.
 
 ```bash
 ${CLAUDE_PLUGIN_ROOT}/skills/stacked-prs/scripts/stacked-prs verify-refs \
-  [--stack-name=<name>]
 ```
 
 Verifies all stack branches have correct ancestry after a rebase and detects
@@ -731,7 +711,7 @@ Exits with code 1 if any branches are stale or duplicates are found.
 ```bash
 ${CLAUDE_PLUGIN_ROOT}/skills/stacked-prs/scripts/stacked-prs create <branch> \
   [-m <message>] [--create-worktree <dir>] \
-  [--stack-name <name>] [--merge-strategy merge|squash] \
+  [--merge-strategy merge|squash] \
   [--force] [--dry-run] [--json]
 ```
 
@@ -756,7 +736,7 @@ base branch, and any warnings (e.g., PR base mismatches).
 
 ```bash
 ${CLAUDE_PLUGIN_ROOT}/skills/stacked-prs/scripts/stacked-prs submit \
-  [--stack-name=<name>] [--owner=<owner> --repo=<repo>] \
+  [--owner=<owner> --repo=<repo>] \
   [--only=<branch>] [--dry-run] [--force] [--json]
 ```
 
@@ -785,18 +765,17 @@ bases on GitHub, and refreshing nav comments), then for each surviving stack
 runs `restack` and force-pushes with `--force-with-lease`. Stops at the first
 conflict or push failure; the returned JSON (`--json`) records
 `failedAt: <stackName>` so the caller can resume that stack with
-`cli.ts restack --stack-name=<failed> --resume` and then re-run `cli.ts sync`
-for the rest. Same three-mode shape as submit: `--dry-run`, interactive default,
-`--force`.
+`cli.ts restack --resume` and then re-run `cli.ts sync` for the rest. Same
+three-mode shape as submit: `--dry-run`, interactive default, `--force`.
 
-Pass `--filter=<globs>` with a comma-separated list of stack-name globs to
+Pass `--filter=<globs>` with a comma-separated list of root-branch-name globs to
 restrict the run to a subset of stacks. Entries prefixed with `!` are negations:
-`--filter="!di*"` syncs every stack whose name does not match `di*`;
-`--filter="feat-*,!feat-draft*"` syncs stacks named `feat-*` except those
-matching `feat-draft*`. Only matched stacks' base branches are fetched and
-fast-forwarded; skipped stack names appear in `plan.filteredOut`. If the filter
-matches nothing, the CLI prints `No stacks match --filter=...` and exits without
-fetching.
+`--filter="!di*"` syncs every stack whose root branch does not match `di*`;
+`--filter="feat-*,!feat-draft*"` syncs stacks whose root branch matches `feat-*`
+except those matching `feat-draft*`. Only matched stacks' base branches are
+fetched and fast-forwarded; skipped stack names appear in `plan.filteredOut`. If
+the filter matches nothing, the CLI prints `No stacks match --filter=...` and
+exits without fetching.
 
 ### `pr`
 
@@ -814,7 +793,7 @@ lookup result (`{ ok, branch, pr?: { number, url, state, isDraft }, error? }`).
 
 ```bash
 ${CLAUDE_PLUGIN_ROOT}/skills/stacked-prs/scripts/stacked-prs land \
-  [--stack-name=<name>] [--dry-run] [--json] [--resume]
+  [--dry-run] [--json] [--resume]
 ```
 
 Lands a merged PR and cleans up the stack. Builds the land plan, executes
@@ -828,7 +807,7 @@ failure (conflict or blocked).
 
 ```bash
 ${CLAUDE_PLUGIN_ROOT}/skills/stacked-prs/scripts/stacked-prs clean \
-  [--stack-name=<name>] [--force] [--json]
+  [--force] [--json]
 ```
 
 Detects four classes of stale git config: orphaned branch entries (config
@@ -841,34 +820,34 @@ Pass `--force` for non-interactive use. Pass `--json` for structured output.
 
 ```bash
 ${CLAUDE_PLUGIN_ROOT}/skills/stacked-prs/scripts/stacked-prs init \
-  [--branch <name>] [--stack-name <name>] [--merge-strategy merge|squash] \
+  [--branch <name>] [--merge-strategy merge|squash] \
   [--base-branch <name>] [--force] [--dry-run] [--json]
 ```
 
 Initializes the current branch (or `--branch`) as the root of a new stack. The
-CLI guards against running on the base branch, against a branch already in a
-stack, and against a stack-name collision. Same three-mode shape as submit:
-`--dry-run`, interactive default, `--force`.
+CLI guards against running on the base branch and against a branch already in a
+stack. Same three-mode shape as submit: `--dry-run`, interactive default,
+`--force`.
 
 ### `import`
 
 ```bash
 ${CLAUDE_PLUGIN_ROOT}/skills/stacked-prs/scripts/stacked-prs import \
-  [--branch <name>] [--stack-name <name>] [--merge-strategy merge|squash] \
+  [--branch <name>] [--merge-strategy merge|squash] \
   [--owner <owner> --repo <repo>] [--force] [--dry-run] [--json]
 ```
 
 Wraps `import-discover` with a config-write step. Flattens the discovered tree
-into `(branch, parent)` pairs and writes all four config keys per branch in a
-single run. Guards against any discovered branch already being in a stack, and
-against stack-name collisions. Warnings from the discovery phase (e.g. PR base
-mismatches) are surfaced in the plan.
+into `(branch, parent)` pairs and writes the per-branch trio (`stack-parent`,
+`base-branch`, `merge-strategy`) for every discovered branch. Guards against any
+discovered branch already being tracked. Warnings from the discovery phase (e.g.
+PR base mismatches) are surfaced in the plan.
 
 ### `insert`
 
 ```bash
 ${CLAUDE_PLUGIN_ROOT}/skills/stacked-prs/scripts/stacked-prs insert <branch> \
-  [--stack-name <name>] [--child <name>] [--force] [--dry-run] [--json]
+  [--child <name>] [--force] [--dry-run] [--json]
 ```
 
 Creates `<branch>` off the parent of `--child` (default: current branch) and
@@ -879,7 +858,7 @@ no rebase happens because the inserted branch starts empty.
 
 ```bash
 ${CLAUDE_PLUGIN_ROOT}/skills/stacked-prs/scripts/stacked-prs fold \
-  [--stack-name <name>] [--branch <name>] [--strategy ff|squash] \
+  [--branch <name>] [--strategy ff|squash] \
   [--message <msg>] [--force] [--dry-run] [--json]
 ```
 
@@ -892,7 +871,7 @@ collapses the branch into a single commit on the parent.
 
 ```bash
 ${CLAUDE_PLUGIN_ROOT}/skills/stacked-prs/scripts/stacked-prs move \
-  [--stack-name <name>] [--branch <name>] --new-parent <name> \
+  [--branch <name>] --new-parent <name> \
   [--force] [--dry-run] [--json]
 ```
 
@@ -906,7 +885,7 @@ stops and returns recovery commands matching the `restack` / `sync` shape.
 
 ```bash
 ${CLAUDE_PLUGIN_ROOT}/skills/stacked-prs/scripts/stacked-prs split \
-  [--stack-name <name>] [--branch <name>] --new-branch <name> \
+  [--branch <name>] --new-branch <name> \
   (--by-commit <sha> | --by-file <f1,f2,...>) \
   [--extract-message <msg>] [--remainder-message <msg>] \
   [--force] [--dry-run] [--json]
