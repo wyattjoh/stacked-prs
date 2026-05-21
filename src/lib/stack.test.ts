@@ -10,6 +10,8 @@ import {
   getAllNodes,
   getAllStackTrees,
   getBaseBranch,
+  getBranchBaseBranch,
+  getBranchMergeStrategy,
   getLandedBranches,
   getLandedParents,
   getLandedPrs,
@@ -24,6 +26,8 @@ import {
   renderTree,
   runGitCommand,
   setBaseBranch,
+  setBranchBaseBranch,
+  setBranchMergeStrategy,
   setMergeStrategy,
   setStackBranch,
   setStackNode,
@@ -1257,5 +1261,29 @@ describe("getLiveSubtreeRoots", () => {
     };
     const tree = makeTree("main", [root]);
     expect(getLiveSubtreeRoots(tree)).toEqual([]);
+  });
+});
+
+describe("per-branch base-branch and merge-strategy helpers", () => {
+  test("setBranchBaseBranch + getBranchBaseBranch round-trip", async () => {
+    await using repo = await createTestRepo();
+    await addBranch(repo.dir, "feat/a", "main");
+    await setBranchBaseBranch(repo.dir, "feat/a", "main");
+    expect(await getBranchBaseBranch(repo.dir, "feat/a")).toBe("main");
+    expect(await getBranchBaseBranch(repo.dir, "feat/b")).toBeUndefined();
+  });
+
+  test("setBranchMergeStrategy + getBranchMergeStrategy round-trip", async () => {
+    await using repo = await createTestRepo();
+    await addBranch(repo.dir, "feat/a", "main");
+    await setBranchMergeStrategy(repo.dir, "feat/a", "squash");
+    expect(await getBranchMergeStrategy(repo.dir, "feat/a")).toBe("squash");
+    await setBranchMergeStrategy(repo.dir, "feat/a", "merge");
+    expect(await getBranchMergeStrategy(repo.dir, "feat/a")).toBe("merge");
+  });
+
+  test("getBranchMergeStrategy returns undefined for unknown branch", async () => {
+    await using repo = await createTestRepo();
+    expect(await getBranchMergeStrategy(repo.dir, "nope")).toBeUndefined();
   });
 });

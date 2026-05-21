@@ -306,6 +306,42 @@ export async function setStackBranch(
   await gitConfigSet(dir, `branch.${branch}.stack-order`, String(opts.order));
 }
 
+/** Read this branch's own base-branch config, ignoring ancestors. */
+export async function getBranchBaseBranch(
+  dir: string,
+  branch: string,
+): Promise<string | undefined> {
+  return await gitConfig(dir, `branch.${branch}.base-branch`);
+}
+
+/** Write `branch.<branch>.base-branch`. */
+export async function setBranchBaseBranch(
+  dir: string,
+  branch: string,
+  baseBranch: string,
+): Promise<void> {
+  await gitConfigSet(dir, `branch.${branch}.base-branch`, baseBranch);
+}
+
+/** Read this branch's own merge-strategy config, ignoring ancestors. */
+export async function getBranchMergeStrategy(
+  dir: string,
+  branch: string,
+): Promise<MergeStrategy | undefined> {
+  const value = await gitConfig(dir, `branch.${branch}.merge-strategy`);
+  if (value === "merge" || value === "squash") return value;
+  return undefined;
+}
+
+/** Write `branch.<branch>.merge-strategy`. */
+export async function setBranchMergeStrategy(
+  dir: string,
+  branch: string,
+  strategy: MergeStrategy,
+): Promise<void> {
+  await gitConfigSet(dir, `branch.${branch}.merge-strategy`, strategy);
+}
+
 /** Get the merge strategy for a stack. Returns undefined if not set. */
 export async function getMergeStrategy(
   dir: string,
