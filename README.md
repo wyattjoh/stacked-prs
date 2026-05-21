@@ -69,17 +69,27 @@ also user-invocable as `/stacked-prs <subcommand>`.
 
 ### Storage model
 
-Stack metadata lives entirely in **local git config**:
+Stack metadata lives entirely in **local git config**, replicated per branch:
 
 ```
-branch.<name>.stack-name          = my-stack
-branch.<name>.stack-parent        = main
-stack.<stack-name>.merge-strategy = squash
-stack.<stack-name>.base-branch    = main
+branch.<name>.stack-parent           = <parent-branch>
+branch.<name>.base-branch            = main
+branch.<name>.merge-strategy         = squash
+stacked-prs.resume-state             = <transient JSON>
+stacked-prs.default-merge-strategy   = squash    # optional
 ```
 
-No files are added to the working tree. Metadata is per-repo and survives branch
-switches, stashes, and worktree changes.
+Stacks are identified by topology, not by a stored name: a stack is the set of
+branches reachable from a root (the branch whose `stack-parent` equals the base
+branch) via parent pointers. No files are added to the working tree. Metadata is
+per-repo and survives branch switches, stashes, and worktree changes.
+
+### Upgrading from 2.x
+
+3.0 removes the `--stack-name` flag and the `stack.<name>.*` git config
+namespace. On first run after upgrading, `stacked-prs` automatically converts
+existing config to the new per-branch schema and emits one stderr notice. Finish
+any in-flight rebase from the prior version before upgrading.
 
 ### Tree model
 
@@ -405,8 +415,9 @@ deno run --allow-run=git,gh --allow-env --allow-read \
 | `cli.ts pr [--branch=<name>] [--print]`       | Open the branch's PR in the browser via `gh pr view --web`             |
 | `cli.ts land [--dry-run] [--json] [--resume]` | Land a merged PR; plan only with `--dry-run`, resume after conflicts   |
 
-`--stack-name` auto-detects from the current branch's git config when omitted.
-`--owner` and `--repo` auto-detect from `gh repo view` when omitted.
+Stacks are identified by walking `stack-parent` pointers from the current branch
+up to its root; no stack name argument is required. `--owner` and `--repo`
+auto-detect from `gh repo view` when omitted.
 
 ## Merge strategies
 
@@ -418,14 +429,14 @@ When initializing a stack, you choose a merge strategy:
 - **merge**: After landing, a standard `git rebase origin/main --update-refs`
   realigns the stack because merge commits preserve ancestry.
 
-The skill tracks this in `stack.<name>.merge-strategy` and uses the correct
+The skill tracks this in `branch.<name>.merge-strategy` and uses the correct
 rebase strategy automatically during `land`.
 
 ### Changing the default
 
 `init`, `import`, and auto-init `create` default to `squash`. To change the
 default without passing `--merge-strategy` on every invocation, set
-`stack.default-merge-strategy` in git config:
+`stacked-prs.default-merge-strategy` in git config:
 
 ```bash
 # Per-repo override:
@@ -481,8 +492,9 @@ The branch has existing stack metadata. Run `/stacked-prs status` to see its
 current stack. To manually clear metadata:
 
 ```bash
-git config --unset branch.<name>.stack-name
 git config --unset branch.<name>.stack-parent
+git config --unset branch.<name>.base-branch
+git config --unset branch.<name>.merge-strategy
 ```
 
 ### Stale branches after rebase
@@ -518,11 +530,12 @@ conflict are already complete.
 
 ### Stack looks wrong after migration from old format
 
-Old stacks used `branch.<name>.stack-order` for ordering. The skill
-auto-migrates when it detects this key: it validates the tree from
-`stack-parent` relationships, writes `stack.<name>.base-branch`, then removes
-all `stack-order` keys. If you see unexpected behavior after migration, run
-`/stacked-prs status` to verify the tree looks correct.
+Pre-3.0 stacks used the `stack.<name>.*` config namespace. The skill
+auto-migrates when it detects legacy keys on first invocation: it copies
+`base-branch` and `merge-strategy` from each stack onto every branch in that
+stack, then removes the legacy `stack.*` and `branch.<n>.stack-name` keys. If
+you see unexpected behavior after the migration runs, run `/stacked-prs status`
+to verify the tree looks correct.
 
 ## Development
 

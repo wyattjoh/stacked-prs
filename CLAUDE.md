@@ -171,8 +171,8 @@ node's parent SHA before any mutation, then runs
 turn. Root branches target `origin/<base>` so local `main` is never touched. The
 walk stops at the first conflict and leaves the working tree mid-rebase for
 resolution; `--resume` continues the walk after `git rebase --continue`. Resume
-state is persisted under `stack.<stack-name>.resume-state` so a conflicted run
-can be continued across process invocations.
+state is persisted under `stacked-prs.resume-state` so a conflicted run can be
+continued across process invocations.
 
 ### Script roles
 
@@ -201,27 +201,38 @@ can be continued across process invocations.
 | `src/commands/split.ts`           | Split a branch (--by-commit / --by-file) into two                     | `cli.ts split --new-branch <name> [flags]`                              |
 | `src/tui/app.tsx`                 | Root Ink component, owns reducer + effects                            | Launched by `cli.ts status --interactive`                               |
 
-### Git config schema
+### Git config schema (v3)
 
 ```
-branch.<name>.stack-name           # Which stack this branch belongs to
-branch.<name>.stack-parent         # Parent branch name (or the base branch, e.g. "main")
-stack.<stack-name>.merge-strategy  # "merge" or "squash"
-stack.<stack-name>.base-branch     # Base branch name, e.g. "main" or "master"
-stack.<stack-name>.resume-state    # Transient JSON for in-progress restack recovery
-stack.<stack-name>.landed-branches # Multi-value: branch names landed from this stack
-stack.<stack-name>.landed-pr       # Multi-value: "<branch>:<pr-number>" per landed branch, written at land time so nav comments can keep rendering merged PRs after the branch is deleted
-stack.<stack-name>.landed-parent   # Multi-value: "<branch>:<parent-branch>" per landed branch, written at land time so the tombstone keeps its structural position in the tree after `git branch -D` wipes its live branch-level config
-stack.<stack-name>.color           # (Optional) hex color override for TUI and clean output
-stack.default-merge-strategy       # (Optional) default for init/import/auto-init create; "merge" or "squash". Falls back to "squash" when unset. Read via getDefaultMergeStrategy(). Respects --local/--global/--system precedence.
+branch.<name>.stack-parent           # Parent branch name (or the base branch, e.g. "main")
+branch.<name>.base-branch            # Replicated to every branch in the stack at creation time
+branch.<name>.merge-strategy         # Replicated to every branch in the stack at creation time
+stacked-prs.resume-state             # Transient JSON: at most one in-progress restack per repo
+stacked-prs.land-resume-state        # Transient JSON: at most one in-progress land per repo
+stacked-prs.default-merge-strategy   # (Optional) default for init/import/auto-init create; "merge" or "squash". Falls back to "squash" when unset.
 ```
 
-`stack-order` is not used in the tree model; topology is derived entirely from
-`stack-parent` relationships. `getStackTree` auto-migrates old configs by
-removing `stack-order` keys after validating the tree. `resume-state` is
-transient: written before a restack walk begins, updated after each successful
-branch rebase, and cleared on successful completion. If it exists,
-`cli.ts restack` refuses to run without `--resume`.
+Stacks are identified by topology: a stack is the set of branches reachable from
+a root (the branch whose `stack-parent` equals the base branch) via parent
+pointers. The root branch's name is the stack's UI label. Two roots sharing a
+base branch are two separate stacks.
+
+`resume-state` is transient: written before a restack walk begins, updated after
+each successful branch rebase, and cleared on successful completion. If it
+exists, `cli.ts restack` refuses to run without `--resume`.
+
+#### Migration from v2
+
+Pre-3.0 stacks used `stack.<stack-name>.*` keys, `branch.<n>.stack-name`, and
+tombstone multi-values (`landed-branches`, `landed-pr`, `landed-parent`). The
+migration in `src/lib/migration.ts` runs once on the first CLI invocation
+post-upgrade: it copies stack-level base-branch and merge-strategy down to every
+branch in the stack, moves any in-flight resume-state to the repo-level
+`stacked-prs.*` slot, renames `stack.default-merge-strategy` to
+`stacked-prs.default-merge-strategy`, then deletes every legacy key (including
+tombstones, which v3 does not use). It refuses to run when multiple stacks have
+a non-empty in-flight resume-state; the user finishes or aborts the rebase under
+v2 first.
 
 ### TUI layer (`src/tui/`)
 
