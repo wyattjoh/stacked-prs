@@ -1,5 +1,6 @@
 import { setMockDir } from "../gh.ts";
 import { addLandedBranch, addLandedPr } from "../stack.ts";
+import type { MergeStrategy } from "../stack.ts";
 
 const GIT_ENV = {
   GIT_AUTHOR_NAME: "Test User",
@@ -176,4 +177,52 @@ export async function addTombstone(
       env: GIT_ENV,
     }).output();
   }
+}
+
+export interface TrackBranchOptions {
+  parent: string;
+  baseBranch?: string;
+  mergeStrategy?: MergeStrategy;
+}
+
+/**
+ * Write the per-branch trio (`stack-parent`, optional `base-branch`,
+ * optional `merge-strategy`) without going through any production helper.
+ * Used by tests that need to set up tracked branches under the new schema.
+ */
+export async function trackBranch(
+  dir: string,
+  branch: string,
+  opts: TrackBranchOptions,
+): Promise<void> {
+  await runGit(dir, "config", `branch.${branch}.stack-parent`, opts.parent);
+  if (opts.baseBranch !== undefined) {
+    await runGit(
+      dir,
+      "config",
+      `branch.${branch}.base-branch`,
+      opts.baseBranch,
+    );
+  }
+  if (opts.mergeStrategy !== undefined) {
+    await runGit(
+      dir,
+      "config",
+      `branch.${branch}.merge-strategy`,
+      opts.mergeStrategy,
+    );
+  }
+}
+
+/**
+ * Simulate a PR-merged branch by deleting the ref. Git removes
+ * `branch.<n>.*` config keys with the ref. Use this in tests that need
+ * "this branch was landed and is gone" without invoking the full `land`
+ * command.
+ */
+export async function markBranchMerged(
+  dir: string,
+  branch: string,
+): Promise<void> {
+  await runGit(dir, "branch", "-D", branch);
 }
