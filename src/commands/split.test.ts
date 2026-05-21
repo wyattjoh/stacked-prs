@@ -4,7 +4,9 @@ import {
   addTombstone,
   createTestRepo,
   runGit,
+  trackBranch,
 } from "../lib/testdata/helpers.ts";
+import { getStackTree } from "../lib/stack.ts";
 import { planSplit, split } from "./split.ts";
 
 /**
@@ -34,6 +36,39 @@ async function setupMultiCommitStack(dir: string): Promise<string[]> {
   await runGit(dir, "config", "stack.my-stack.merge-strategy", "merge");
 
   return [c1, c2, c3];
+}
+
+async function setupMultiCommitV3Stack(dir: string): Promise<string[]> {
+  await runGit(dir, "checkout", "-b", "feat/a");
+  await Deno.writeTextFile(`${dir}/file1.txt`, "v1\n");
+  await runGit(dir, "add", "file1.txt");
+  await runGit(dir, "commit", "-m", "c1");
+  const c1 = await runGit(dir, "rev-parse", "HEAD");
+
+  await Deno.writeTextFile(`${dir}/file2.txt`, "v1\n");
+  await runGit(dir, "add", "file2.txt");
+  await runGit(dir, "commit", "-m", "c2");
+  const c2 = await runGit(dir, "rev-parse", "HEAD");
+
+  await Deno.writeTextFile(`${dir}/file3.txt`, "v1\n");
+  await runGit(dir, "add", "file3.txt");
+  await runGit(dir, "commit", "-m", "c3");
+  const c3 = await runGit(dir, "rev-parse", "HEAD");
+
+  await trackBranch(dir, "feat/a", {
+    parent: "main",
+    baseBranch: "main",
+    mergeStrategy: "merge",
+  });
+
+  return [c1, c2, c3];
+}
+
+async function configValue(
+  dir: string,
+  key: string,
+): Promise<string | undefined> {
+  return await runGit(dir, "config", key).catch(() => undefined);
 }
 
 describe("split --by-commit — plan", () => {
@@ -140,12 +175,39 @@ describe("split --by-commit — execute (real git)", () => {
     void c2;
 
     // Config wired up
-    expect(
-      await runGit(repo.dir, "config", "branch.feat/b.stack-name"),
-    ).toBe("my-stack");
+    expect(await configValue(repo.dir, "branch.feat/b.stack-name"))
+      .toBeUndefined();
     expect(
       await runGit(repo.dir, "config", "branch.feat/b.stack-parent"),
     ).toBe("feat/a");
+  });
+
+  test("v3 commit split keeps root readable without stack-name keys", async () => {
+    await using repo = await createTestRepo();
+    const [c1] = await setupMultiCommitV3Stack(repo.dir);
+
+    const result = await split(repo.dir, {
+      mode: "by-commit",
+      stackName: "feat/a",
+      branch: "feat/a",
+      at: c1,
+      newBranch: "feat/b",
+    });
+    expect(result.ok).toBe(true);
+
+    const tree = await getStackTree(repo.dir, "feat/a");
+    expect(tree.roots.map((root) => root.branch)).toEqual(["feat/a"]);
+    expect(tree.roots[0].children.map((child) => child.branch)).toEqual([
+      "feat/b",
+    ]);
+    expect(await configValue(repo.dir, "branch.feat/b.stack-name"))
+      .toBeUndefined();
+    expect(await configValue(repo.dir, "branch.feat/b.base-branch")).toBe(
+      "main",
+    );
+    expect(await configValue(repo.dir, "branch.feat/b.merge-strategy")).toBe(
+      "merge",
+    );
   });
 
   test("reparents existing children of original onto new upper", async () => {
@@ -229,6 +291,36 @@ describe("split --by-file — execute (real git)", () => {
     expect(
       await runGit(repo.dir, "config", "branch.feat/a.stack-parent"),
     ).toBe("feat/new");
+  });
+
+  test("v3 file split keeps promoted branch readable without stack-name keys", async () => {
+    await using repo = await createTestRepo();
+    await setupMultiCommitV3Stack(repo.dir);
+
+    const result = await split(repo.dir, {
+      mode: "by-file",
+      stackName: "feat/a",
+      branch: "feat/a",
+      files: ["file1.txt"],
+      newBranch: "feat/new",
+      extractMessage: "extract file1",
+      remainderMessage: "remainder",
+    });
+    expect(result.ok).toBe(true);
+
+    const tree = await getStackTree(repo.dir, "feat/new");
+    expect(tree.roots.map((root) => root.branch)).toEqual(["feat/new"]);
+    expect(tree.roots[0].children.map((child) => child.branch)).toEqual([
+      "feat/a",
+    ]);
+    expect(await configValue(repo.dir, "branch.feat/new.stack-name"))
+      .toBeUndefined();
+    expect(await configValue(repo.dir, "branch.feat/new.base-branch")).toBe(
+      "main",
+    );
+    expect(await configValue(repo.dir, "branch.feat/new.merge-strategy")).toBe(
+      "merge",
+    );
   });
 
   test("rejects file not in branch's changes", async () => {

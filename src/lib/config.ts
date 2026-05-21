@@ -1,8 +1,13 @@
 import {
   getAllNodes,
+  getEffectiveMergeStrategy,
   getStackTree,
+  gitConfig,
   type MergeStrategy,
   removeStackBranch,
+  setBranchBaseBranch,
+  setBranchMergeStrategy,
+  setBranchParent,
   setMergeStrategy,
   setStackNode,
   type StackTree,
@@ -51,6 +56,7 @@ export interface SplitInfo {
 
 export interface LandCleanupResult {
   removed: string;
+  remainingRoots: string[];
   splitInto: SplitInfo[];
 }
 
@@ -65,10 +71,28 @@ export async function configInsertBranch(
   dir: string,
   opts: InsertBranchOpts,
 ): Promise<void> {
+  const tree = await getStackTree(dir, opts.stack);
+  const strategy = await getEffectiveMergeStrategy(dir, opts.child);
+  const childStackName = await gitConfig(
+    dir,
+    `branch.${opts.child}.stack-name`,
+  );
+  const useLegacyStackName = childStackName === opts.stack;
+
   // Set new branch's parent
-  await setStackNode(dir, opts.branch, opts.stack, opts.parent);
+  if (useLegacyStackName) {
+    await setStackNode(dir, opts.branch, opts.stack, opts.parent);
+  } else {
+    await setBranchParent(dir, opts.branch, opts.parent);
+  }
+  await setBranchBaseBranch(dir, opts.branch, tree.baseBranch);
+  await setBranchMergeStrategy(dir, opts.branch, strategy);
   // Reparent child to point to the new branch
-  await setStackNode(dir, opts.child, opts.stack, opts.branch);
+  if (useLegacyStackName) {
+    await setStackNode(dir, opts.child, opts.stack, opts.branch);
+  } else {
+    await setBranchParent(dir, opts.child, opts.branch);
+  }
 }
 
 export interface FoldBranchResult {
@@ -110,11 +134,11 @@ export async function configMoveBranch(
 
   // Reparent all children of the moved branch to its old parent
   for (const child of node.children) {
-    await setStackNode(dir, child.branch, opts.stack, node.parent);
+    await setBranchParent(dir, child.branch, node.parent);
   }
 
   // Set the moved branch's parent to the new parent
-  await setStackNode(dir, opts.branch, opts.stack, opts.newParent);
+  await setBranchParent(dir, opts.branch, opts.newParent);
 }
 
 export async function configLandCleanup(
@@ -123,6 +147,15 @@ export async function configLandCleanup(
   mergedBranch: string,
   _prNumber?: number,
 ): Promise<LandCleanupResult> {
-  await configBranchCleanup(dir, stackName, mergedBranch, _prNumber);
-  return { removed: mergedBranch, splitInto: [] };
+  const result = await configBranchCleanup(
+    dir,
+    stackName,
+    mergedBranch,
+    _prNumber,
+  );
+  return {
+    removed: mergedBranch,
+    remainingRoots: result.remainingRoots,
+    splitInto: [],
+  };
 }

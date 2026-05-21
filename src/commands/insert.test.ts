@@ -5,7 +5,9 @@ import {
   addTombstone,
   createTestRepo,
   runGit,
+  trackBranch,
 } from "../lib/testdata/helpers.ts";
+import { getStackTree } from "../lib/stack.ts";
 import { insert, planInsert } from "./insert.ts";
 
 /** Register a linear 2-branch stack: main <- feat/a <- feat/c. */
@@ -18,6 +20,13 @@ async function setupTwoBranchStack(dir: string): Promise<void> {
   await runGit(dir, "config", "branch.feat/c.stack-parent", "feat/a");
   await runGit(dir, "config", "stack.my-stack.base-branch", "main");
   await runGit(dir, "config", "stack.my-stack.merge-strategy", "merge");
+}
+
+async function configValue(
+  dir: string,
+  key: string,
+): Promise<string | undefined> {
+  return await runGit(dir, "config", key).catch(() => undefined);
 }
 
 describe("insert — plan", () => {
@@ -102,6 +111,45 @@ describe("insert — execute (real git)", () => {
     expect(
       await runGit(repo.dir, "config", "branch.feat/c.stack-parent"),
     ).toBe("feat/b");
+  });
+
+  test("v3 insert keeps the root stack readable without stack-name keys", async () => {
+    await using repo = await createTestRepo();
+    await addBranch(repo.dir, "feat/a", "main");
+    await addBranch(repo.dir, "feat/c", "feat/a");
+    await trackBranch(repo.dir, "feat/a", {
+      parent: "main",
+      baseBranch: "main",
+      mergeStrategy: "merge",
+    });
+    await trackBranch(repo.dir, "feat/c", {
+      parent: "feat/a",
+      baseBranch: "main",
+      mergeStrategy: "merge",
+    });
+
+    const result = await insert(repo.dir, {
+      stackName: "feat/a",
+      child: "feat/c",
+      branch: "feat/b",
+    });
+    expect(result.ok).toBe(true);
+
+    const tree = await getStackTree(repo.dir, "feat/a");
+    expect(tree.roots.map((root) => root.branch)).toEqual(["feat/a"]);
+    expect(tree.roots[0].children.map((child) => child.branch)).toEqual([
+      "feat/b",
+    ]);
+    expect(tree.roots[0].children[0].children.map((child) => child.branch))
+      .toEqual(["feat/c"]);
+    expect(await configValue(repo.dir, "branch.feat/b.stack-name"))
+      .toBeUndefined();
+    expect(await configValue(repo.dir, "branch.feat/b.base-branch")).toBe(
+      "main",
+    );
+    expect(await configValue(repo.dir, "branch.feat/b.merge-strategy")).toBe(
+      "merge",
+    );
   });
 
   test("dry-run mutates nothing", async () => {

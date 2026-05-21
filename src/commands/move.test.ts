@@ -5,7 +5,9 @@ import {
   addTombstone,
   createTestRepo,
   runGit,
+  trackBranch,
 } from "../lib/testdata/helpers.ts";
+import { getStackTree } from "../lib/stack.ts";
 import { move, planMove } from "./move.ts";
 
 /** Register a stack:  main <- feat/a <- feat/b, and sibling feat/c off feat/a. */
@@ -22,6 +24,35 @@ async function setupForkStack(dir: string): Promise<void> {
   await runGit(dir, "config", "branch.feat/c.stack-parent", "feat/a");
   await runGit(dir, "config", "stack.my-stack.base-branch", "main");
   await runGit(dir, "config", "stack.my-stack.merge-strategy", "merge");
+}
+
+async function setupV3ForkStack(dir: string): Promise<void> {
+  await addBranch(dir, "feat/a", "main");
+  await addBranch(dir, "feat/b", "feat/a");
+  await addBranch(dir, "feat/c", "feat/a");
+
+  await trackBranch(dir, "feat/a", {
+    parent: "main",
+    baseBranch: "main",
+    mergeStrategy: "merge",
+  });
+  await trackBranch(dir, "feat/b", {
+    parent: "feat/a",
+    baseBranch: "main",
+    mergeStrategy: "merge",
+  });
+  await trackBranch(dir, "feat/c", {
+    parent: "feat/a",
+    baseBranch: "main",
+    mergeStrategy: "merge",
+  });
+}
+
+async function configValue(
+  dir: string,
+  key: string,
+): Promise<string | undefined> {
+  return await runGit(dir, "config", key).catch(() => undefined);
 }
 
 describe("move — plan", () => {
@@ -111,6 +142,28 @@ describe("move — execute (real git)", () => {
       "feat/c",
     ).then(() => "yes").catch(() => "no");
     expect(ancestor).toBe("yes");
+  });
+
+  test("v3 move keeps the root readable without stack-name keys", async () => {
+    await using repo = await createTestRepo();
+    await setupV3ForkStack(repo.dir);
+
+    const result = await move(repo.dir, {
+      stackName: "feat/a",
+      branch: "feat/c",
+      newParent: "feat/b",
+    });
+    expect(result.ok).toBe(true);
+
+    const tree = await getStackTree(repo.dir, "feat/a");
+    expect(tree.roots.map((root) => root.branch)).toEqual(["feat/a"]);
+    expect(tree.roots[0].children.map((child) => child.branch)).toEqual([
+      "feat/b",
+    ]);
+    expect(tree.roots[0].children[0].children.map((child) => child.branch))
+      .toEqual(["feat/c"]);
+    expect(await configValue(repo.dir, "branch.feat/c.stack-name"))
+      .toBeUndefined();
   });
 
   test("reparents moved branch's children back to its old parent", async () => {

@@ -143,6 +143,39 @@ export function prStateFrom(
   return "OPEN";
 }
 
+function navStackNamesAfterRootCleanup(
+  plan: LandPlan,
+  remainingRoots?: string[],
+): string[] {
+  if (plan.stackName !== plan.branchesToDelete[0]) {
+    return [plan.stackName];
+  }
+  const roots = remainingRoots && remainingRoots.length > 0
+    ? remainingRoots
+    : plan.snapshot
+      .filter((entry) => entry.recordedParent === plan.branchesToDelete[0])
+      .map((entry) => entry.branch);
+  return [...new Set(roots)];
+}
+
+async function refreshNavAfterRootCleanup(
+  dir: string,
+  plan: LandPlan,
+  remainingRoots?: string[],
+): Promise<number> {
+  const stackNames = navStackNamesAfterRootCleanup(plan, remainingRoots);
+  if (stackNames.length === 0) return 0;
+
+  const { owner, repo } = await resolveRepo();
+  let applied = 0;
+  for (const stackName of stackNames) {
+    const navActions = await buildNavPlan(dir, stackName, owner, repo);
+    await applyNavPlan(owner, repo, navActions);
+    applied += navActions.length;
+  }
+  return applied;
+}
+
 export interface LandHooks {
   onProgress: (event: LandProgressEvent) => void;
   /**
@@ -214,6 +247,7 @@ import {
   removeStackBranch,
   repoResumeStore,
   runGitCommand,
+  setBranchParent,
   type StackTree,
   tryResolveRef,
 } from "../lib/stack.ts";
@@ -995,10 +1029,12 @@ async function executeCaseA(
   // landed, rolling back nav is not meaningful.
   emit(hooks, { kind: "nav" }, "running");
   try {
-    const { owner, repo } = await resolveRepo();
-    const navActions = await buildNavPlan(dir, plan.stackName, owner, repo);
-    await applyNavPlan(owner, repo, navActions);
-    emit(hooks, { kind: "nav" }, navActions.length === 0 ? "skipped" : "ok");
+    const navActionCount = await refreshNavAfterRootCleanup(
+      dir,
+      plan,
+      cleanupResult.remainingRoots,
+    );
+    emit(hooks, { kind: "nav" }, navActionCount === 0 ? "skipped" : "ok");
   } catch (err) {
     emit(hooks, { kind: "nav" }, "failed", (err as Error).message);
   }
@@ -1021,12 +1057,7 @@ async function executeCaseA(
           (s) => s.recordedParent === branch,
         );
         for (const child of childrenOfThis) {
-          await runGitCommand(
-            dir,
-            "config",
-            `branch.${child.branch}.stack-parent`,
-            recordedParent,
-          );
+          await setBranchParent(dir, child.branch, recordedParent);
         }
       }
     }
@@ -1272,12 +1303,12 @@ export async function executeLandFromCli(
     );
   }
 
-  const makeRecovery = (sn: string): LandCliResult["recovery"] => ({
+  const makeRecovery = (): LandCliResult["recovery"] => ({
     resolve: "git add <conflicting files> && git rebase --continue",
     abort: "git rebase --abort",
     resume: `deno run --allow-run=git,gh --allow-env --allow-read ${
       Deno.env.get("CLAUDE_PLUGIN_ROOT") ?? "."
-    }/src/cli.ts land --stack-name=${sn} --resume`,
+    }/src/cli.ts land --resume`,
   });
 
   let plan: LandPlan;
@@ -1294,7 +1325,7 @@ export async function executeLandFromCli(
             error: "conflict",
             plan,
             conflictFiles,
-            recovery: makeRecovery(stackName),
+            recovery: makeRecovery(),
           };
         }
         return { ok: false, error: "other", plan };
@@ -1402,7 +1433,7 @@ export async function executeLandFromCli(
         },
         conflictedAt: { kind: "rebase", branch: step.branch },
         conflictFiles,
-        recovery: makeRecovery(stackName),
+        recovery: makeRecovery(),
       };
     }
 
@@ -1477,9 +1508,10 @@ export async function executeLandFromCli(
   const prByBranch = new Map(
     plan.landedPrNumbers.map((e) => [e.branch, e.prNumber]),
   );
+  let cleanupResult: { remainingRoots: string[] } | undefined;
 
   if (!completed.configCleanupDone) {
-    await configLandCleanup(
+    cleanupResult = await configLandCleanup(
       dir,
       stackName,
       mergedRoot,
@@ -1493,9 +1525,11 @@ export async function executeLandFromCli(
   // reparented children under their new parent, not under the now-removed
   // merged root.
   if (!completed.navDone) {
-    const { owner, repo } = await resolveRepo();
-    const navActions = await buildNavPlan(dir, stackName, owner, repo);
-    await applyNavPlan(owner, repo, navActions);
+    await refreshNavAfterRootCleanup(
+      dir,
+      plan,
+      cleanupResult?.remainingRoots,
+    );
     completed.navDone = true;
     await writeLandResumeState(dir, completed);
   }
@@ -1516,12 +1550,7 @@ export async function executeLandFromCli(
           (s) => s.recordedParent === branch,
         );
         for (const child of childrenOfThis) {
-          await runGitCommand(
-            dir,
-            "config",
-            `branch.${child.branch}.stack-parent`,
-            recordedParent,
-          );
+          await setBranchParent(dir, child.branch, recordedParent);
         }
       }
     }

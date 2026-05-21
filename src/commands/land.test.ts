@@ -23,6 +23,7 @@ import {
   createTestRepo,
   runGit,
   type TestRepo,
+  trackBranch,
 } from "../lib/testdata/helpers.ts";
 import {
   getStackTree,
@@ -338,6 +339,39 @@ describe("configLandCleanup reparents children and removes merged branch", () =>
       expect(nodeB.branch).toBe("feat/b");
       expect(nodeB.merged).toBeFalsy();
       expect(nodeB.parent).toBe("main");
+    }
+  });
+
+  it("v3 root cleanup returns promoted child roots as new stack names", async () => {
+    await using repo = await createTestRepo();
+    {
+      await addBranch(repo.dir, "feat/a", "main");
+      await addBranch(repo.dir, "feat/b", "feat/a");
+      await addBranch(repo.dir, "feat/c", "feat/a");
+      await trackBranch(repo.dir, "feat/a", {
+        parent: "main",
+        baseBranch: "main",
+        mergeStrategy: "merge",
+      });
+      await trackBranch(repo.dir, "feat/b", {
+        parent: "feat/a",
+        baseBranch: "main",
+        mergeStrategy: "merge",
+      });
+      await trackBranch(repo.dir, "feat/c", {
+        parent: "feat/a",
+        baseBranch: "main",
+        mergeStrategy: "merge",
+      });
+
+      const { configLandCleanup } = await import("../lib/config.ts");
+      const result = await configLandCleanup(repo.dir, "feat/a", "feat/a");
+
+      expect(result.remainingRoots).toEqual(["feat/b", "feat/c"]);
+      const bTree = await getStackTree(repo.dir, "feat/b");
+      expect(bTree.roots.map((root) => root.branch)).toEqual(["feat/b"]);
+      const cTree = await getStackTree(repo.dir, "feat/c");
+      expect(cTree.roots.map((root) => root.branch)).toEqual(["feat/c"]);
     }
   });
 });

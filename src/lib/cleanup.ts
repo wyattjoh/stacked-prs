@@ -5,7 +5,7 @@ import {
   removeStackBranch,
   revParse,
   runGitCommand,
-  setStackNode,
+  setBranchParent,
   type StackTree,
 } from "./stack.ts";
 import { findWorktreeCollisions, type WorktreeCollision } from "./worktrees.ts";
@@ -210,6 +210,7 @@ export function previewBranchCleanup(
 
 export interface BranchCleanupResult {
   removed: string;
+  remainingRoots: string[];
   splitInto: Array<{ stackName: string; branches: string[] }>;
 }
 
@@ -236,13 +237,18 @@ export async function reparentAndRemove(
 
   if (node && newParent !== undefined) {
     for (const child of node.children) {
-      await setStackNode(dir, child.branch, stackName, newParent);
+      await setBranchParent(dir, child.branch, newParent);
     }
   }
 
   await removeStackBranch(dir, branch);
 
-  return { removed: branch, splitInto: [] };
+  const treeAfter = await getStackTree(dir, stackName).catch(() => null);
+  return {
+    removed: branch,
+    remainingRoots: treeAfter?.roots.map((root) => root.branch) ?? [],
+    splitInto: [],
+  };
 }
 
 /**
@@ -273,17 +279,18 @@ export async function configBranchCleanup(
   // Reparent each direct child to mergedBranch's own parent so the tree
   // remains connected after the branch is deleted.
   for (const child of node.children) {
-    await runGitCommand(
-      dir,
-      "config",
-      `branch.${child.branch}.stack-parent`,
-      node.parent,
-    );
+    await setBranchParent(dir, child.branch, node.parent);
   }
 
   // Remove the merged branch from the stack index so subsequent getStackTree
   // calls see only the reparented children, not an extra dangling root.
   await removeStackBranch(dir, mergedBranch);
 
-  return { removed: mergedBranch, splitInto: [] };
+  const remainingRoots = node.parent === tree.baseBranch
+    ? node.children.map((child) => child.branch)
+    : tree.roots
+      .filter((root) => root.branch !== mergedBranch)
+      .map((root) => root.branch);
+
+  return { removed: mergedBranch, remainingRoots, splitInto: [] };
 }

@@ -1,8 +1,11 @@
 import {
   findNode,
+  getEffectiveMergeStrategy,
   getStackTree,
   runGitCommand,
-  setStackNode,
+  setBranchBaseBranch,
+  setBranchMergeStrategy,
+  setBranchParent,
 } from "../lib/stack.ts";
 
 export type SplitMode = "by-commit" | "by-file";
@@ -351,9 +354,12 @@ async function executeByCommit(
   const r4 = await runOrFail(dir, "reset", "--hard", atSha);
   if (!r4.ok) return { ok: false, error: "git-failed", message: r4.message };
 
-  await setStackNode(dir, opts.newBranch, opts.stackName, opts.branch);
+  const strategy = await getEffectiveMergeStrategy(dir, opts.branch);
+  await setBranchParent(dir, opts.newBranch, opts.branch);
+  await setBranchBaseBranch(dir, opts.newBranch, plan.baseBranch);
+  await setBranchMergeStrategy(dir, opts.newBranch, strategy);
   for (const child of plan.reparentedChildren) {
-    await setStackNode(dir, child, opts.stackName, opts.newBranch);
+    await setBranchParent(dir, child, opts.newBranch);
   }
 
   return { ok: true, plan };
@@ -435,8 +441,11 @@ async function executeByFile(
     }
   }
 
-  await setStackNode(dir, opts.newBranch, opts.stackName, plan.parent);
-  await setStackNode(dir, opts.branch, opts.stackName, opts.newBranch);
+  const strategy = await getEffectiveMergeStrategy(dir, opts.branch);
+  await setBranchParent(dir, opts.newBranch, plan.parent);
+  await setBranchBaseBranch(dir, opts.newBranch, plan.baseBranch);
+  await setBranchMergeStrategy(dir, opts.newBranch, strategy);
+  await setBranchParent(dir, opts.branch, opts.newBranch);
 
   return { ok: true, plan };
 }

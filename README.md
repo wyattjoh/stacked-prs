@@ -440,13 +440,14 @@ default without passing `--merge-strategy` on every invocation, set
 
 ```bash
 # Per-repo override:
-git config stack.default-merge-strategy merge
+git config stacked-prs.default-merge-strategy merge
 
 # Global override (applies to every repo):
-git config --global stack.default-merge-strategy merge
+git config --global stacked-prs.default-merge-strategy merge
 ```
 
-An explicit `--merge-strategy` flag always wins over the config value.
+An explicit `--merge-strategy` flag always wins over the config value. The old
+`stack.default-merge-strategy` key is still read as a compatibility fallback.
 
 ## Tree-shaped stacks
 

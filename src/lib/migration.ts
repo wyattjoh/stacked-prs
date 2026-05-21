@@ -35,6 +35,7 @@ export async function needsMigration(dir: string): Promise<boolean> {
   const { code, stdout } = await runGitCommand(
     dir,
     "config",
+    "--local",
     "--name-only",
     "--get-regexp",
     LEGACY_PROBE_REGEX,
@@ -75,6 +76,7 @@ async function snapshot(dir: string): Promise<LegacySnapshot> {
   const { stdout: legacyDump } = await runGitCommand(
     dir,
     "config",
+    "--local",
     "--get-regexp",
     LEGACY_PROBE_REGEX,
   );
@@ -171,6 +173,7 @@ export async function migrateLegacyConfig(
       await runGitCommand(
         dir,
         "config",
+        "--local",
         `branch.${branch}.base-branch`,
         stack.baseBranch,
       );
@@ -179,6 +182,7 @@ export async function migrateLegacyConfig(
       await runGitCommand(
         dir,
         "config",
+        "--local",
         `branch.${branch}.merge-strategy`,
         stack.mergeStrategy,
       );
@@ -189,6 +193,7 @@ export async function migrateLegacyConfig(
     await runGitCommand(
       dir,
       "config",
+      "--local",
       "stacked-prs.resume-state",
       resumeOwners[0][1].resumeState!,
     );
@@ -197,6 +202,7 @@ export async function migrateLegacyConfig(
     await runGitCommand(
       dir,
       "config",
+      "--local",
       "stacked-prs.land-resume-state",
       landResumeOwners[0][1].landResumeState!,
     );
@@ -205,6 +211,7 @@ export async function migrateLegacyConfig(
     await runGitCommand(
       dir,
       "config",
+      "--local",
       "stacked-prs.default-merge-strategy",
       snap.defaultMergeStrategy,
     );
@@ -234,6 +241,7 @@ async function deleteKeysMatching(
   const { code, stdout } = await runGitCommand(
     dir,
     "config",
+    "--local",
     "--name-only",
     "--get-regexp",
     pattern,
@@ -243,7 +251,7 @@ async function deleteKeysMatching(
   // unset-all individually.
   const keys = new Set(stdout.split("\n").filter(Boolean));
   for (const key of keys) {
-    await runGitCommand(dir, "config", "--unset-all", key);
+    await runGitCommand(dir, "config", "--local", "--unset-all", key);
   }
 }
 
@@ -254,6 +262,7 @@ async function deleteSection(dir: string, section: string): Promise<void> {
   const { stdout } = await runGitCommand(
     dir,
     "config",
+    "--local",
     "--name-only",
     "--get-regexp",
     `^${section}\\.`,
@@ -272,9 +281,9 @@ async function deleteSection(dir: string, section: string): Promise<void> {
     }
   }
   for (const sub of subsections) {
-    await runGitCommand(dir, "config", "--remove-section", sub);
+    await runGitCommand(dir, "config", "--local", "--remove-section", sub);
   }
   for (const key of topLevel) {
-    await runGitCommand(dir, "config", "--unset", key);
+    await runGitCommand(dir, "config", "--local", "--unset", key);
   }
 }

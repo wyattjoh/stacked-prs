@@ -53,6 +53,7 @@
   "fmt": {
     "exclude": [
       "CHANGELOG.md",
+      ".context/**",
       "docs/superpowers/**"
     ]
   },

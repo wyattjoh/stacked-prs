@@ -12,6 +12,7 @@ import {
   getBaseBranch,
   getBranchBaseBranch,
   getBranchMergeStrategy,
+  getDefaultMergeStrategy,
   getEffectiveBaseBranch,
   getEffectiveMergeStrategy,
   getLandedBranches,
@@ -1354,6 +1355,34 @@ describe("cascade lookup helpers", () => {
       "merge",
     );
     expect(await getEffectiveMergeStrategy(repo.dir, "feat/a")).toBe("merge");
+  });
+
+  test("getDefaultMergeStrategy reads the v3 repo default", async () => {
+    await using repo = await createTestRepo();
+    await runGitCommand(
+      repo.dir,
+      "config",
+      "stacked-prs.default-merge-strategy",
+      "merge",
+    );
+    expect(await getDefaultMergeStrategy(repo.dir)).toBe("merge");
+  });
+
+  test("getDefaultMergeStrategy prefers v3 default over legacy default", async () => {
+    await using repo = await createTestRepo();
+    await runGitCommand(
+      repo.dir,
+      "config",
+      "stack.default-merge-strategy",
+      "squash",
+    );
+    await runGitCommand(
+      repo.dir,
+      "config",
+      "stacked-prs.default-merge-strategy",
+      "merge",
+    );
+    expect(await getDefaultMergeStrategy(repo.dir)).toBe("merge");
   });
 
   test("getEffectiveMergeStrategy falls back to hardcoded squash when no default set", async () => {

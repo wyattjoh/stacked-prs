@@ -352,6 +352,15 @@ export async function setBranchBaseBranch(
   await gitConfigSet(dir, `branch.${branch}.base-branch`, baseBranch);
 }
 
+/** Write `branch.<branch>.stack-parent` without touching legacy stack-name metadata. */
+export async function setBranchParent(
+  dir: string,
+  branch: string,
+  parent: string,
+): Promise<void> {
+  await gitConfigSet(dir, `branch.${branch}.stack-parent`, parent);
+}
+
 /** Read this branch's own merge-strategy config, ignoring ancestors. */
 export async function getBranchMergeStrategy(
   dir: string,
@@ -441,15 +450,20 @@ export async function getMergeStrategy(
 }
 
 /**
- * Resolve the default merge strategy for newly-initialized stacks. Reads
- * `stack.default-merge-strategy` from git config (local repo, inherits global
- * and system) and falls back to "squash" when unset or invalid.
+ * Resolve the default merge strategy for newly-initialized stacks. Reads the v3
+ * repo-level key first, then the legacy key for compatibility, and falls back
+ * to "squash" when unset or invalid.
  */
 export async function getDefaultMergeStrategy(
   dir: string,
 ): Promise<MergeStrategy> {
-  const value = await gitConfig(dir, "stack.default-merge-strategy");
+  const value = await gitConfig(
+    dir,
+    "stacked-prs.default-merge-strategy",
+  );
   if (value === "merge" || value === "squash") return value;
+  const legacy = await gitConfig(dir, "stack.default-merge-strategy");
+  if (legacy === "merge" || legacy === "squash") return legacy;
   return "squash";
 }
 
@@ -471,6 +485,8 @@ export async function removeStackBranch(
     `branch.${branch}.stack-name`,
     `branch.${branch}.stack-parent`,
     `branch.${branch}.stack-order`,
+    `branch.${branch}.base-branch`,
+    `branch.${branch}.merge-strategy`,
   ];
 
   // Ignore exit codes: key may not exist (exit 5 from git config --unset).

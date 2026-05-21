@@ -1,6 +1,7 @@
 import { describe, it as test } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { addBranch, createTestRepo, runGit } from "./testdata/helpers.ts";
+import { getDefaultMergeStrategy } from "./stack.ts";
 import { migrateLegacyConfig, needsMigration } from "./migration.ts";
 
 async function setConfig(dir: string, key: string, value: string) {
@@ -167,6 +168,19 @@ describe("migrateLegacyConfig: default-merge-strategy", () => {
       .toBe("merge");
     expect(await getConfig(repo.dir, "stack.default-merge-strategy"))
       .toBeUndefined();
+    expect(await getDefaultMergeStrategy(repo.dir)).toBe("merge");
+  });
+
+  test("ignores global legacy default when deciding whether migration is needed", async () => {
+    await using repo = await createTestRepo();
+    await runGit(
+      repo.dir,
+      "config",
+      "--global",
+      "stack.default-merge-strategy",
+      "merge",
+    );
+    expect(await needsMigration(repo.dir)).toBe(false);
   });
 });
 

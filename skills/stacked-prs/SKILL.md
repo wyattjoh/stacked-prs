@@ -194,7 +194,8 @@ The CLI resolves the create case automatically:
 - **Auto-init from base**: when the current branch is the repo's default branch.
   A new stack is registered (default name: the new branch name; default merge
   strategy: `squash`, overridable via
-  `git config stack.default-merge-strategy`).
+  `git config stacked-prs.default-merge-strategy`; the old
+  `stack.default-merge-strategy` key remains a compatibility fallback).
 - **Auto-init + worktree**: same as auto-init, but the new branch lives in a
   worktree at `<dir>/<branch>` and the current repo stays on the base branch.
   Only valid from the base branch.

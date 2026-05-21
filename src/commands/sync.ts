@@ -524,6 +524,7 @@ export async function executeSync(
     // the merge marker from `stack.<n>.landed-branches` and renders them
     // as structural merged nodes.
     let switchedToBase = false;
+    let navStackNames: string[] | undefined;
     for (const step of stackPlan.pruneSteps) {
       if (step.isCurrentBranch && !switchedToBase) {
         const co = await runGitCommand(
@@ -540,7 +541,17 @@ export async function executeSync(
       }
 
       try {
-        await configBranchCleanup(dir, stackPlan.stackName, step.branch);
+        const cleanup = await configBranchCleanup(
+          dir,
+          stackPlan.stackName,
+          step.branch,
+        );
+        if (
+          stackPlan.stackName === step.branch &&
+          cleanup.remainingRoots.length > 0
+        ) {
+          navStackNames = cleanup.remainingRoots;
+        }
       } catch (err) {
         return fail(
           `configBranchCleanup(${step.branch}) failed: ${
@@ -563,14 +574,16 @@ export async function executeSync(
     // recorded children still nested beneath them.
     if (owner && repo) {
       try {
-        const freshNavActions = await buildNavPlan(
-          dir,
-          stackPlan.stackName,
-          owner,
-          repo,
-        );
-        for (const action of freshNavActions) {
-          await executeNavAction(owner, repo, action);
+        for (const stackName of navStackNames ?? [stackPlan.stackName]) {
+          const freshNavActions = await buildNavPlan(
+            dir,
+            stackName,
+            owner,
+            repo,
+          );
+          for (const action of freshNavActions) {
+            await executeNavAction(owner, repo, action);
+          }
         }
       } catch (err) {
         return fail(
