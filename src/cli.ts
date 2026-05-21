@@ -85,43 +85,66 @@ async function confirmOrExit(opts: {
   return true;
 }
 
-/** Resolve stack name from current branch's git config, with --stack-name override. */
-async function resolveStackName(
+/** Resolve stack identity by walking stack-parent chain to the root branch. */
+async function resolveRootBranch(
   dir: string,
-  explicit?: string,
 ): Promise<string> {
-  if (explicit) return explicit;
-
-  const { code, stdout } = await runGitCommand(dir, "branch", "--show-current");
-  if (code !== 0 || !stdout) {
-    console.error(
-      "Could not detect stack name. Use --stack-name or switch to a stack branch.",
-    );
-    Deno.exit(1);
-  }
-
-  const { code: configCode, stdout: stackName } = await runGitCommand(
+  const { code, stdout: current } = await runGitCommand(
     dir,
-    "config",
-    `branch.${stdout}.stack-name`,
+    "branch",
+    "--show-current",
   );
-  if (configCode !== 0 || !stackName) {
+  if (code !== 0 || !current) {
     console.error(
-      "Could not detect stack name. Use --stack-name or switch to a stack branch.",
+      "Could not detect current branch. Switch to a tracked stack branch first.",
     );
     Deno.exit(1);
   }
 
-  return stackName;
+  let walker = current;
+  const seen = new Set<string>();
+  while (!seen.has(walker)) {
+    seen.add(walker);
+    const { code: pc, stdout: parent } = await runGitCommand(
+      dir,
+      "config",
+      `branch.${walker}.stack-parent`,
+    );
+    if (pc !== 0 || !parent) {
+      // walker has no recorded parent: either the base branch or untracked
+      if (walker === current) {
+        console.error(
+          `Branch ${current} is not part of a stack. Run \`stacked-prs init\` to track it.`,
+        );
+        Deno.exit(1);
+      }
+      // walker IS the root (its parent isn't tracked, so it's pointing at the base)
+      return walker;
+    }
+    // If parent has no stack-parent, then walker is the root.
+    const { code: gpc, stdout: grandparent } = await runGitCommand(
+      dir,
+      "config",
+      `branch.${parent}.stack-parent`,
+    );
+    if (gpc !== 0 || !grandparent) {
+      // parent is untracked, walker's parent is the base - walker is the root
+      return walker;
+    }
+    walker = parent;
+  }
+  // Cycle detected (shouldn't happen): error out
+  console.error(
+    `Cycle detected in stack-parent chain starting from ${current}`,
+  );
+  Deno.exit(1);
 }
 
 async function shouldStatusAll(
   dir: string,
   explicitAll: boolean,
-  explicitStackName?: string,
 ): Promise<boolean> {
   if (explicitAll) return true;
-  if (explicitStackName) return false;
 
   const { code, stdout: currentBranch } = await runGitCommand(
     dir,
@@ -266,10 +289,6 @@ const command = new Command()
   .description("Manage stacked branches and pull requests")
   // --- status ---
   .command("status", "Show current stack state with PR and sync info")
-  .option(
-    "--stack-name <name:string>",
-    "Stack name (auto-detected from current branch)",
-  )
   .option("--owner <owner:string>", "GitHub repo owner")
   .option("--repo <repo:string>", "GitHub repo name")
   .option("--json", "Output as JSON")
@@ -285,12 +304,11 @@ const command = new Command()
     const statusAll = await shouldStatusAll(
       dir,
       options.all === true,
-      options.stackName,
     );
     if (options.interactive) {
       const initialTab = statusAll
         ? "all"
-        : { stack: await resolveStackName(dir, options.stackName) } as const;
+        : { stack: await resolveRootBranch(dir) } as const;
       const { render } = await import("ink");
       const React = await import("react");
       const { App } = await import("./tui/app.tsx");
@@ -468,8 +486,8 @@ const command = new Command()
           loadPrs,
         });
       }
-      const stackName = await resolveStackName(dir, options.stackName);
-      return await getStackStatus(dir, stackName, owner, repo, {
+      const rootBranch = await resolveRootBranch(dir);
+      return await getStackStatus(dir, rootBranch, owner, repo, {
         loadPrs,
       });
     };
@@ -582,10 +600,6 @@ const command = new Command()
   // --- restack ---
   .command("restack", "Rebase the stack tree (no fetch, no push)")
   .option(
-    "--stack-name <name:string>",
-    "Stack name (auto-detected from current branch)",
-  )
-  .option(
     "--upstack-from <branch:string>",
     "Rebase only this branch and its descendants",
   )
@@ -599,7 +613,7 @@ const command = new Command()
   .option("--force", "Execute without the interactive confirmation prompt")
   .option("--json", "Output as JSON")
   .action(async (options) => {
-    const stackName = await resolveStackName(dir, options.stackName);
+    const rootBranch = await resolveRootBranch(dir);
     const baseOpts = {
       upstackFrom: options.upstackFrom,
       downstackFrom: options.downstackFrom,
@@ -621,10 +635,10 @@ const command = new Command()
     const renderRebases = async (
       rebases: { branch: string; status: string }[],
     ): Promise<string> => {
-      const tree = await getStackTree(dir, stackName);
+      const tree = await getStackTree(dir, rootBranch);
       const statusIcons = new Map<string, string>();
       for (const r of rebases) statusIcons.set(r.branch, iconFor(r.status));
-      return `Stack: ${stackName} (base: ${tree.baseBranch})\n` +
+      return `Stack: ${rootBranch} (base: ${tree.baseBranch})\n` +
         renderTree(tree, { statusIcons });
     };
 
@@ -646,7 +660,7 @@ const command = new Command()
     // the original plan, and the resume path inside executeRestack handles
     // state recovery without needing a fresh plan render.
     if (options.resume) {
-      const result = await restack(dir, stackName, baseOpts);
+      const result = await restack(dir, rootBranch, baseOpts);
       if (options.json) {
         logJson(result);
       } else {
@@ -657,7 +671,7 @@ const command = new Command()
       return;
     }
 
-    const plan = await restack(dir, stackName, { ...baseOpts, dryRun: true });
+    const plan = await restack(dir, rootBranch, { ...baseOpts, dryRun: true });
 
     if (options.dryRun) {
       if (options.json) logJson(plan);
@@ -685,7 +699,7 @@ const command = new Command()
       return;
     }
 
-    const result = await restack(dir, stackName, baseOpts);
+    const result = await restack(dir, rootBranch, baseOpts);
 
     if (options.json) {
       logJson(result);
@@ -698,18 +712,14 @@ const command = new Command()
   })
   // --- nav ---
   .command("nav", "Create or update stack navigation comments on PRs")
-  .option(
-    "--stack-name <name:string>",
-    "Stack name (auto-detected from current branch)",
-  )
   .option("--owner <owner:string>", "GitHub repo owner")
   .option("--repo <repo:string>", "GitHub repo name")
   .option("--dry-run", "Preview without writing")
   .action(async (options) => {
-    const stackName = await resolveStackName(dir, options.stackName);
+    const rootBranch = await resolveRootBranch(dir);
     const { owner, repo } = await resolveRepo(options.owner, options.repo);
     await withPrIndex(owner, repo, async () => {
-      const plan = await buildNavPlan(dir, stackName, owner, repo);
+      const plan = await buildNavPlan(dir, rootBranch, owner, repo);
 
       if (options.dryRun) {
         logJson(plan);
@@ -739,13 +749,9 @@ const command = new Command()
     "verify-refs",
     "Verify branch ancestry and detect duplicate patches",
   )
-  .option(
-    "--stack-name <name:string>",
-    "Stack name (auto-detected from current branch)",
-  )
-  .action(async (options) => {
-    const stackName = await resolveStackName(dir, options.stackName);
-    const result = await verifyRefs(dir, stackName);
+  .action(async () => {
+    const rootBranch = await resolveRootBranch(dir);
+    const result = await verifyRefs(dir, rootBranch);
     logJson(result);
     if (!result.valid) Deno.exit(1);
   })
@@ -871,17 +877,13 @@ const command = new Command()
   })
   // --- land ---
   .command("land", "Land a merged PR and clean up the stack")
-  .option(
-    "--stack-name <name:string>",
-    "Stack name (auto-detected from current branch)",
-  )
   .option("--dry-run", "Plan and display what would happen without executing")
   .option("--json", "Output as JSON")
   .option("--resume", "Resume after resolving a rebase conflict")
   .action(async (options) => {
-    const stackName = await resolveStackName(dir, options.stackName);
+    const rootBranch = await resolveRootBranch(dir);
 
-    const tree = await getStackTree(dir, stackName);
+    const tree = await getStackTree(dir, rootBranch);
     const nodes = getAllNodes(tree);
 
     const { owner, repo: repoName } = await resolveRepo();
@@ -924,7 +926,7 @@ const command = new Command()
 
         return await executeLandFromCli(
           dir,
-          stackName,
+          rootBranch,
           prStateByBranch,
           prInfoByBranch,
           { resume: options.resume },
@@ -937,7 +939,7 @@ const command = new Command()
     if ((result as unknown as { dryRun?: boolean }).dryRun) {
       const plan = await planLand(
         dir,
-        stackName,
+        rootBranch,
         prStateByBranch,
         prInfoByBranch,
       );
@@ -945,7 +947,7 @@ const command = new Command()
         logJson(plan);
       } else {
         const lines: string[] = [];
-        lines.push(`Stack: ${stackName} (base: ${plan.baseBranch})`);
+        lines.push(`Stack: ${rootBranch} (base: ${plan.baseBranch})`);
         lines.push(`  case: ${plan.case}`);
         if (plan.mergedBranches.length > 0) {
           lines.push("");
@@ -980,7 +982,7 @@ const command = new Command()
       logJson(result);
     } else {
       if (result.ok) {
-        console.log(`Landed stack ${stackName}.`);
+        console.log(`Landed stack ${rootBranch}.`);
         if (result.result?.split && result.result.split.length > 0) {
           console.log(
             `  ↳ split into: ${
@@ -1053,10 +1055,6 @@ const command = new Command()
     "submit",
     "Push branches and create/update PRs (runs the full submit plan)",
   )
-  .option(
-    "--stack-name <name:string>",
-    "Stack name (auto-detected from current branch)",
-  )
   .option("--owner <owner:string>", "GitHub repo owner")
   .option("--repo <repo:string>", "GitHub repo name")
   .option("--dry-run", "Print the plan without executing")
@@ -1067,7 +1065,7 @@ const command = new Command()
   )
   .option("--json", "Output as JSON")
   .action(async (options) => {
-    const stackName = await resolveStackName(dir, options.stackName);
+    const rootBranch = await resolveRootBranch(dir);
     const { owner, repo } = await resolveRepo(options.owner, options.repo);
 
     // Every `gh pr list --head` in the planner, the executor, and the
@@ -1075,7 +1073,7 @@ const command = new Command()
     const result = await withPrIndex(owner, repo, async () => {
       let plan;
       try {
-        plan = await computeSubmitPlan(dir, stackName, owner, repo, {
+        plan = await computeSubmitPlan(dir, rootBranch, owner, repo, {
           only: options.only,
         });
       } catch (err) {
@@ -1124,7 +1122,7 @@ const command = new Command()
       logJson(result);
     } else if (result.ok) {
       console.log(
-        `Submitted ${stackName}. ` +
+        `Submitted ${rootBranch}. ` +
           `Pushed ${result.pushedBranches.length}, ` +
           `created ${result.prsCreated.length} PR(s), ` +
           `retargeted ${result.prsBaseUpdated.length}, ` +
@@ -1398,10 +1396,6 @@ const command = new Command()
     "Insert a new branch between a branch and its parent",
   )
   .option(
-    "--stack-name <name:string>",
-    "Stack name (auto-detected from current branch)",
-  )
-  .option(
     "--child <name:string>",
     "Branch that will be reparented under the new branch (default: current)",
   )
@@ -1409,7 +1403,7 @@ const command = new Command()
   .option("--dry-run", "Print plan without touching git or config")
   .option("--json", "Output as JSON")
   .action(async (options, newBranch: string) => {
-    const stackName = await resolveStackName(dir, options.stackName);
+    const rootBranch = await resolveRootBranch(dir);
     let child = options.child;
     if (!child) {
       const { code, stdout } = await runGitCommand(
@@ -1424,7 +1418,7 @@ const command = new Command()
       child = stdout;
     }
 
-    const baseOpts = { stackName, child, branch: newBranch };
+    const baseOpts = { stackName: rootBranch, child, branch: newBranch };
     const planResult = await insert(dir, { ...baseOpts, dryRun: true });
     if (!planResult.ok || !planResult.plan) {
       if (options.json) logJson(planResult);
@@ -1463,7 +1457,6 @@ const command = new Command()
     "fold",
     "Merge a branch into its parent and remove it from the stack",
   )
-  .option("--stack-name <name:string>", "Stack name (auto-detected)")
   .option(
     "--branch <name:string>",
     "Branch to fold into its parent (default: current)",
@@ -1477,7 +1470,7 @@ const command = new Command()
   .option("--dry-run", "Print plan without executing")
   .option("--json", "Output as JSON")
   .action(async (options) => {
-    const stackName = await resolveStackName(dir, options.stackName);
+    const rootBranch = await resolveRootBranch(dir);
     let branch = options.branch;
     if (!branch) {
       const { code, stdout } = await runGitCommand(
@@ -1504,7 +1497,7 @@ const command = new Command()
     }
 
     const baseOpts = {
-      stackName,
+      stackName: rootBranch,
       branch,
       strategy,
       squashMessage: options.message,
@@ -1547,7 +1540,6 @@ const command = new Command()
     "move",
     "Detach a branch and reattach it as a child of a different parent",
   )
-  .option("--stack-name <name:string>", "Stack name (auto-detected)")
   .option(
     "--branch <name:string>",
     "Branch to move (default: current)",
@@ -1559,7 +1551,7 @@ const command = new Command()
   .option("--dry-run", "Print plan without executing")
   .option("--json", "Output as JSON")
   .action(async (options) => {
-    const stackName = await resolveStackName(dir, options.stackName);
+    const rootBranch = await resolveRootBranch(dir);
     let branch = options.branch;
     if (!branch) {
       const { code, stdout } = await runGitCommand(
@@ -1575,7 +1567,7 @@ const command = new Command()
     }
 
     const baseOpts = {
-      stackName,
+      stackName: rootBranch,
       branch,
       newParent: options.newParent,
     };
@@ -1625,7 +1617,6 @@ const command = new Command()
     "split",
     "Split a branch into two: --by-commit or --by-file",
   )
-  .option("--stack-name <name:string>", "Stack name (auto-detected)")
   .option(
     "--branch <name:string>",
     "Branch to split (default: current)",
@@ -1653,7 +1644,7 @@ const command = new Command()
   .option("--dry-run", "Print plan without executing")
   .option("--json", "Output as JSON")
   .action(async (options) => {
-    const stackName = await resolveStackName(dir, options.stackName);
+    const rootBranch = await resolveRootBranch(dir);
     let branch = options.branch;
     if (!branch) {
       const { code, stdout } = await runGitCommand(
@@ -1682,14 +1673,14 @@ const command = new Command()
     const baseOpts = options.byCommit
       ? {
         mode: "by-commit" as const,
-        stackName,
+        stackName: rootBranch,
         branch,
         at: options.byCommit,
         newBranch: options.newBranch,
       }
       : {
         mode: "by-file" as const,
-        stackName,
+        stackName: rootBranch,
         branch,
         files: options.byFile!.split(",").map((s) => s.trim()).filter(
           Boolean,
