@@ -1,15 +1,4 @@
 import { getActiveRefLoader } from "./loaders.ts";
-import { migrateLegacyConfig, needsMigration } from "./migration.ts";
-
-const migrationDone = new Set<string>();
-
-async function ensureMigrated(dir: string): Promise<void> {
-  if (migrationDone.has(dir)) return;
-  if (await needsMigration(dir)) {
-    await migrateLegacyConfig(dir);
-  }
-  migrationDone.add(dir);
-}
 
 export type MergeStrategy = "merge" | "squash";
 
@@ -754,7 +743,6 @@ export async function getStackTree(
   stackName?: string,
   preScan?: Map<string, BranchStackEntry>,
 ): Promise<StackTree> {
-  await ensureMigrated(dir);
   let resolvedStackName = stackName;
 
   if (!resolvedStackName) {
@@ -795,38 +783,6 @@ export async function getStackTree(
     if (entry.stackName === resolvedStackName) matchingBranches.push(branch);
   }
   matchingBranches.sort();
-
-  // V3 fallback: no stack-name keys means this is a v3 (topology-only) repo.
-  // Treat resolvedStackName as the root branch and discover the stack by
-  // walking stack-parent pointers. Base branch and merge strategy come from
-  // per-branch keys rather than stack-level keys.
-  if (matchingBranches.length === 0) {
-    const v3BaseBranch = await getBranchBaseBranch(dir, resolvedStackName);
-    if (v3BaseBranch) {
-      // Build parent -> children map from the full branch config scan.
-      const parentToChildren = new Map<string, string[]>();
-      for (const [branch, entry] of branchConfig) {
-        if (!entry.parent) continue;
-        const siblings = parentToChildren.get(entry.parent) ?? [];
-        siblings.push(branch);
-        parentToChildren.set(entry.parent, siblings);
-      }
-      // BFS from resolvedStackName to collect the full subtree.
-      const queue: string[] = [resolvedStackName];
-      const visited = new Set<string>();
-      while (queue.length > 0) {
-        const b = queue.shift()!;
-        if (visited.has(b)) continue;
-        visited.add(b);
-        for (const child of parentToChildren.get(b) ?? []) {
-          queue.push(child);
-        }
-      }
-      matchingBranches.push(...visited);
-      matchingBranches.sort();
-      baseBranch = v3BaseBranch;
-    }
-  }
 
   // Auto-migrate old linear format (stack-order keys) to tree format.
   // Only attempt migration when base-branch is missing, indicating an old stack.
@@ -1208,7 +1164,6 @@ export async function validateStackTree(
 
 /** Enumerate all configured stack names in the repo, sorted alphabetically. */
 export async function listAllStacks(dir: string): Promise<string[]> {
-  await ensureMigrated(dir);
   const branchConfig = await readAllBranchStackConfig(dir);
   const set = new Set<string>();
   for (const entry of branchConfig.values()) {
@@ -1229,7 +1184,6 @@ export async function listAllStacks(dir: string): Promise<string[]> {
  * instead of O(M).
  */
 export async function getAllStackTrees(dir: string): Promise<StackTree[]> {
-  await ensureMigrated(dir);
   const branchConfig = await readAllBranchStackConfig(dir);
   const names = new Set<string>();
   for (const entry of branchConfig.values()) {

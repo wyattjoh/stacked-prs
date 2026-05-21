@@ -193,22 +193,3 @@ describe("migrateLegacyConfig: idempotency", () => {
     expect(await needsMigration(repo.dir)).toBe(false);
   });
 });
-
-describe("migration auto-runs on getStackTree read", () => {
-  test("a legacy repo becomes a v3 repo after the first getStackTree call", async () => {
-    const { getStackTree } = await import("./stack.ts");
-    await using repo = await createTestRepo();
-    await addBranch(repo.dir, "feat/a", "main");
-    await setConfig(repo.dir, "branch.feat/a.stack-name", "feat/a");
-    await setConfig(repo.dir, "branch.feat/a.stack-parent", "main");
-    await setConfig(repo.dir, "stack.feat/a.base-branch", "main");
-    await setConfig(repo.dir, "stack.feat/a.merge-strategy", "squash");
-
-    const tree = await getStackTree(repo.dir, "feat/a");
-    expect(tree.roots[0].branch).toBe("feat/a");
-
-    // After read, new keys exist and old ones are gone
-    expect(await getConfig(repo.dir, "branch.feat/a.base-branch")).toBe("main");
-    expect(await listMatching(repo.dir, "^stack\\.")).toEqual([]);
-  });
-});
