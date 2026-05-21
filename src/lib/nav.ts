@@ -1,4 +1,4 @@
-import { getAllNodes, getLandedPrs, getStackTree } from "./stack.ts";
+import { getAllNodes, getStackTree } from "./stack.ts";
 import type { StackNode, StackTree } from "./stack.ts";
 import { gh, listPrsForBranch } from "./gh.ts";
 
@@ -42,14 +42,9 @@ export function generateNavMarkdown(
     }
 
     const indent = "  ".repeat(depth);
-    let line: string;
-    if (node.merged) {
-      line = `${indent}- ~~#${prNum}~~`;
-    } else if (prNum === currentPrNumber) {
-      line = `${indent}- **#${prNum} 👈 this PR**`;
-    } else {
-      line = `${indent}- #${prNum}`;
-    }
+    const line = prNum === currentPrNumber
+      ? `${indent}- **#${prNum} 👈 this PR**`
+      : `${indent}- #${prNum}`;
     lines.push(line);
 
     for (const child of node.children) {
@@ -57,10 +52,7 @@ export function generateNavMarkdown(
     }
   };
 
-  // Render merged roots before live roots
-  const mergedRoots = tree.roots.filter((n) => n.merged);
-  const liveRoots = tree.roots.filter((n) => !n.merged);
-  for (const root of [...mergedRoots, ...liveRoots]) {
+  for (const root of tree.roots) {
     renderNode(root, 0);
   }
 
@@ -167,37 +159,22 @@ export async function buildNavPlan(
   const tree = applyNavOverrides(rawTree, options);
   const nodes = getAllNodes(tree);
 
-  // Tombstoned (merged) nodes have no live ref, so `gh pr list --head` won't
-  // return them. Seed their PR numbers from `stack.<n>.landed-pr`, captured
-  // at land time. This keeps merged PRs in the nav as a historical record.
-  const landedPrs = await getLandedPrs(dir, stackName);
-
-  // Fetch PRs for live nodes in parallel; skip merged tombstones.
+  // Fetch PRs for all tracked branches in parallel.
   // `listPrsForBranch` reads from the active repo-wide PR index when
   // one is installed, collapsing N per-branch `gh pr list` calls into
   // zero (the single batch fetch happened inside `withPrIndex`).
   const prResults = await Promise.all(
     nodes.map(async (node) => {
-      if (node.merged) return { node, pr: null as GhPr | null };
       const pr = await listPrsForBranch(node.branch, { owner, repo });
       return { node, pr };
     }),
   );
 
-  // Build prMap from live results, then overlay tombstone PR numbers
-  // (first from stored `landed-pr`, then from caller-supplied overrides
-  // so preview callers can populate PR numbers for branches that will
-  // become tombstones but aren't yet recorded in config).
   const prMap = new Map<string, number>();
   for (const { node, pr } of prResults) {
     if (pr !== null) {
       prMap.set(node.branch, pr.number);
     }
-  }
-  for (const node of nodes) {
-    if (!node.merged) continue;
-    const num = landedPrs.get(node.branch);
-    if (num !== undefined) prMap.set(node.branch, num);
   }
   if (options?.prOverrides) {
     for (const [branch, num] of options.prOverrides) {
@@ -205,8 +182,7 @@ export async function buildNavPlan(
     }
   }
 
-  // Filter to live nodes with open PRs (tombstones are rendered via prMap
-  // but don't need their own nav comment written to them).
+  // Filter to nodes with open PRs -- these are the ones that need nav comments.
   const withPrs = prResults.filter(
     (r): r is { node: typeof r.node; pr: GhPr } => r.pr !== null,
   );

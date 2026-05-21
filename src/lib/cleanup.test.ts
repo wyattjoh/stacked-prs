@@ -1,12 +1,7 @@
 import { describe, it as test } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { addBranch, createTestRepo } from "./testdata/helpers.ts";
-import {
-  getLandedBranches,
-  gitConfig,
-  setBaseBranch,
-  setStackNode,
-} from "./stack.ts";
+import { addBranch, addTombstone, createTestRepo } from "./testdata/helpers.ts";
+import { gitConfig, setBaseBranch, setStackNode } from "./stack.ts";
 import { configBranchCleanup, projectTreeAfterRemoval } from "./cleanup.ts";
 import { getStackTree } from "./stack.ts";
 
@@ -18,7 +13,7 @@ async function getStackParent(
 }
 
 describe("configBranchCleanup", () => {
-  test("records the branch as a tombstone in landed-branches", async () => {
+  test("reparents direct children to the merged branch's parent", async () => {
     await using repo = await createTestRepo();
     await addBranch(repo.dir, "feat/a", "main");
     await addBranch(repo.dir, "feat/b", "feat/a");
@@ -28,11 +23,11 @@ describe("configBranchCleanup", () => {
 
     await configBranchCleanup(repo.dir, "s", "feat/a");
 
-    const landed = await getLandedBranches(repo.dir, "s");
-    expect(landed).toContain("feat/a");
+    // feat/b should now point to main, not feat/a.
+    expect(await getStackParent(repo.dir, "feat/b")).toBe("main");
   });
 
-  test("preserves the tombstoned branch's own stack-name/stack-parent config", async () => {
+  test("removes the merged branch from the stack config", async () => {
     await using repo = await createTestRepo();
     await addBranch(repo.dir, "feat/a", "main");
     await setBaseBranch(repo.dir, "s", "main");
@@ -40,49 +35,41 @@ describe("configBranchCleanup", () => {
 
     await configBranchCleanup(repo.dir, "s", "feat/a");
 
-    expect(await gitConfig(repo.dir, "branch.feat/a.stack-name")).toBe("s");
-    expect(await gitConfig(repo.dir, "branch.feat/a.stack-parent")).toBe(
-      "main",
-    );
+    // stack-name and stack-parent config for feat/a should be gone.
+    expect(await gitConfig(repo.dir, "branch.feat/a.stack-name"))
+      .toBeUndefined();
+    expect(await gitConfig(repo.dir, "branch.feat/a.stack-parent"))
+      .toBeUndefined();
   });
 
-  test("leaves live children's stack-parent pointing at the tombstone", async () => {
+  test("reparents multiple children to the merged branch's parent", async () => {
     await using repo = await createTestRepo();
     await addBranch(repo.dir, "feat/a", "main");
     await addBranch(repo.dir, "feat/b", "feat/a");
+    await addBranch(repo.dir, "feat/c", "feat/a");
     await setBaseBranch(repo.dir, "s", "main");
     await setStackNode(repo.dir, "feat/a", "s", "main");
     await setStackNode(repo.dir, "feat/b", "s", "feat/a");
+    await setStackNode(repo.dir, "feat/c", "s", "feat/a");
 
     await configBranchCleanup(repo.dir, "s", "feat/a");
 
-    expect(await getStackParent(repo.dir, "feat/b")).toBe("feat/a");
+    expect(await getStackParent(repo.dir, "feat/b")).toBe("main");
+    expect(await getStackParent(repo.dir, "feat/c")).toBe("main");
   });
 
-  test("is idempotent when called twice for the same branch", async () => {
+  test("accepts a prNumber argument without error (for call-site compatibility)", async () => {
     await using repo = await createTestRepo();
     await addBranch(repo.dir, "feat/a", "main");
     await setBaseBranch(repo.dir, "s", "main");
     await setStackNode(repo.dir, "feat/a", "s", "main");
 
-    await configBranchCleanup(repo.dir, "s", "feat/a");
-    await configBranchCleanup(repo.dir, "s", "feat/a");
-
-    const landed = await getLandedBranches(repo.dir, "s");
-    expect(landed.filter((b) => b === "feat/a")).toHaveLength(1);
-  });
-
-  test("records landed-pr when prNumber is supplied", async () => {
-    await using repo = await createTestRepo();
-    await addBranch(repo.dir, "feat/a", "main");
-    await setBaseBranch(repo.dir, "s", "main");
-    await setStackNode(repo.dir, "feat/a", "s", "main");
-
-    const { getLandedPrs } = await import("./stack.ts");
+    // prNumber is accepted but no longer recorded anywhere.
     await configBranchCleanup(repo.dir, "s", "feat/a", 42);
 
-    const prs = await getLandedPrs(repo.dir, "s");
-    expect(prs.get("feat/a")).toBe(42);
+    // Config for feat/a is removed.
+    expect(await gitConfig(repo.dir, "branch.feat/a.stack-name"))
+      .toBeUndefined();
   });
 
   test("throws when branch is not a stack member", async () => {
@@ -100,7 +87,7 @@ describe("configBranchCleanup", () => {
     expect(caught!.message).toContain("is not a member of stack");
   });
 
-  test("getStackTree renders the tombstone with live children nested under it", async () => {
+  test("getStackTree shows the reparented child as the new root after cleanup", async () => {
     await using repo = await createTestRepo();
     await addBranch(repo.dir, "feat/a", "main");
     await addBranch(repo.dir, "feat/b", "feat/a");
@@ -110,14 +97,14 @@ describe("configBranchCleanup", () => {
 
     await configBranchCleanup(repo.dir, "s", "feat/a");
 
+    // feat/a is removed; feat/b is now the root.
     const tree = await getStackTree(repo.dir, "s");
     expect(tree.roots).toHaveLength(1);
     const [root] = tree.roots;
-    expect(root.branch).toBe("feat/a");
-    expect(root.merged).toBe(true);
-    expect(root.children).toHaveLength(1);
-    expect(root.children[0].branch).toBe("feat/b");
-    expect(root.children[0].merged).toBeFalsy();
+    expect(root.branch).toBe("feat/b");
+    expect(root.merged).toBeFalsy();
+    expect(root.parent).toBe("main");
+    expect(root.children).toHaveLength(0);
   });
 });
 
@@ -148,9 +135,9 @@ describe("projectTreeAfterRemoval", () => {
     await setStackNode(repo.dir, "feat/b", "s", "feat/a");
     await setStackNode(repo.dir, "feat/c", "s", "feat/b");
 
-    // feat/a is already a tombstone; feat/b is newly merged. feat/c's live
-    // effective parent should walk past both to main.
-    await configBranchCleanup(repo.dir, "s", "feat/a");
+    // Use addTombstone to inject a legacy tombstone directly, since
+    // configBranchCleanup no longer writes tombstone config.
+    await addTombstone(repo.dir, "s", "feat/a", {});
     const tree = await getStackTree(repo.dir, "s");
 
     const projection = projectTreeAfterRemoval(tree, new Set(["feat/b"]));

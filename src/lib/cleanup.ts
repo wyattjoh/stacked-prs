@@ -1,7 +1,4 @@
 import {
-  addLandedBranch,
-  addLandedParent,
-  addLandedPr,
   findNode,
   getAllNodes,
   getStackTree,
@@ -249,34 +246,22 @@ export async function reparentAndRemove(
 }
 
 /**
- * Tombstone `mergedBranch` by recording it in `stack.<n>.landed-branches`
- * along with its original stack-parent in `stack.<n>.landed-parent` and
- * (when supplied) its PR number in `stack.<n>.landed-pr`. The parent
- * record survives `git branch -D` wiping `branch.<name>.stack-*`, so
- * `getStackTree` can still place the tombstone as a structural node.
- * Live descendants keep pointing at the tombstoned branch name and render
- * as children of the merged node. Downstream operations (restack target
- * resolution, submit PR base, etc.) walk up through tombstones to find
- * the effective parent.
+ * Reparent every direct child of `mergedBranch` to `mergedBranch`'s own
+ * recorded parent, then remove `mergedBranch` from the stack config so
+ * subsequent `getStackTree` reads see only the reparented children. The git
+ * branch ref is NOT deleted here; callers are responsible for `git branch -D`.
  *
- * The three writes are sequenced together so a crash part-way through
- * leaves the tombstone either fully complete or fully absent; nav
- * rendering is correct in either state. Throws if `mergedBranch` is not a
- * member of the stack tree -- callers should validate via `classifyLandCase`
- * or equivalent before invoking.
+ * Throws if `mergedBranch` is not a member of the stack tree.
  *
- * All three writes are idempotent (first-write wins for `landed-parent`
- * and `landed-pr`, de-duplication for `landed-branches`).
+ * The `_prNumber` parameter is accepted but ignored; it is kept in the
+ * signature so callers that pass a PR number do not need updating.
  */
 export async function configBranchCleanup(
   dir: string,
   stackName: string,
   mergedBranch: string,
-  prNumber?: number,
+  _prNumber?: number,
 ): Promise<BranchCleanupResult> {
-  // Capture the branch's parent BEFORE tombstoning so the structural
-  // position is preserved even after `git branch -D` clears its live
-  // branch-level config.
   const tree = await getStackTree(dir, stackName);
   const node = findNode(tree, mergedBranch);
   if (!node) {
@@ -285,10 +270,20 @@ export async function configBranchCleanup(
     );
   }
 
-  await addLandedBranch(dir, stackName, mergedBranch);
-  await addLandedParent(dir, stackName, mergedBranch, node.parent);
-  if (prNumber !== undefined) {
-    await addLandedPr(dir, stackName, mergedBranch, prNumber);
+  // Reparent each direct child to mergedBranch's own parent so the tree
+  // remains connected after the branch is deleted.
+  for (const child of node.children) {
+    await runGitCommand(
+      dir,
+      "config",
+      `branch.${child.branch}.stack-parent`,
+      node.parent,
+    );
   }
+
+  // Remove the merged branch from the stack index so subsequent getStackTree
+  // calls see only the reparented children, not an extra dangling root.
+  await removeStackBranch(dir, mergedBranch);
+
   return { removed: mergedBranch, splitInto: [] };
 }

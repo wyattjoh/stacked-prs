@@ -318,38 +318,26 @@ describe("previewLandCleanup", () => {
   });
 });
 
-describe("tombstone survives branch deletion", () => {
-  it("landed branch appears in tree after git branch -D", async () => {
+describe("configLandCleanup reparents children and removes merged branch", () => {
+  it("child's stack-parent points to grandparent after configLandCleanup", async () => {
     await using repo = await createTestRepo();
     {
       await addBranch(repo.dir, "feat/a", "main");
       await addBranch(repo.dir, "feat/b", "feat/a");
       await initStack(repo, "s", [["feat/a", "main"], ["feat/b", "feat/a"]]);
 
-      // Simulate what executeLand case A does:
-      // 1. configLandCleanup (tombstones the landed branch without touching
-      //    its branch-level config or its children's stack-parent).
+      // configLandCleanup reparents children and removes the merged branch
+      // from the stack config.
       const { configLandCleanup } = await import("../lib/config.ts");
       await configLandCleanup(repo.dir, "s", "feat/a");
 
-      // 2. Delete the branch ref. Branch-level stack-name/stack-parent
-      //    config is intentionally preserved so the tombstone remains a
-      //    structural node in the tree.
-      await runGitCommand(repo.dir, "checkout", "main");
-      await runGitCommand(repo.dir, "branch", "-D", "feat/a");
-
-      // Tree should still contain feat/a as a merged inner node with the
-      // live child nested beneath it.
+      // feat/b's stack-parent should now be "main", not "feat/a".
       const tree = await getStackTree(repo.dir, "s");
       expect(tree.roots).toHaveLength(1);
-      const [nodeA] = tree.roots;
-      expect(nodeA.branch).toBe("feat/a");
-      expect(nodeA.merged).toBe(true);
-      expect(nodeA.parent).toBe("main");
-      expect(nodeA.children).toHaveLength(1);
-      expect(nodeA.children[0].branch).toBe("feat/b");
-      expect(nodeA.children[0].merged).toBeFalsy();
-      expect(nodeA.children[0].parent).toBe("feat/a");
+      const [nodeB] = tree.roots;
+      expect(nodeB.branch).toBe("feat/b");
+      expect(nodeB.merged).toBeFalsy();
+      expect(nodeB.parent).toBe("main");
     }
   });
 });
@@ -455,8 +443,8 @@ describe("planLand with pre-existing tombstone", () => {
   });
 });
 
-describe("executeLand case A tombstone integration", () => {
-  it("preserves merged root as tombstone after executeLand", async () => {
+describe("executeLand case A reparent integration", () => {
+  it("reparents child to base and deletes merged root after executeLand", async () => {
     await using env = await createRepoWithOrigin();
     {
       await addBranch(env.dir, "feat/a", "main");
@@ -508,20 +496,124 @@ describe("executeLand case A tombstone integration", () => {
       );
       expect(probe.code !== 0).toBe(true);
 
-      // getStackTree must reconstruct feat/a as a merged inner node with
-      // the live child nested beneath it. Tombstones preserve their
-      // structural position in the tree so nav comments keep showing the
-      // parent/child relationship.
+      // feat/b must be reparented to main (not feat/a) and appear as the
+      // new root of the stack.
       const tree = await getStackTree(env.dir, "s");
       expect(tree.roots).toHaveLength(1);
-      const [tombstone] = tree.roots;
-      expect(tombstone.branch).toBe("feat/a");
-      expect(tombstone.merged).toBe(true);
-      expect(tombstone.parent).toBe("main");
-      expect(tombstone.children).toHaveLength(1);
-      expect(tombstone.children[0].branch).toBe("feat/b");
-      expect(tombstone.children[0].merged).toBeFalsy();
-      expect(tombstone.children[0].parent).toBe("feat/a");
+      const [root] = tree.roots;
+      expect(root.branch).toBe("feat/b");
+      expect(root.merged).toBeFalsy();
+      expect(root.parent).toBe("main");
+      expect(root.children).toHaveLength(0);
+    }
+  });
+
+  it("landing root reparents children to base and deletes root branch", async () => {
+    await using env = await createRepoWithOrigin();
+    {
+      await addBranch(env.dir, "feat/a", "main");
+      await runGit(env.dir, "push", "origin", "feat/a");
+      await addBranch(env.dir, "feat/b", "feat/a");
+      await runGit(env.dir, "push", "origin", "feat/b");
+      await addBranch(env.dir, "feat/c", "feat/a");
+      await runGit(env.dir, "push", "origin", "feat/c");
+      await initStack(env, "s", [
+        ["feat/a", "main"],
+        ["feat/b", "feat/a"],
+        ["feat/c", "feat/a"],
+      ]);
+
+      // Merge feat/a into main.
+      await runGit(env.dir, "checkout", "main");
+      await runGit(env.dir, "merge", "feat/a", "--no-ff", "-m", "Merge feat/a");
+      await runGit(env.dir, "push", "origin", "main");
+      await runGit(env.dir, "fetch", "origin", "main");
+
+      const prStates: PrStateByBranch = new Map([
+        ["feat/a", "MERGED"],
+        ["feat/b", "OPEN"],
+        ["feat/c", "OPEN"],
+      ]);
+      const prInfo = new Map<string, PrInfo>([
+        ["feat/b", { number: 20, url: "", state: "OPEN", isDraft: false }],
+        ["feat/c", { number: 21, url: "", state: "OPEN", isDraft: false }],
+      ]);
+
+      const mockDir = await Deno.makeTempDir();
+      setMockDir(mockDir);
+      await writeFixture(mockDir, ["repo", "view"], {
+        owner: { login: "acme" },
+        name: "widgets",
+      });
+
+      try {
+        const plan = await planLand(env.dir, "s", prStates, prInfo);
+        await executeLand(env.dir, plan, {
+          onProgress: () => {},
+          freshPrStates: () => Promise.resolve(prStates),
+        });
+      } finally {
+        setMockDir(undefined);
+      }
+
+      // Both children must be reparented to main.
+      const { gitConfig } = await import("../lib/stack.ts");
+      expect(await gitConfig(env.dir, "branch.feat/b.stack-parent")).toBe(
+        "main",
+      );
+      expect(await gitConfig(env.dir, "branch.feat/c.stack-parent")).toBe(
+        "main",
+      );
+
+      // feat/a ref is gone.
+      const probe = await runGitCommand(
+        env.dir,
+        "rev-parse",
+        "--verify",
+        "refs/heads/feat/a",
+      );
+      expect(probe.code !== 0).toBe(true);
+    }
+  });
+});
+
+describe("mid-stack reparent via configBranchCleanup", () => {
+  it("reparents grandchild to former parent when a mid-stack branch is cleaned up", async () => {
+    // Scenario: feat/a -> feat/b -> feat/c linear stack. feat/b is landed
+    // mid-stack; feat/c should be reparented to feat/a (feat/b's parent).
+    await using repo = await createTestRepo();
+    {
+      await addBranch(repo.dir, "feat/a", "main");
+      await addBranch(repo.dir, "feat/b", "feat/a");
+      await addBranch(repo.dir, "feat/c", "feat/b");
+      await initStack(repo, "s", [
+        ["feat/a", "main"],
+        ["feat/b", "feat/a"],
+        ["feat/c", "feat/b"],
+      ]);
+
+      const { configLandCleanup } = await import("../lib/config.ts");
+      await configLandCleanup(repo.dir, "s", "feat/b");
+
+      // feat/c should now point to feat/a, skipping the removed feat/b.
+      const { gitConfig } = await import("../lib/stack.ts");
+      expect(await gitConfig(repo.dir, "branch.feat/c.stack-parent")).toBe(
+        "feat/a",
+      );
+
+      // feat/b's config is gone from the stack.
+      expect(
+        await gitConfig(repo.dir, "branch.feat/b.stack-parent"),
+      ).toBeUndefined();
+
+      // Tree shows feat/a -> feat/c directly (feat/b removed).
+      const tree = await getStackTree(repo.dir, "s");
+      expect(tree.roots).toHaveLength(1);
+      const [nodeA] = tree.roots;
+      expect(nodeA.branch).toBe("feat/a");
+      expect(nodeA.children).toHaveLength(1);
+      expect(nodeA.children[0].branch).toBe("feat/c");
+      expect(nodeA.children[0].parent).toBe("feat/a");
     }
   });
 });
@@ -1001,16 +1093,13 @@ describe("executeLand case A cleanup phase", () => {
       );
       expect(aExists.code).not.toBe(0);
 
-      // feat/b's stack-parent still points at feat/a (the tombstone). The
-      // live tree renders feat/a as a merged inner node so downstream
-      // consumers can still see the parent/child relationship; only git
-      // rebase targets walk through the tombstone to reach origin/main.
+      // feat/b's stack-parent is now "main" (reparented away from feat/a).
       const parent = await runGitCommand(
         env.dir,
         "config",
         "branch.feat/b.stack-parent",
       );
-      expect(parent.stdout).toBe("feat/a");
+      expect(parent.stdout).toBe("main");
     }
   });
 });
@@ -1403,19 +1492,22 @@ describe("executeLandFromCli auto-merged detection", () => {
       );
       expect(bProbe.code !== 0).toBe(true);
 
-      // getStackTree must reconstruct feat/b as a merged tombstone.
-      const { getStackTree, getLandedBranches } = await import(
-        "../lib/stack.ts"
+      // feat/a (the mergedRoot) must also be deleted.
+      const aProbe = await runGitCommand(
+        env.dir,
+        "rev-parse",
+        "--verify",
+        "refs/heads/feat/a",
       );
-      const tree = await getStackTree(env.dir, "s");
-      const tombstoneB = tree.roots
-        .flatMap((r) => [r, ...r.children])
-        .find((n) => n.branch === "feat/b" && n.merged === true);
-      expect(tombstoneB).toBeDefined();
+      expect(aProbe.code !== 0).toBe(true);
 
-      // landed-branches includes feat/b.
-      const landed = await getLandedBranches(env.dir, "s");
-      expect(landed).toContain("feat/b");
+      // feat/b's per-branch config is gone (deleted with the branch ref).
+      const bStackParent = await runGitCommand(
+        env.dir,
+        "config",
+        "branch.feat/b.stack-parent",
+      );
+      expect(bStackParent.code !== 0).toBe(true);
     }
   });
 });

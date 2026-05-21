@@ -205,9 +205,6 @@ import {
 } from "../lib/worktrees.ts";
 import { gh, resolveRepo } from "../lib/gh.ts";
 import {
-  addLandedBranch,
-  addLandedParent,
-  addLandedPr,
   clearStackConfig,
   detachHeadIfIn,
   getAllNodes,
@@ -956,12 +953,9 @@ async function executeCaseA(
 
   await executeCaseAPrCloses(dir, plan, hooks, state);
 
-  // Config cleanup: tombstone the merged root so future reads render it
-  // with its live descendants nested beneath. All three tombstone records
-  // (`landed-branches` + `landed-parent` + `landed-pr`) commit together so
-  // a crash mid-call leaves the tombstone fully present or fully absent --
-  // never in the degenerate "no PR number" shape that collapses the nav
-  // tree back to flat siblings.
+  // Config cleanup: reparent the merged root's children to their grandparent
+  // and remove the merged root from the stack config so future reads see the
+  // updated tree shape.
   emit(hooks, { kind: "config-cleanup" }, "running");
   const mergedRoot = plan.branchesToDelete[0];
   const prByBranch = new Map(
@@ -996,11 +990,9 @@ async function executeCaseA(
   }
 
   // Nav comment refresh. Runs AFTER configLandCleanup so buildNavPlan
-  // sees the tombstoned merged root as a structural merged node with its
-  // live descendants nested beneath, instead of seeing it as a live
-  // PR-less branch (which would collapse the tree back to flat siblings).
-  // Failures are non-fatal: the stack has already landed, rolling back
-  // nav is not meaningful.
+  // sees the reparented children under their new parent, not under the
+  // now-removed merged root. Failures are non-fatal: the stack has already
+  // landed, rolling back nav is not meaningful.
   emit(hooks, { kind: "nav" }, "running");
   try {
     const { owner, repo } = await resolveRepo();
@@ -1019,23 +1011,23 @@ async function executeCaseA(
   for (const branch of toDelete) {
     emit(hooks, { kind: "delete", branch }, "running");
 
-    // Tombstone first so a crash between ref delete and config writes
-    // cannot silently drop the tombstone. All writes are idempotent:
-    // addLandedBranch / addLandedPr / addLandedParent de-dupe, and
-    // configLandCleanup already tombstoned mergedRoot earlier. The
-    // landed-parent record survives `git branch -D` wiping the branch's
-    // live config so the tombstone remains a structural node. mergedRoot
-    // was already fully tombstoned by configLandCleanup and is skipped
-    // here so this loop only needs to handle auto-merged branches.
+    // configLandCleanup already reparented mergedRoot's direct children.
+    // For auto-merged branches, reparent their direct children to their
+    // recorded parent before deleting so the stack remains coherent.
     if (branch !== mergedRoot) {
-      await addLandedBranch(dir, plan.stackName, branch);
-      const prNumber = prByBranch.get(branch);
-      if (prNumber !== undefined) {
-        await addLandedPr(dir, plan.stackName, branch, prNumber);
-      }
       const recordedParent = snapByBranch.get(branch)?.recordedParent;
       if (recordedParent !== undefined) {
-        await addLandedParent(dir, plan.stackName, branch, recordedParent);
+        const childrenOfThis = plan.snapshot.filter(
+          (s) => s.recordedParent === branch,
+        );
+        for (const child of childrenOfThis) {
+          await runGitCommand(
+            dir,
+            "config",
+            `branch.${child.branch}.stack-parent`,
+            recordedParent,
+          );
+        }
       }
     }
 
@@ -1501,9 +1493,8 @@ export async function executeLandFromCli(
   }
 
   // Nav refresh runs AFTER configLandCleanup so buildNavPlan sees the
-  // tombstoned merged root as a merged structural node with its live
-  // descendants nested beneath, instead of rendering flat siblings when
-  // the live-but-PR-less mergedRoot is skipped.
+  // reparented children under their new parent, not under the now-removed
+  // merged root.
   if (!completed.navDone) {
     const { owner, repo } = await resolveRepo();
     const navActions = await buildNavPlan(dir, stackName, owner, repo);
@@ -1518,31 +1509,30 @@ export async function executeLandFromCli(
   for (const branch of toDelete) {
     if (completed.deletedBranches.includes(branch)) continue;
 
-    // Tombstone first so a crash between the ref delete and the config
-    // writes cannot silently drop the tombstone. All writes are
-    // idempotent: addLandedBranch / addLandedPr / addLandedParent
-    // de-dupe, and configLandCleanup already tombstoned mergedRoot as
-    // an atomic unit earlier. The landed-parent record survives
-    // `git branch -D` wiping the branch's live config so the tombstone
-    // remains a structural node in the tree. mergedRoot's tombstone is
-    // fully written by configLandCleanup; skip the per-branch loop for
-    // it so we only handle auto-merged branches here.
+    // configLandCleanup already reparented mergedRoot's direct children.
+    // For auto-merged branches, reparent their direct children to their
+    // recorded parent before deleting so the stack remains coherent.
     if (branch !== mergedRoot) {
-      await addLandedBranch(dir, stackName, branch);
-      const prNumber = prByBranch.get(branch);
-      if (prNumber !== undefined) {
-        await addLandedPr(dir, stackName, branch, prNumber);
-      }
       const recordedParent = snapByBranch.get(branch)?.recordedParent;
       if (recordedParent !== undefined) {
-        await addLandedParent(dir, stackName, branch, recordedParent);
+        const childrenOfThis = plan.snapshot.filter(
+          (s) => s.recordedParent === branch,
+        );
+        for (const child of childrenOfThis) {
+          await runGitCommand(
+            dir,
+            "config",
+            `branch.${child.branch}.stack-parent`,
+            recordedParent,
+          );
+        }
       }
     }
 
     const outcome = await deleteBranchIfExists(dir, branch);
     if (outcome.status === "failed") {
-      // Leave the ref in place; the tombstone still stands. Do NOT mark
-      // this branch deleted so a subsequent --resume can retry.
+      // Leave the ref in place. Do NOT mark this branch deleted so a
+      // subsequent --resume can retry.
       continue;
     }
     completed.deletedBranches.push(branch);

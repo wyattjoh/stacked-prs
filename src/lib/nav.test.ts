@@ -1,12 +1,7 @@
 import { describe, it as test } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { addBranch, createTestRepo, makeMockDir } from "./testdata/helpers.ts";
-import {
-  addLandedBranch,
-  addLandedPr,
-  setBaseBranch,
-  setStackNode,
-} from "./stack.ts";
+import { setBaseBranch, setStackNode } from "./stack.ts";
 import type { StackNode, StackTree } from "./stack.ts";
 import { writeErrorFixture, writeFixture } from "./gh.ts";
 import {
@@ -191,13 +186,12 @@ describe("generateNavMarkdown", () => {
     expect(result).toContain("**Stack: auth-rework**");
   });
 
-  test("renders merged nodes with strikethrough and places them before live roots", () => {
+  test("renders all tracked branches without special merged styling", () => {
     const nodeA: StackNode = {
       branch: "feature/a",
       stackName: "my-stack",
       parent: "main",
       children: [],
-      merged: true,
     };
     const nodeB: StackNode = {
       branch: "feature/b",
@@ -219,12 +213,10 @@ describe("generateNavMarkdown", () => {
 
     const result = generateNavMarkdown(tree, prMap, 143);
 
-    // Merged PR renders with strikethrough
-    expect(result).toContain("~~#122~~");
-    // Live PR renders normally
+    // Both PRs render as plain references (no strikethrough for deleted branches).
+    expect(result).toContain("#122");
+    expect(result).not.toContain("~~#122~~");
     expect(result).toContain("**#143 👈 this PR**");
-    // Merged comes before live in the output
-    expect(result.indexOf("~~#122~~")).toBeLessThan(result.indexOf("**#143"));
   });
 });
 
@@ -378,16 +370,14 @@ describe("buildNavPlan", () => {
     expect(plan).toHaveLength(0);
   });
 
-  test("renders tombstoned (landed) branches using stored PR number", async () => {
+  test("only shows currently-tracked branches (does not resurrect deleted branches)", async () => {
     await using repo = await createTestRepo();
     await using mock = await makeMockDir();
 
-    // Live child branch still in the stack; tombstoned root has been deleted.
+    // Only feature/b is tracked; feature/a was landed and deleted.
     await addBranch(repo.dir, "feature/b", "main");
     await setBaseBranch(repo.dir, "my-stack", "main");
     await setStackNode(repo.dir, "feature/b", "my-stack", "main");
-    await addLandedBranch(repo.dir, "my-stack", "feature/a");
-    await addLandedPr(repo.dir, "my-stack", "feature/a", 101);
 
     await writeFixture(
       mock.path,
@@ -410,51 +400,9 @@ describe("buildNavPlan", () => {
 
     expect(plan).toHaveLength(1);
     expect(plan[0].prNumber).toBe(102);
-    // The merged root should appear in the body with strikethrough.
-    expect(plan[0].body).toContain("~~#101~~");
+    // Only the live branch appears; no strikethrough for the landed root.
+    expect(plan[0].body).not.toContain("~~#101~~");
     expect(plan[0].body).toContain("**#102 👈 this PR**");
-  });
-
-  test("preserves tombstone -> live-child hierarchy after a landed root", async () => {
-    // Regression: after land of feature/a, submit used to rebuild the nav
-    // with feature/a and feature/b as flat siblings at depth 0. The
-    // tombstone should stay the structural parent so the rendered graph
-    // keeps the parent/child shape from before the land.
-    await using repo = await createTestRepo();
-    await using mock = await makeMockDir();
-
-    await addBranch(repo.dir, "feature/b", "main");
-    await setBaseBranch(repo.dir, "my-stack", "main");
-    await setStackNode(repo.dir, "feature/b", "my-stack", "feature/a");
-    await addLandedBranch(repo.dir, "my-stack", "feature/a");
-    await addLandedPr(repo.dir, "my-stack", "feature/a", 101);
-    const { addLandedParent } = await import("./stack.ts");
-    await addLandedParent(repo.dir, "my-stack", "feature/a", "main");
-
-    await writeFixture(
-      mock.path,
-      ["pr", "list", "--head", "feature/b", "--repo", "o/r"],
-      [{
-        number: 102,
-        url: "...",
-        title: "feat: b",
-        state: "OPEN",
-        isDraft: false,
-      }],
-    );
-    await writeFixture(
-      mock.path,
-      ["api", "repos/o/r/issues/102/comments"],
-      [],
-    );
-
-    const plan = await buildNavPlan(repo.dir, "my-stack", "o", "r");
-
-    expect(plan).toHaveLength(1);
-    const body = plan[0].body;
-    // The tombstoned root is at depth 0, and the live child sits at
-    // depth 1 (two-space indent) directly below it.
-    expect(body).toContain("- ~~#101~~\n  - **#102 👈 this PR**");
   });
 });
 
