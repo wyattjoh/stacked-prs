@@ -789,6 +789,26 @@ export async function getStackTree(
       dir,
       `branch.${currentBranch}.stack-name`,
     );
+    // v3 fallback: no stack-name key. Walk stack-parent upward to find the
+    // root branch and use its name as the stack identity.
+    if (!resolvedStackName) {
+      let walker: string | undefined = currentBranch;
+      const seen = new Set<string>();
+      while (walker && !seen.has(walker)) {
+        seen.add(walker);
+        const parent = await gitConfig(dir, `branch.${walker}.stack-parent`);
+        if (!parent) break;
+        const grandparent = await gitConfig(
+          dir,
+          `branch.${parent}.stack-parent`,
+        );
+        if (!grandparent) {
+          resolvedStackName = walker;
+          break;
+        }
+        walker = parent;
+      }
+    }
     if (!resolvedStackName) {
       throw new Error(`Current branch ${currentBranch} is not part of a stack`);
     }
@@ -812,6 +832,36 @@ export async function getStackTree(
     if (entry.stackName === resolvedStackName) matchingBranches.push(branch);
   }
   matchingBranches.sort();
+
+  // v3 fallback: when no `branch.<n>.stack-name` keys reference this stack
+  // (post-migration state), treat `resolvedStackName` as the root branch
+  // name and discover stack members by walking `stack-parent` pointers
+  // downward from the root. Also fetch baseBranch / mergeStrategy from the
+  // root branch's per-branch keys, since the legacy `stack.<n>.*` keys
+  // no longer exist.
+  if (matchingBranches.length === 0) {
+    const rootHasParent = branchConfig.get(resolvedStackName)?.parent;
+    if (rootHasParent !== undefined) {
+      // Walk descendants of the root via stack-parent.
+      const toVisit = [resolvedStackName];
+      const visited = new Set<string>();
+      while (toVisit.length > 0) {
+        const current = toVisit.pop()!;
+        if (visited.has(current)) continue;
+        visited.add(current);
+        matchingBranches.push(current);
+        for (const [branch, entry] of branchConfig) {
+          if (entry.parent === current && !visited.has(branch)) {
+            toVisit.push(branch);
+          }
+        }
+      }
+      matchingBranches.sort();
+      if (!baseBranch) {
+        baseBranch = await getBranchBaseBranch(dir, resolvedStackName);
+      }
+    }
+  }
 
   // Auto-migrate old linear format (stack-order keys) to tree format.
   // Only attempt migration when base-branch is missing, indicating an old stack.
@@ -1198,6 +1248,18 @@ export async function listAllStacks(dir: string): Promise<string[]> {
   for (const entry of branchConfig.values()) {
     if (entry.stackName) set.add(entry.stackName);
   }
+  // v3 fallback: if no stack-name keys are present, identify stacks by their
+  // root branches (a branch whose stack-parent is set but whose parent has no
+  // stack-parent of its own).
+  if (set.size === 0) {
+    for (const [branch, entry] of branchConfig) {
+      if (entry.parent === undefined) continue;
+      const parentEntry = branchConfig.get(entry.parent);
+      if (!parentEntry || parentEntry.parent === undefined) {
+        set.add(branch);
+      }
+    }
+  }
   return [...set].sort();
 }
 
@@ -1217,6 +1279,17 @@ export async function getAllStackTrees(dir: string): Promise<StackTree[]> {
   const names = new Set<string>();
   for (const entry of branchConfig.values()) {
     if (entry.stackName) names.add(entry.stackName);
+  }
+  // v3 fallback: derive stack identities from topology when no stack-name
+  // keys remain (post-migration repos).
+  if (names.size === 0) {
+    for (const [branch, entry] of branchConfig) {
+      if (entry.parent === undefined) continue;
+      const parentEntry = branchConfig.get(entry.parent);
+      if (!parentEntry || parentEntry.parent === undefined) {
+        names.add(branch);
+      }
+    }
   }
   const results = await Promise.all(
     [...names].sort().map(async (name) => {

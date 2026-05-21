@@ -1726,6 +1726,21 @@ const command = new Command()
 
 /** Run the stacked-prs command-line interface. */
 export async function main(args: string[] = Deno.args): Promise<void> {
+  // Auto-migrate legacy v2 git config (stack-name / stack.* keys) to the v3
+  // per-branch schema on first invocation after upgrading. Idempotent and
+  // silent when nothing needs migrating.
+  const { migrateLegacyConfig, needsMigration } = await import(
+    "./lib/migration.ts"
+  );
+  if (await needsMigration(dir)) {
+    try {
+      await migrateLegacyConfig(dir);
+    } catch (err) {
+      console.error(`stacked-prs: ${(err as Error).message}`);
+      Deno.exit(1);
+    }
+  }
+
   await command.parse(args);
 }
 
