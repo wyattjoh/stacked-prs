@@ -1304,6 +1304,19 @@ describe("cascade lookup helpers", () => {
     expect(await getEffectiveBaseBranch(repo.dir, "feat/a")).toBe("main");
   });
 
+  test("getEffectiveMergeStrategy returns the branch's own value when set", async () => {
+    await using repo = await createTestRepo();
+    await addBranch(repo.dir, "feat/a", "main");
+    await runGitCommand(
+      repo.dir,
+      "config",
+      "branch.feat/a.stack-parent",
+      "main",
+    );
+    await setBranchMergeStrategy(repo.dir, "feat/a", "merge");
+    expect(await getEffectiveMergeStrategy(repo.dir, "feat/a")).toBe("merge");
+  });
+
   test("getEffectiveBaseBranch walks parent chain when missing", async () => {
     await using repo = await createTestRepo();
     await addBranch(repo.dir, "feat/a", "main");
