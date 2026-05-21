@@ -342,6 +342,64 @@ export async function setBranchMergeStrategy(
   await gitConfigSet(dir, `branch.${branch}.merge-strategy`, strategy);
 }
 
+/**
+ * Walk parent pointers from `branch` upward, returning the first ancestor
+ * with a `branch.<n>.base-branch` value set. Throws if no ancestor has one.
+ */
+export async function getEffectiveBaseBranch(
+  dir: string,
+  branch: string,
+): Promise<string> {
+  let current: string | undefined = branch;
+  const seen = new Set<string>();
+  while (current && !seen.has(current)) {
+    seen.add(current);
+    const own = await getBranchBaseBranch(dir, current);
+    if (own) return own;
+    current = await gitConfig(dir, `branch.${current}.stack-parent`);
+  }
+  throw new Error(
+    `no base-branch found on ${branch} or any of its ancestors`,
+  );
+}
+
+/**
+ * Walk parent pointers from `branch` upward, returning the first ancestor
+ * with a `branch.<n>.merge-strategy` value set. Falls back to the repo
+ * default (`stacked-prs.default-merge-strategy`) or "squash".
+ */
+export async function getEffectiveMergeStrategy(
+  dir: string,
+  branch: string,
+): Promise<MergeStrategy> {
+  let current: string | undefined = branch;
+  const seen = new Set<string>();
+  while (current && !seen.has(current)) {
+    seen.add(current);
+    const own = await getBranchMergeStrategy(dir, current);
+    if (own) return own;
+    current = await gitConfig(dir, `branch.${current}.stack-parent`);
+  }
+  const repoDefault = await gitConfig(
+    dir,
+    "stacked-prs.default-merge-strategy",
+  );
+  if (repoDefault === "merge" || repoDefault === "squash") return repoDefault;
+  return "squash";
+}
+
+/**
+ * Write `stacked-prs.default-merge-strategy` to the repo's git config.
+ * This is the new namespace; the legacy `stack.default-merge-strategy` key
+ * continues to be read by `getDefaultMergeStrategy` until migration completes.
+ */
+export async function setRepoDefaultMergeStrategy(
+  dir: string,
+  strategy: MergeStrategy,
+): Promise<void> {
+  await gitConfigSet(dir, "stacked-prs.default-merge-strategy", strategy);
+}
+
 /** Get the merge strategy for a stack. Returns undefined if not set. */
 export async function getMergeStrategy(
   dir: string,

@@ -12,6 +12,8 @@ import {
   getBaseBranch,
   getBranchBaseBranch,
   getBranchMergeStrategy,
+  getEffectiveBaseBranch,
+  getEffectiveMergeStrategy,
   getLandedBranches,
   getLandedParents,
   getLandedPrs,
@@ -1285,5 +1287,86 @@ describe("per-branch base-branch and merge-strategy helpers", () => {
   test("getBranchMergeStrategy returns undefined for unknown branch", async () => {
     await using repo = await createTestRepo();
     expect(await getBranchMergeStrategy(repo.dir, "nope")).toBeUndefined();
+  });
+});
+
+describe("cascade lookup helpers", () => {
+  test("getEffectiveBaseBranch returns the branch's own value when set", async () => {
+    await using repo = await createTestRepo();
+    await addBranch(repo.dir, "feat/a", "main");
+    await setBranchBaseBranch(repo.dir, "feat/a", "main");
+    await runGitCommand(
+      repo.dir,
+      "config",
+      "branch.feat/a.stack-parent",
+      "main",
+    );
+    expect(await getEffectiveBaseBranch(repo.dir, "feat/a")).toBe("main");
+  });
+
+  test("getEffectiveBaseBranch walks parent chain when missing", async () => {
+    await using repo = await createTestRepo();
+    await addBranch(repo.dir, "feat/a", "main");
+    await addBranch(repo.dir, "feat/b", "feat/a");
+    await runGitCommand(
+      repo.dir,
+      "config",
+      "branch.feat/a.stack-parent",
+      "main",
+    );
+    await runGitCommand(
+      repo.dir,
+      "config",
+      "branch.feat/b.stack-parent",
+      "feat/a",
+    );
+    await setBranchBaseBranch(repo.dir, "feat/a", "main");
+    // feat/b has no own base-branch, must inherit from feat/a
+    expect(await getEffectiveBaseBranch(repo.dir, "feat/b")).toBe("main");
+  });
+
+  test("getEffectiveMergeStrategy falls back to repo default when no ancestor sets it", async () => {
+    await using repo = await createTestRepo();
+    await addBranch(repo.dir, "feat/a", "main");
+    await runGitCommand(
+      repo.dir,
+      "config",
+      "branch.feat/a.stack-parent",
+      "main",
+    );
+    await runGitCommand(
+      repo.dir,
+      "config",
+      "stacked-prs.default-merge-strategy",
+      "merge",
+    );
+    expect(await getEffectiveMergeStrategy(repo.dir, "feat/a")).toBe("merge");
+  });
+
+  test("getEffectiveMergeStrategy falls back to hardcoded squash when no default set", async () => {
+    await using repo = await createTestRepo();
+    await addBranch(repo.dir, "feat/a", "main");
+    await runGitCommand(
+      repo.dir,
+      "config",
+      "branch.feat/a.stack-parent",
+      "main",
+    );
+    expect(await getEffectiveMergeStrategy(repo.dir, "feat/a")).toBe("squash");
+  });
+
+  test("getEffectiveBaseBranch throws when chain has no base", async () => {
+    await using repo = await createTestRepo();
+    await addBranch(repo.dir, "feat/a", "main");
+    await runGitCommand(
+      repo.dir,
+      "config",
+      "branch.feat/a.stack-parent",
+      "main",
+    );
+    // no base-branch anywhere
+    await expect(getEffectiveBaseBranch(repo.dir, "feat/a")).rejects.toThrow(
+      /no base-branch/i,
+    );
   });
 });
