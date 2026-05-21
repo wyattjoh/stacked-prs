@@ -495,7 +495,6 @@ const command = new Command()
     "--create-worktree <dir:string>",
     "Place the new branch in a worktree at <dir>/<branch> (base branch only)",
   )
-  .option("--stack-name <name:string>", "Auto-init only: stack name")
   .option(
     "--merge-strategy <strategy:string>",
     "Auto-init only: merge or squash",
@@ -519,7 +518,6 @@ const command = new Command()
       branch,
       message: options.message,
       createWorktree: options.createWorktree,
-      stackName: options.stackName,
       mergeStrategy,
     };
 

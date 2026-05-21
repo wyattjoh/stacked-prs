@@ -6,18 +6,20 @@ import {
   createTestRepo,
   makeTempDir,
   runGit,
+  trackBranch,
 } from "../lib/testdata/helpers.ts";
 import { detectDefaultBranch } from "../lib/stack.ts";
 import { create, planCreate } from "./create.ts";
 
-/** Register `feat/a` as a stack branch on `my-stack` rooted at main. */
+/** Register `feat/a` as a stack branch rooted at main using per-branch schema. */
 async function setupStackOnFeatA(dir: string): Promise<void> {
   await addBranch(dir, "feat/a", "main");
   await runGit(dir, "checkout", "feat/a");
-  await runGit(dir, "config", "branch.feat/a.stack-name", "my-stack");
-  await runGit(dir, "config", "branch.feat/a.stack-parent", "main");
-  await runGit(dir, "config", "stack.my-stack.base-branch", "main");
-  await runGit(dir, "config", "stack.my-stack.merge-strategy", "merge");
+  await trackBranch(dir, "feat/a", {
+    parent: "main",
+    baseBranch: "main",
+    mergeStrategy: "merge",
+  });
 }
 
 describe("detectDefaultBranch", () => {
@@ -70,7 +72,7 @@ describe("create — case 1 (child in existing stack)", () => {
     expect(result.ok).toBe(true);
     expect(result.plan?.case).toBe("child");
     expect(result.plan?.parent).toBe("feat/a");
-    expect(result.plan?.stackName).toBe("my-stack");
+    expect(result.plan?.stackName).toBe("feat/a");
     expect(result.plan?.baseBranch).toBe("main");
     expect(result.plan?.willCommit).toBe(false);
   });
@@ -86,18 +88,26 @@ describe("create — case 1 (child in existing stack)", () => {
     const current = await runGit(repo.dir, "branch", "--show-current");
     expect(current).toBe("feat/b");
 
-    const stackName = await runGit(
-      repo.dir,
-      "config",
-      "branch.feat/b.stack-name",
-    );
-    expect(stackName).toBe("my-stack");
     const parent = await runGit(
       repo.dir,
       "config",
       "branch.feat/b.stack-parent",
     );
     expect(parent).toBe("feat/a");
+
+    const baseBranch = await runGit(
+      repo.dir,
+      "config",
+      "branch.feat/b.base-branch",
+    );
+    expect(baseBranch).toBe("main");
+
+    const mergeStrategy = await runGit(
+      repo.dir,
+      "config",
+      "branch.feat/b.merge-strategy",
+    );
+    expect(mergeStrategy).toBe("merge");
   });
 
   test("commits staged changes when -m is passed", async () => {
@@ -136,18 +146,6 @@ describe("create — case 1 (child in existing stack)", () => {
     const result = await create(repo.dir, { branch: "existing" });
     expect(result.ok).toBe(false);
     expect(result.error).toBe("branch-exists");
-  });
-
-  test("rejects flag misuse (--stack-name on child)", async () => {
-    await using repo = await createTestRepo();
-    await setupStackOnFeatA(repo.dir);
-
-    const result = await create(repo.dir, {
-      branch: "feat/b",
-      stackName: "other",
-    });
-    expect(result.ok).toBe(false);
-    expect(result.error).toBe("flag-misuse");
   });
 
   test("rejects --create-worktree on child", async () => {
@@ -196,8 +194,9 @@ describe("create — case 1 (child in existing stack)", () => {
     expect(result.plan?.commands).toEqual([
       "git checkout -b feat/b",
       "git commit -m hi",
-      "git config branch.feat/b.stack-name my-stack",
       "git config branch.feat/b.stack-parent feat/a",
+      "git config branch.feat/b.base-branch main",
+      "git config branch.feat/b.merge-strategy merge",
     ]);
   });
 
@@ -258,46 +257,29 @@ describe("create — case 2 (auto-init in-repo)", () => {
     expect(result.plan?.case).toBe("auto-init");
 
     expect(
-      await runGit(repo.dir, "config", "branch.feat/a.stack-name"),
-    ).toBe("feat/a");
-    expect(
       await runGit(repo.dir, "config", "branch.feat/a.stack-parent"),
     ).toBe("main");
     expect(
-      await runGit(repo.dir, "config", "stack.feat/a.base-branch"),
+      await runGit(repo.dir, "config", "branch.feat/a.base-branch"),
     ).toBe("main");
     expect(
-      await runGit(repo.dir, "config", "stack.feat/a.merge-strategy"),
+      await runGit(repo.dir, "config", "branch.feat/a.merge-strategy"),
     ).toBe("squash");
   });
 
-  test("honors explicit --stack-name and --merge-strategy", async () => {
+  test("honors explicit --merge-strategy", async () => {
     await using repo = await createTestRepo();
 
     const result = await create(repo.dir, {
       branch: "feat/a",
-      stackName: "my-stack",
       mergeStrategy: "squash",
     });
     expect(result.ok).toBe(true);
-    expect(result.plan?.stackName).toBe("my-stack");
+    expect(result.plan?.stackName).toBe("feat/a");
     expect(result.plan?.mergeStrategy).toBe("squash");
     expect(
-      await runGit(repo.dir, "config", "stack.my-stack.merge-strategy"),
+      await runGit(repo.dir, "config", "branch.feat/a.merge-strategy"),
     ).toBe("squash");
-  });
-
-  test("rejects when stack-name already exists", async () => {
-    await using repo = await createTestRepo();
-
-    await runGit(repo.dir, "config", "stack.taken.base-branch", "main");
-
-    const result = await create(repo.dir, {
-      branch: "feat/a",
-      stackName: "taken",
-    });
-    expect(result.ok).toBe(false);
-    expect(result.error).toBe("stack-exists");
   });
 
   test("commits staged changes when -m is passed", async () => {
@@ -331,33 +313,15 @@ describe("create — case 2 (auto-init in-repo)", () => {
     await using repo = await createTestRepo();
     const result = await planCreate(repo.dir, {
       branch: "feat/a",
-      stackName: "my-stack",
       mergeStrategy: "squash",
     });
     expect(result.ok).toBe(true);
     expect(result.plan?.commands).toEqual([
       "git checkout -b feat/a",
-      "git config branch.feat/a.stack-name my-stack",
       "git config branch.feat/a.stack-parent main",
-      "git config stack.my-stack.base-branch main",
-      "git config stack.my-stack.merge-strategy squash",
+      "git config branch.feat/a.base-branch main",
+      "git config branch.feat/a.merge-strategy squash",
     ]);
-  });
-
-  test("pre-check: rejects stack names with regex metacharacters that would collide", async () => {
-    await using repo = await createTestRepo();
-
-    // Write a stack named "foo"; then try to create with --stack-name "f.o"
-    // which previously would have regex-matched "foo".
-    await runGit(repo.dir, "config", "stack.foo.base-branch", "main");
-
-    const result = await create(repo.dir, {
-      branch: "feat/a",
-      stackName: "f.o",
-    });
-    // With regex escape, "f.o" is a distinct literal name and succeeds.
-    expect(result.ok).toBe(true);
-    expect(result.plan?.stackName).toBe("f.o");
   });
 });
 
@@ -384,8 +348,8 @@ describe("create — case 3 (auto-init worktree)", () => {
     expect(worktreeBranch).toBe("feat/a");
 
     expect(
-      await runGit(repo.dir, "config", "branch.feat/a.stack-name"),
-    ).toBe("feat/a");
+      await runGit(repo.dir, "config", "branch.feat/a.stack-parent"),
+    ).toBe("main");
   });
 
   test("creates worktree with -m; commit lands on new branch", async () => {
@@ -460,10 +424,9 @@ describe("create — case 3 (auto-init worktree)", () => {
       "git commit -m init",
       "git checkout -",
       `git worktree add ${expectedPath} feat/a`,
-      "git config branch.feat/a.stack-name feat/a",
       "git config branch.feat/a.stack-parent main",
-      "git config stack.feat/a.base-branch main",
-      "git config stack.feat/a.merge-strategy squash",
+      "git config branch.feat/a.base-branch main",
+      "git config branch.feat/a.merge-strategy squash",
     ]);
   });
 
@@ -538,12 +501,12 @@ describe("create — case 3 (auto-init worktree)", () => {
     // under the currently checked-out live branch.
     await using repo = await createTestRepo();
     await setupStackOnFeatA(repo.dir);
-    await addTombstone(repo.dir, "my-stack", "feat/landed", { prNumber: 71 });
+    await addTombstone(repo.dir, "feat/a", "feat/landed", { prNumber: 71 });
 
     const result = await create(repo.dir, { branch: "feat/b" });
     expect(result.ok).toBe(true);
     expect(result.plan?.case).toBe("child");
     expect(result.plan?.parent).toBe("feat/a");
-    expect(result.plan?.stackName).toBe("my-stack");
+    expect(result.plan?.stackName).toBe("feat/a");
   });
 });

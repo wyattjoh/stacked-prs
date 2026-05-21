@@ -2,16 +2,19 @@ import { join } from "@std/path";
 import {
   detectDefaultBranch,
   getDefaultMergeStrategy,
+  getEffectiveBaseBranch,
+  getEffectiveMergeStrategy,
   gitConfig,
   type MergeStrategy,
   runGitCommand,
+  setBranchBaseBranch,
+  setBranchMergeStrategy,
 } from "../lib/stack.ts";
 
 export interface CreateBranchOptions {
   branch: string;
   message?: string;
   createWorktree?: string;
-  stackName?: string;
   mergeStrategy?: MergeStrategy;
   force?: boolean;
   dryRun?: boolean;
@@ -24,6 +27,10 @@ export interface CreatePlan {
   branch: string;
   parent: string;
   baseBranch: string;
+  /**
+   * @deprecated Kept for printer compatibility; equals the root branch name.
+   * Renamed in a future task.
+   */
   stackName: string;
   mergeStrategy: MergeStrategy;
   willCommit: boolean;
@@ -39,7 +46,6 @@ export type CreateError =
   | "worktree-requires-base"
   | "worktree-exists"
   | "flag-misuse"
-  | "stack-exists"
   | "nothing-staged"
   | "git-failed";
 
@@ -96,11 +102,6 @@ async function currentBranch(
     return { ok: true, branch: "", detached: true };
   }
   return { ok: true, branch: stdout, detached: false };
-}
-
-/** Escape a string for safe use as a literal match in a git `--get-regexp` pattern. */
-function escapeRegex(input: string): string {
-  return input.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 async function runGitOrFail(
@@ -225,29 +226,20 @@ function commandsForPlan(
     }
   }
 
-  cmds.push(
-    gitCmd("config", `branch.${plan.branch}.stack-name`, plan.stackName),
-  );
+  // Per-branch trio: stack-parent, base-branch, merge-strategy.
   cmds.push(
     gitCmd("config", `branch.${plan.branch}.stack-parent`, plan.parent),
   );
-
-  if (plan.case !== "child") {
-    cmds.push(
-      gitCmd(
-        "config",
-        `stack.${plan.stackName}.base-branch`,
-        plan.baseBranch,
-      ),
-    );
-    cmds.push(
-      gitCmd(
-        "config",
-        `stack.${plan.stackName}.merge-strategy`,
-        plan.mergeStrategy,
-      ),
-    );
-  }
+  cmds.push(
+    gitCmd("config", `branch.${plan.branch}.base-branch`, plan.baseBranch),
+  );
+  cmds.push(
+    gitCmd(
+      "config",
+      `branch.${plan.branch}.merge-strategy`,
+      plan.mergeStrategy,
+    ),
+  );
 
   return cmds;
 }
@@ -292,12 +284,12 @@ export async function planCreate(
   }
   const current = currentResult.branch;
 
-  const currentStack = await gitConfig(
+  const currentParent = await gitConfig(
     dir,
-    `branch.${current}.stack-name`,
+    `branch.${current}.stack-parent`,
   );
 
-  if (currentStack) {
+  if (currentParent) {
     // Case 1: child in existing stack.
     if (opts.createWorktree !== undefined) {
       return {
@@ -307,29 +299,37 @@ export async function planCreate(
           "--create-worktree only applies when starting a new stack from the base branch",
       };
     }
-    if (opts.stackName !== undefined || opts.mergeStrategy !== undefined) {
+    if (opts.mergeStrategy !== undefined) {
       return {
         ok: false,
         error: "flag-misuse",
         message:
-          "--stack-name and --merge-strategy only apply when auto-initing from the base branch",
+          "--merge-strategy only applies when auto-initing from the base branch",
       };
     }
-    const baseBranch = await gitConfig(
-      dir,
-      `stack.${currentStack}.base-branch`,
-    );
-    const strategy = (await gitConfig(
-      dir,
-      `stack.${currentStack}.merge-strategy`,
-    )) as MergeStrategy | undefined;
-    if (!baseBranch || !strategy) {
+
+    let baseBranch: string;
+    try {
+      baseBranch = await getEffectiveBaseBranch(dir, current);
+    } catch (err) {
       return {
         ok: false,
         error: "git-failed",
-        message:
-          `stack "${currentStack}" is missing base-branch or merge-strategy config`,
+        message: err instanceof Error ? err.message : String(err),
       };
+    }
+    const strategy = await getEffectiveMergeStrategy(dir, current);
+
+    // Walk up to find the root branch (the one whose parent is the base branch).
+    let rootBranch = current;
+    let walkBranch = current;
+    while (true) {
+      const walkParent = await gitConfig(
+        dir,
+        `branch.${walkBranch}.stack-parent`,
+      );
+      if (!walkParent || walkParent === baseBranch) break;
+      rootBranch = walkBranch = walkParent;
     }
 
     const childPlan: Omit<CreatePlan, "commands"> = {
@@ -337,7 +337,7 @@ export async function planCreate(
       branch: opts.branch,
       parent: current,
       baseBranch,
-      stackName: currentStack,
+      stackName: rootBranch,
       mergeStrategy: strategy,
       willCommit: opts.message !== undefined,
     };
@@ -372,26 +372,10 @@ export async function planCreate(
     };
   }
 
-  const stackName = opts.stackName ?? opts.branch;
+  // stackName equals the new branch name for auto-init (kept for printer compat).
+  const stackName = opts.branch;
   const mergeStrategy: MergeStrategy = opts.mergeStrategy ??
     await getDefaultMergeStrategy(dir);
-
-  // Use --get-regexp to catch any orphan stack-level keys from a prior partial
-  // run, not just the base-branch key.
-  const existingStack = await runGitCommand(
-    dir,
-    "config",
-    "--get-regexp",
-    `^stack\\.${escapeRegex(stackName)}\\.`,
-  );
-  if (existingStack.code === 0 && existingStack.stdout) {
-    return {
-      ok: false,
-      error: "stack-exists",
-      message:
-        `stack "${stackName}" already has config entries; choose a different --stack-name`,
-    };
-  }
 
   const worktreeCase = opts.createWorktree !== undefined;
   const worktreePath = worktreeCase
@@ -453,15 +437,7 @@ export async function executeCreate(
       }
     }
 
-    const setStack = await runGitOrFail(
-      dir,
-      "config",
-      `branch.${plan.branch}.stack-name`,
-      plan.stackName,
-    );
-    if (!setStack.ok) {
-      return { ok: false, error: "git-failed", message: setStack.message };
-    }
+    // Write per-branch trio for the new child branch.
     const setParent = await runGitOrFail(
       dir,
       "config",
@@ -471,6 +447,8 @@ export async function executeCreate(
     if (!setParent.ok) {
       return { ok: false, error: "git-failed", message: setParent.message };
     }
+    await setBranchBaseBranch(dir, plan.branch, plan.baseBranch);
+    await setBranchMergeStrategy(dir, plan.branch, plan.mergeStrategy);
 
     return { ok: true, plan };
   }
@@ -488,18 +466,18 @@ export async function executeCreate(
       }
     }
 
-    const writes: Array<[string, string]> = [
-      [`branch.${plan.branch}.stack-name`, plan.stackName],
-      [`branch.${plan.branch}.stack-parent`, plan.baseBranch],
-      [`stack.${plan.stackName}.base-branch`, plan.baseBranch],
-      [`stack.${plan.stackName}.merge-strategy`, plan.mergeStrategy],
-    ];
-    for (const [key, value] of writes) {
-      const r = await runGitOrFail(dir, "config", key, value);
-      if (!r.ok) {
-        return { ok: false, error: "git-failed", message: r.message };
-      }
+    // Write per-branch trio for the new root branch.
+    const setParent = await runGitOrFail(
+      dir,
+      "config",
+      `branch.${plan.branch}.stack-parent`,
+      plan.baseBranch,
+    );
+    if (!setParent.ok) {
+      return { ok: false, error: "git-failed", message: setParent.message };
     }
+    await setBranchBaseBranch(dir, plan.branch, plan.baseBranch);
+    await setBranchMergeStrategy(dir, plan.branch, plan.mergeStrategy);
 
     return { ok: true, plan };
   }
@@ -575,18 +553,18 @@ export async function executeCreate(
       }
     }
 
-    const writes: Array<[string, string]> = [
-      [`branch.${plan.branch}.stack-name`, plan.stackName],
-      [`branch.${plan.branch}.stack-parent`, plan.baseBranch],
-      [`stack.${plan.stackName}.base-branch`, plan.baseBranch],
-      [`stack.${plan.stackName}.merge-strategy`, plan.mergeStrategy],
-    ];
-    for (const [key, value] of writes) {
-      const r = await runGitOrFail(dir, "config", key, value);
-      if (!r.ok) {
-        return { ok: false, error: "git-failed", message: r.message };
-      }
+    // Write per-branch trio for the new root branch.
+    const setParent = await runGitOrFail(
+      dir,
+      "config",
+      `branch.${plan.branch}.stack-parent`,
+      plan.baseBranch,
+    );
+    if (!setParent.ok) {
+      return { ok: false, error: "git-failed", message: setParent.message };
     }
+    await setBranchBaseBranch(dir, plan.branch, plan.baseBranch);
+    await setBranchMergeStrategy(dir, plan.branch, plan.mergeStrategy);
 
     return { ok: true, plan };
   }
