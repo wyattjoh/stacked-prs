@@ -212,7 +212,7 @@ import {
   getLiveSubtreeRoots,
   getStackTree,
   removeStackBranch,
-  resumeStore,
+  repoResumeStore,
   runGitCommand,
   type StackTree,
   tryResolveRef,
@@ -1213,29 +1213,26 @@ export async function executeLand(
   return await executeCaseA(dir, plan, hooks);
 }
 
-const landResumeStateFor = (dir: string, stackName: string) =>
-  resumeStore<LandResumeState>(dir, stackName, "land-resume-state");
+const landResumeStateFor = (dir: string) =>
+  repoResumeStore<LandResumeState>(dir, "land-resume-state");
 
 async function readLandResumeState(
   dir: string,
-  stackName: string,
 ): Promise<LandResumeState | null> {
-  return await landResumeStateFor(dir, stackName).read();
+  return await landResumeStateFor(dir).read();
 }
 
 async function writeLandResumeState(
   dir: string,
-  stackName: string,
   state: LandResumeState,
 ): Promise<void> {
-  await landResumeStateFor(dir, stackName).write(state);
+  await landResumeStateFor(dir).write(state);
 }
 
 async function clearLandResumeState(
   dir: string,
-  stackName: string,
 ): Promise<void> {
-  await landResumeStateFor(dir, stackName).clear();
+  await landResumeStateFor(dir).clear();
 }
 
 export async function executeLandFromCli(
@@ -1245,7 +1242,7 @@ export async function executeLandFromCli(
   prInfoByBranch: Map<string, PrInfo>,
   opts: { resume?: boolean },
 ): Promise<LandCliResult> {
-  const existingState = await readLandResumeState(dir, stackName);
+  const existingState = await readLandResumeState(dir);
   if (existingState && !Array.isArray(existingState.autoMerged)) {
     existingState.autoMerged = [];
     // Pre-migration resume state: re-evaluate isBranchAutoMerged for
@@ -1270,8 +1267,8 @@ export async function executeLandFromCli(
   }
   if (!opts.resume && existingState) {
     throw new Error(
-      `land already in progress for stack "${stackName}". ` +
-        `Run with --resume or clear stack.${stackName}.land-resume-state manually.`,
+      `land already in progress. ` +
+        `Run with --resume or clear stacked-prs.land-resume-state manually.`,
     );
   }
 
@@ -1337,7 +1334,7 @@ export async function executeLandFromCli(
 
   // Write initial resume state before any mutations
   if (!existingState) {
-    await writeLandResumeState(dir, stackName, { ...completed, plan });
+    await writeLandResumeState(dir, { ...completed, plan });
   }
 
   if (plan.case === "all-merged") {
@@ -1355,10 +1352,10 @@ export async function executeLandFromCli(
       // regardless so the metadata doesn't linger as an orphan.
       await removeStackBranch(dir, branch);
       completed.deletedBranches.push(branch);
-      await writeLandResumeState(dir, stackName, completed);
+      await writeLandResumeState(dir, completed);
     }
     await clearStackConfig(dir, stackName);
-    await clearLandResumeState(dir, stackName);
+    await clearLandResumeState(dir);
     await restoreHead(dir, plan, {
       onProgress: () => {},
       freshPrStates: () => Promise.resolve(new Map()),
@@ -1390,7 +1387,7 @@ export async function executeLandFromCli(
     if (rebase.code !== 0) {
       const conflictFiles = await getConflictFiles(dir);
       completed.conflictedBranch = step.branch;
-      await writeLandResumeState(dir, stackName, completed);
+      await writeLandResumeState(dir, completed);
       return {
         ok: false,
         error: "conflict",
@@ -1423,7 +1420,7 @@ export async function executeLandFromCli(
     );
     completed.completedRebases.push(step.branch);
     if (autoMerged) completed.autoMerged.push(step.branch);
-    await writeLandResumeState(dir, stackName, completed);
+    await writeLandResumeState(dir, completed);
   }
 
   for (const step of plan.pushSteps) {
@@ -1437,7 +1434,7 @@ export async function executeLandFromCli(
       step.branch,
     );
     completed.completedPushes.push(step.branch);
-    await writeLandResumeState(dir, stackName, completed);
+    await writeLandResumeState(dir, completed);
   }
 
   for (const update of plan.prUpdates) {
@@ -1448,7 +1445,7 @@ export async function executeLandFromCli(
       await gh("pr", "ready", String(update.prNumber));
     }
     completed.prUpdated.push(update.prNumber);
-    await writeLandResumeState(dir, stackName, completed);
+    await writeLandResumeState(dir, completed);
   }
 
   // Close PRs whose branches were auto-merged by patch-id. Mirrors the TUI
@@ -1473,7 +1470,7 @@ export async function executeLandFromCli(
       );
     }
     completed.prClosed.push(update.prNumber);
-    await writeLandResumeState(dir, stackName, completed);
+    await writeLandResumeState(dir, completed);
   }
 
   const mergedRoot = plan.branchesToDelete[0];
@@ -1489,7 +1486,7 @@ export async function executeLandFromCli(
       prByBranch.get(mergedRoot),
     );
     completed.configCleanupDone = true;
-    await writeLandResumeState(dir, stackName, completed);
+    await writeLandResumeState(dir, completed);
   }
 
   // Nav refresh runs AFTER configLandCleanup so buildNavPlan sees the
@@ -1500,7 +1497,7 @@ export async function executeLandFromCli(
     const navActions = await buildNavPlan(dir, stackName, owner, repo);
     await applyNavPlan(owner, repo, navActions);
     completed.navDone = true;
-    await writeLandResumeState(dir, stackName, completed);
+    await writeLandResumeState(dir, completed);
   }
 
   const toDelete = [...plan.branchesToDelete, ...completed.autoMerged];
@@ -1536,10 +1533,10 @@ export async function executeLandFromCli(
       continue;
     }
     completed.deletedBranches.push(branch);
-    await writeLandResumeState(dir, stackName, completed);
+    await writeLandResumeState(dir, completed);
   }
 
-  await clearLandResumeState(dir, stackName);
+  await clearLandResumeState(dir);
   await restoreHead(dir, plan, {
     onProgress: () => {},
     freshPrStates: () => Promise.resolve(new Map()),

@@ -1,7 +1,7 @@
 import {
   effectiveParent,
   getAllNodes,
-  getMergeStrategy,
+  getEffectiveMergeStrategy,
   getStackTree,
   runGitCommand,
   tryResolveRef,
@@ -96,7 +96,7 @@ export async function computeSubmitPlan(
 ): Promise<SubmitPlan> {
   const [tree, mergeStrategy, currentBranchResult] = await Promise.all([
     getStackTree(dir, stackName),
-    getMergeStrategy(dir, stackName),
+    getEffectiveMergeStrategy(dir, stackName),
     runGitCommand(dir, "branch", "--show-current"),
   ]);
 

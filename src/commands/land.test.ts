@@ -1402,7 +1402,7 @@ describe("executeLandFromCli resume guard", () => {
       await runGitCommand(
         repo.dir,
         "config",
-        "stack.my-stack.land-resume-state",
+        "stacked-prs.land-resume-state",
         JSON.stringify({ plan: {}, completedRebases: [] }),
       );
 

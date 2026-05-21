@@ -42,8 +42,6 @@ describe("fold — plan", () => {
       "git checkout feat/a",
       "git merge --ff-only feat/b",
       "git config branch.feat/c.stack-parent feat/a",
-      "git config --unset branch.feat/b.stack-name",
-      "git config --unset branch.feat/b.stack-parent",
       "git branch -d feat/b",
     ]);
   });

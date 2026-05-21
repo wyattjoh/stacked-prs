@@ -6,7 +6,6 @@ import {
   getMergeStrategy,
   getStackTree,
   gitConfig,
-  runGitCommand,
   setBaseBranch,
   setStackNode,
 } from "./stack.ts";
@@ -19,7 +18,6 @@ import {
   configRemoveBranch,
   configSetBranch,
   configSetStrategy,
-  configSplitStack,
 } from "./config.ts";
 
 describe("config", () => {
@@ -265,10 +263,12 @@ describe("config", () => {
   });
 
   describe("configLandCleanup", () => {
-    test("single root remains after landing: no split", async () => {
+    test("reparents children to merged branch's parent and removes its config", async () => {
       await using repo = await createTestRepo();
       // Tree: main -> feature/a -> feature/b -> feature/c
-      // Land feature/a, feature/b becomes new live root (feature/a stays as merged)
+      // Land feature/a; feature/b and feature/c are reparented (feature/b to
+      // main since it was a direct child; feature/c keeps pointing at
+      // feature/b which still exists in this scenario).
       await addBranch(repo.dir, "feature/a", "main");
       await addBranch(repo.dir, "feature/b", "feature/a");
       await addBranch(repo.dir, "feature/c", "feature/b");
@@ -287,24 +287,21 @@ describe("config", () => {
       expect(result.removed).toBe("feature/a");
       expect(result.splitInto).toHaveLength(0);
 
-      // Stack has 3 nodes: feature/a (merged), feature/b (live, nested
-      // under the tombstone), feature/c (live, nested under feature/b).
-      const tree = await getStackTree(repo.dir, "my-stack");
-      const nodes = getAllNodes(tree);
-      expect(nodes).toHaveLength(3);
-      const byBranch = Object.fromEntries(nodes.map((n) => [n.branch, n]));
-      expect(byBranch["feature/a"].merged).toBe(true);
-      // Tombstone preserves the structural link: feature/b stays pointing
-      // at the tombstoned feature/a so nav rendering keeps the hierarchy.
-      expect(byBranch["feature/b"].parent).toBe("feature/a");
-      expect(byBranch["feature/c"].parent).toBe("feature/b");
+      // feature/a's config is gone; feature/b now points at main; feature/c
+      // still points at feature/b.
+      expect(await gitConfig(repo.dir, "branch.feature/a.stack-parent"))
+        .toBeUndefined();
+      expect(await gitConfig(repo.dir, "branch.feature/b.stack-parent"))
+        .toBe("main");
+      expect(await gitConfig(repo.dir, "branch.feature/c.stack-parent"))
+        .toBe("feature/b");
     });
 
-    test("multi-root after landing: splits into separate stacks", async () => {
+    test("reparents fan-out children to the merged branch's parent", async () => {
       await using repo = await createTestRepo();
       // Tree: main -> feature/a -> feature/b
       //                         -> feature/c
-      // Land feature/a, leaves two live roots: feature/b and feature/c
+      // Land feature/a; both children get reparented to main.
       await addBranch(repo.dir, "feature/a", "main");
       await addBranch(repo.dir, "feature/b", "feature/a");
       await addBranch(repo.dir, "feature/c", "feature/a");
@@ -321,31 +318,20 @@ describe("config", () => {
       );
 
       expect(result.removed).toBe("feature/a");
-      expect(result.splitInto).toHaveLength(2);
+      expect(result.splitInto).toHaveLength(0);
 
-      // Each sub-stack should have one live branch (the merged feature/a is not split into new stacks)
-      const stackNames = result.splitInto.map((s) => s.stackName);
-      // Derived from branch names (strip feature/ prefix)
-      expect(stackNames).toContain("b");
-      expect(stackNames).toContain("c");
-
-      for (const split of result.splitInto) {
-        expect(split.branches).toHaveLength(1);
-        const tree = await getStackTree(repo.dir, split.stackName);
-        const nodes = getAllNodes(tree);
-        // Each new stack's root should have "main" as parent
-        expect(nodes[0].parent).toBe("main");
-      }
+      expect(await gitConfig(repo.dir, "branch.feature/a.stack-parent"))
+        .toBeUndefined();
+      expect(await gitConfig(repo.dir, "branch.feature/b.stack-parent"))
+        .toBe("main");
+      expect(await gitConfig(repo.dir, "branch.feature/c.stack-parent"))
+        .toBe("main");
     });
 
-    test("preserves children as structural descendants of the tombstone", async () => {
+    test("landing a leaf branch removes only its own config", async () => {
       await using repo = await createTestRepo();
-      // Linear: main -> feature/a -> feature/b
-      // Land feature/a; feature/b stays pointing at the tombstone so nav
-      // comments show the inherited graph shape.
       await addBranch(repo.dir, "feature/a", "main");
       await addBranch(repo.dir, "feature/b", "feature/a");
-
       await setBaseBranch(repo.dir, "my-stack", "main");
       await setStackNode(repo.dir, "feature/a", "my-stack", "main");
       await setStackNode(repo.dir, "feature/b", "my-stack", "feature/a");
@@ -353,189 +339,14 @@ describe("config", () => {
       const result = await configLandCleanup(
         repo.dir,
         "my-stack",
-        "feature/a",
+        "feature/b",
       );
 
-      expect(result.removed).toBe("feature/a");
-      expect(result.splitInto).toHaveLength(0);
-
-      // One root (the tombstone) with feature/b nested beneath it.
-      const tree = await getStackTree(repo.dir, "my-stack");
-      expect(tree.roots).toHaveLength(1);
-      const [root] = tree.roots;
-      expect(root.branch).toBe("feature/a");
-      expect(root.merged).toBe(true);
-      expect(root.children).toHaveLength(1);
-      expect(root.children[0].branch).toBe("feature/b");
-      expect(root.children[0].merged).toBeFalsy();
-      expect(root.children[0].parent).toBe("feature/a");
-    });
-
-    test("split-triggering land: each new split sees the landed branch as tombstone", async () => {
-      await using repo = await createTestRepo();
-      // Tree: main -> feature/a -> feature/b, -> feature/c
-      // Land feature/a; splits into stacks b and c. Both must see feature/a
-      // as a merged root in their reconstructed tree.
-      await addBranch(repo.dir, "feature/a", "main");
-      await addBranch(repo.dir, "feature/b", "feature/a");
-      await addBranch(repo.dir, "feature/c", "feature/a");
-
-      await setBaseBranch(repo.dir, "my-stack", "main");
-      await setStackNode(repo.dir, "feature/a", "my-stack", "main");
-      await setStackNode(repo.dir, "feature/b", "my-stack", "feature/a");
-      await setStackNode(repo.dir, "feature/c", "my-stack", "feature/a");
-
-      const result = await configLandCleanup(repo.dir, "my-stack", "feature/a");
-
-      expect(result.splitInto).toHaveLength(2);
-      const stackNames = result.splitInto.map((s) => s.stackName);
-      expect(stackNames).toContain("b");
-      expect(stackNames).toContain("c");
-
-      // Each split stack's tree must include feature/a as a merged root
-      // with its own live child nested beneath it.
-      for (const name of stackNames) {
-        const tree = await getStackTree(repo.dir, name);
-        const tombstoneA = tree.roots.find((n) =>
-          n.branch === "feature/a" && n.merged === true
-        );
-        expect(tombstoneA).toBeDefined();
-        expect(tombstoneA!.parent).toBe("main");
-        expect(tombstoneA!.children.map((c) => c.branch)).toEqual([
-          `feature/${name}`,
-        ]);
-        expect(tombstoneA!.children[0].merged).toBeFalsy();
-      }
-    });
-  });
-
-  describe("configLandCleanup (deferred cleanup)", () => {
-    test("writes stack-level tombstone instead of branch-level stack-merged", async () => {
-      await using repo = await createTestRepo();
-      await addBranch(repo.dir, "feature/a", "main");
-      await addBranch(repo.dir, "feature/b", "feature/a");
-      await setStackNode(repo.dir, "feature/a", "my-stack", "main");
-      await setStackNode(repo.dir, "feature/b", "my-stack", "feature/a");
-      await setBaseBranch(repo.dir, "my-stack", "main");
-
-      await configLandCleanup(repo.dir, "my-stack", "feature/a");
-
-      // Tombstone is at the stack level, not branch level
-      const { stdout } = await runGitCommand(
-        repo.dir,
-        "config",
-        "--get-all",
-        "stack.my-stack.landed-branches",
-      );
-      expect(stdout).toBe("feature/a");
-
-      // feature/b keeps pointing at the tombstoned parent so the tree
-      // renders feature/a -> feature/b after land.
-      const tree = await getStackTree(repo.dir, "my-stack");
-      expect(tree.roots).toHaveLength(1);
-      const [root] = tree.roots;
-      expect(root.branch).toBe("feature/a");
-      expect(root.merged).toBe(true);
-      expect(root.children.map((c) => c.branch)).toEqual(["feature/b"]);
-      expect(root.children[0].merged).toBeFalsy();
-    });
-
-    test("does not split when only one live root remains after landing", async () => {
-      await using repo = await createTestRepo();
-      await addBranch(repo.dir, "feature/a", "main");
-      await addBranch(repo.dir, "feature/b", "feature/a");
-      await setStackNode(repo.dir, "feature/a", "my-stack", "main");
-      await setStackNode(repo.dir, "feature/b", "my-stack", "feature/a");
-      await setBaseBranch(repo.dir, "my-stack", "main");
-
-      const result = await configLandCleanup(
-        repo.dir,
-        "my-stack",
-        "feature/a",
-      );
-
-      expect(result.removed).toBe("feature/a");
-      expect(result.splitInto).toHaveLength(0);
-    });
-  });
-
-  describe("configSplitStack", () => {
-    test("splits multi-root stack into per-subtree stacks", async () => {
-      await using repo = await createTestRepo();
-      // Tree: main -> feature/x -> feature/y
-      //                         -> feature/z
-      await addBranch(repo.dir, "feature/x", "main");
-      await addBranch(repo.dir, "feature/y", "feature/x");
-      await addBranch(repo.dir, "feature/z", "feature/x");
-
-      await setBaseBranch(repo.dir, "multi", "main");
-      await setStackNode(repo.dir, "feature/x", "multi", "main");
-      await setStackNode(repo.dir, "feature/y", "multi", "feature/x");
-      await setStackNode(repo.dir, "feature/z", "multi", "feature/x");
-
-      // Now make feature/x a second root too (to have 2 roots from the start)
-      // Actually let's just test split on existing multi-root stack:
-      // Set up so both feature/y and feature/z are roots under main directly
-      await setStackNode(repo.dir, "feature/y", "multi", "main");
-      await setStackNode(repo.dir, "feature/z", "multi", "main");
-      // feature/x is no longer in stack (was replaced)
-      // Remove feature/x's metadata
-      await configRemoveBranch(repo.dir, "feature/x");
-
-      // Now the stack has 2 roots: feature/y and feature/z
-      const result = await configSplitStack(repo.dir, "multi");
-
-      expect(result).toHaveLength(2);
-      const stackNames = result.map((s) => s.stackName);
-      expect(stackNames).toContain("y");
-      expect(stackNames).toContain("z");
-
-      for (const split of result) {
-        const tree = await getStackTree(repo.dir, split.stackName);
-        const nodes = getAllNodes(tree);
-        expect(nodes[0].parent).toBe("main");
-      }
-    });
-
-    test("copies tombstones to each new split stack", async () => {
-      await using repo = await createTestRepo();
-      // Tree: main -> feature/a (will be tombstoned) -> feature/b, -> feature/c
-      await addBranch(repo.dir, "feature/a", "main");
-      await addBranch(repo.dir, "feature/b", "feature/a");
-      await addBranch(repo.dir, "feature/c", "feature/a");
-
-      await setBaseBranch(repo.dir, "multi", "main");
-      await setStackNode(repo.dir, "feature/a", "multi", "main");
-      await setStackNode(repo.dir, "feature/b", "multi", "feature/a");
-      await setStackNode(repo.dir, "feature/c", "multi", "feature/a");
-
-      // Reparent feature/b and feature/c to main to simulate post-land state
-      await setStackNode(repo.dir, "feature/b", "multi", "main");
-      await setStackNode(repo.dir, "feature/c", "multi", "main");
-      // feature/a is tombstoned, no longer a live node
-      const { removeStackBranch, addLandedBranch, getLandedBranches } =
-        await import("../lib/stack.ts");
-      await removeStackBranch(repo.dir, "feature/a");
-      await addLandedBranch(repo.dir, "multi", "feature/a");
-
-      const result = await configSplitStack(repo.dir, "multi");
-
-      expect(result).toHaveLength(2);
-      const stackNames = result.map((s) => s.stackName);
-      expect(stackNames).toContain("b");
-      expect(stackNames).toContain("c");
-
-      // Each new split stack should have feature/a in its tombstones
-      for (const name of stackNames) {
-        const landed = await getLandedBranches(repo.dir, name);
-        expect(landed).toEqual(["feature/a"]);
-      }
-
-      // Original stack's config must be fully unset
-      const origLanded = await getLandedBranches(repo.dir, "multi");
-      expect(origLanded).toEqual([]);
-      const origBase = await gitConfig(repo.dir, "stack.multi.base-branch");
-      expect(origBase).toBeUndefined();
+      expect(result.removed).toBe("feature/b");
+      expect(await gitConfig(repo.dir, "branch.feature/b.stack-parent"))
+        .toBeUndefined();
+      expect(await gitConfig(repo.dir, "branch.feature/a.stack-parent"))
+        .toBe("main");
     });
   });
 });

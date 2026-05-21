@@ -223,9 +223,6 @@ export async function planSplit(
     cmds.push(gitCmd("checkout", opts.branch));
     cmds.push(gitCmd("reset", "--hard", atSha));
     cmds.push(
-      gitCmd("config", `branch.${opts.newBranch}.stack-name`, opts.stackName),
-    );
-    cmds.push(
       gitCmd(
         "config",
         `branch.${opts.newBranch}.stack-parent`,
@@ -291,9 +288,6 @@ export async function planSplit(
     cmds.push(gitCmd("add", "--", ...remainder));
     cmds.push(gitCmd("commit", "-m", opts.remainderMessage));
   }
-  cmds.push(
-    gitCmd("config", `branch.${opts.newBranch}.stack-name`, opts.stackName),
-  );
   cmds.push(
     gitCmd(
       "config",

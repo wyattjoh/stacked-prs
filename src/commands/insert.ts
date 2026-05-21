@@ -44,7 +44,6 @@ function gitCmd(...args: string[]): string {
 function commandsForPlan(plan: Omit<InsertPlan, "commands">): string[] {
   return [
     gitCmd("checkout", "-b", plan.branch, plan.parent),
-    gitCmd("config", `branch.${plan.branch}.stack-name`, plan.stackName),
     gitCmd("config", `branch.${plan.branch}.stack-parent`, plan.parent),
     gitCmd("config", `branch.${plan.child}.stack-parent`, plan.branch),
   ];

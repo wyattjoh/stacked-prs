@@ -498,16 +498,14 @@ describe("executeSync", () => {
     );
     expect(verifyCode).not.toBe(0);
 
-    // feat/c's recorded stack-parent stays pointing at feat/b (the
-    // tombstone). The tree still shows feat/c nested under a merged
-    // feat/b, and restack walks through the tombstone to find the
-    // live effective parent for rebase targets.
+    // feat/c is reparented to feat/b's former parent (feat/a) so the
+    // chain stays connected after feat/b is deleted.
     const { stdout: parentOut } = await runGitCommand(
       repo.dir,
       "config",
       "branch.feat/c.stack-parent",
     );
-    expect(parentOut.trim()).toBe("feat/b");
+    expect(parentOut.trim()).toBe("feat/a");
   });
 
   test("fetch failure short-circuits before running any stack work", async () => {

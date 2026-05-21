@@ -72,8 +72,6 @@ function commandsForPlan(
       gitCmd("config", `branch.${child}.stack-parent`, plan.parent),
     );
   }
-  cmds.push(gitCmd("config", "--unset", `branch.${plan.branch}.stack-name`));
-  cmds.push(gitCmd("config", "--unset", `branch.${plan.branch}.stack-parent`));
   cmds.push(gitCmd("branch", "-d", plan.branch));
   return cmds;
 }

@@ -34,7 +34,6 @@ describe("insert — plan", () => {
     expect(result.plan?.parent).toBe("feat/a");
     expect(result.plan?.commands).toEqual([
       "git checkout -b feat/b feat/a",
-      "git config branch.feat/b.stack-name my-stack",
       "git config branch.feat/b.stack-parent feat/a",
       "git config branch.feat/c.stack-parent feat/b",
     ]);

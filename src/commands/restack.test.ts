@@ -1102,7 +1102,9 @@ describe("executeRestack (deleted branches)", () => {
     expect(caught).toBeDefined();
     expect(caught!.message).toContain("no longer exist");
     expect(caught!.message).toContain("b");
-    expect(caught!.message).toContain("git config --unset branch.b.stack-name");
+    expect(caught!.message).toContain(
+      "git config --unset branch.b.stack-parent",
+    );
   });
 
   test("resume detects a deleted branch and clears state", async () => {

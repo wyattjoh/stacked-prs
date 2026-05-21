@@ -2,7 +2,6 @@ import {
   computeSyncStatus,
   getAllNodes,
   getAllStackTrees,
-  getLandedPrs,
   runGitCommand,
   type StackTree,
 } from "../../lib/stack.ts";
@@ -16,11 +15,9 @@ export interface LoadLocalResult {
   worktreeByBranch: Map<string, WorktreeInfo>;
   allBranches: string[];
   /**
-   * PR info for tombstoned (landed) branches, reconstructed from
-   * `stack.<n>.landed-pr`. Surfaces merged PRs even after the branch ref has
-   * been deleted and `gh pr list --head <branch>` no longer returns it.
-   * `url` is left empty because the owner/repo isn't known at load time;
-   * callers that need a URL should look it up lazily.
+   * Kept for backwards compatibility with consumers; always empty in v3.
+   * Merged branches are deleted outright; their PRs are no longer
+   * resurfaced by `status` after deletion.
    */
   landedPrByBranch: Map<string, PrInfo>;
   currentBranch: string | null;
@@ -32,15 +29,6 @@ export async function loadLocal(dir: string): Promise<LoadLocalResult> {
   const syncByBranch = new Map<string, SyncStatus>();
   const allBranches: string[] = [];
   const landedPrByBranch = new Map<string, PrInfo>();
-  const landedPrByStack = new Map<string, Map<string, number>>();
-  await Promise.all(
-    trees.map(async (tree) => {
-      landedPrByStack.set(
-        tree.stackName,
-        await getLandedPrs(dir, tree.stackName),
-      );
-    }),
-  );
   // Collect every (node, parent) pair that needs a sync status probe
   // and fire them concurrently. The old serialized `for ... await
   // computeSyncStatus` spawned 2 git-subprocesses per live branch in
@@ -48,20 +36,10 @@ export async function loadLocal(dir: string): Promise<LoadLocalResult> {
   // latency.
   const syncProbes: Array<Promise<[string, SyncStatus]>> = [];
   for (const tree of trees) {
-    const stackLandedPrs = landedPrByStack.get(tree.stackName);
     for (const node of getAllNodes(tree)) {
       allBranches.push(node.branch);
       if (node.merged) {
         syncByBranch.set(node.branch, "landed");
-        const num = stackLandedPrs?.get(node.branch);
-        if (num !== undefined) {
-          landedPrByBranch.set(node.branch, {
-            number: num,
-            url: "",
-            state: "MERGED",
-            isDraft: false,
-          });
-        }
       } else {
         syncProbes.push(
           computeSyncStatus(dir, node.branch, node.parent).then(

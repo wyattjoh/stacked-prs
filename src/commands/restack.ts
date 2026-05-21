@@ -231,9 +231,7 @@ export async function planRestack(
   if (missing.length > 0) {
     const lines = missing.map((b) => `  - ${b}`).join("\n");
     const cleanupLines = missing
-      .map((b) =>
-        `  git config --unset branch.${b}.stack-name && git config --unset branch.${b}.stack-parent`
-      )
+      .map((b) => `  git config --unset branch.${b}.stack-parent`)
       .join("\n");
     throw new Error(
       `Stack "${stackName}" references ${missing.length} branch(es) that no longer exist:\n` +
