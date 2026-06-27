@@ -17,6 +17,7 @@ import { buildNavPlan, executeNavAction } from "./lib/nav.ts";
 import { verifyRefs } from "./commands/verify-refs.ts";
 import { discoverChain } from "./commands/import-discover.ts";
 import { applyClean, detectStaleConfig } from "./commands/clean.ts";
+import { archiveStack } from "./commands/archive.ts";
 import { findPrForBranch } from "./commands/pr.ts";
 import { computeSubmitPlan } from "./lib/submit-plan.ts";
 import { executeSubmit, renderSubmitPlan } from "./commands/submit.ts";
@@ -877,6 +878,36 @@ const command = new Command()
         console.log(`  ✓ ${key}`);
       }
     }
+  })
+  // --- archive ---
+  .command(
+    "archive [stack:string]",
+    "Mark a stack as archived (hidden from status/serve and skipped by sync)",
+  )
+  .option("--unarchive", "Clear the archived flag instead of setting it")
+  .option("--json", "Output as JSON")
+  .action(async (options, stack?: string) => {
+    let result;
+    try {
+      result = await archiveStack(dir, {
+        stackName: stack,
+        unarchive: options.unarchive,
+      });
+    } catch (err) {
+      console.error((err as Error).message);
+      Deno.exit(1);
+    }
+    if (options.json) {
+      logJson(result);
+      return;
+    }
+    if (!result.changed) {
+      const state = result.archived ? "already archived" : "not archived";
+      console.log(`· Stack ${result.stackName} is ${state}.`);
+      return;
+    }
+    const verb = result.archived ? "Archived" : "Unarchived";
+    console.log(`✓ ${verb} stack ${result.stackName}.`);
   })
   // --- land ---
   .command("land", "Land a merged PR and clean up the stack")
