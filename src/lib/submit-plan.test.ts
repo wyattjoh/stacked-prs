@@ -149,6 +149,7 @@ describe("computeSubmitPlan", () => {
       stackName: "my-stack",
       baseBranch: "main",
       mergeStrategy: undefined,
+      archived: false,
       roots: [{
         branch: "feat/a",
         stackName: "my-stack",
@@ -211,6 +212,7 @@ describe("computeSubmitPlan", () => {
       stackName: "my-stack",
       baseBranch: "main",
       mergeStrategy: undefined,
+      archived: false,
       roots: [{
         branch: "feat/a",
         stackName: "my-stack",

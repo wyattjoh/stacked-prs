@@ -30,6 +30,7 @@ function makeTree(
     stackName: "test",
     baseBranch,
     mergeStrategy: undefined,
+    archived: false,
     roots,
   };
 }
