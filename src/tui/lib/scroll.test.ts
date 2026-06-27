@@ -21,6 +21,7 @@ function linearStack(name: string, depth: number): StackTree {
     stackName: name,
     baseBranch: "main",
     mergeStrategy: "merge",
+    archived: false,
     roots: [node],
   };
 }

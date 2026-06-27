@@ -414,6 +414,7 @@ const command = new Command()
             initialTab,
             loadPrs,
             theme,
+            showArchived: options.archived === true,
             onRequestExit: (code = 0) => {
               tuiExitCode = code;
               instance?.unmount();

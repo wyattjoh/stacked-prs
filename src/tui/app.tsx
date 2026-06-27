@@ -46,6 +46,7 @@ export interface AppProps {
   loadPrs?: boolean;
   theme?: "light" | "dark";
   initialTab?: TabId;
+  showArchived?: boolean;
   onRequestExit?: (code?: number) => void;
 }
 
@@ -81,8 +82,8 @@ function parentOf(state: State, branch: string): string | null {
 export function App(props: AppProps): React.ReactElement {
   const [state, dispatch] = useReducer(
     reducer,
-    props.initialTab ?? "all",
-    initialState,
+    undefined,
+    () => initialState(props.initialTab ?? "all", props.showArchived ?? false),
   );
   const { exit } = useApp();
   const { stdout } = useStdout();
@@ -527,6 +528,10 @@ export function App(props: AppProps): React.ReactElement {
     }
     if (input === "?") {
       dispatch({ type: "HELP_TOGGLE" });
+      return;
+    }
+    if (input === "a") {
+      dispatch({ type: "ARCHIVED_TOGGLE" });
       return;
     }
 

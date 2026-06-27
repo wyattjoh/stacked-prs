@@ -88,6 +88,9 @@ export interface Viewport {
 
 export interface State {
   trees: StackTree[];
+  /** Every loaded tree, including archived. `trees` is the visible subset. */
+  allTrees: StackTree[];
+  showArchived: boolean;
   syncByBranch: Map<string, SyncStatus>;
   worktreeByBranch: Map<string, WorktreeInfo>;
   grid: GridLayout;
@@ -148,6 +151,7 @@ export type Action =
   | { type: "TAB_SWITCH"; tab: TabId }
   | { type: "SCROLL"; viewport: Viewport }
   | { type: "HELP_TOGGLE" }
+  | { type: "ARCHIVED_TOGGLE" }
   | { type: "TERMINAL_SIZE"; tooNarrow: boolean }
   | { type: "FOCUS_SET"; section: FocusedSection }
   | { type: "DETAIL_SCROLL"; viewport: Viewport }
