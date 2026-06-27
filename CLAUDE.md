@@ -109,7 +109,7 @@ deno publish --dry-run --allow-dirty
 
 Subcommands: `status` (add `--interactive`/`-i` to launch the TUI), `create`,
 `restack`, `nav`, `verify-refs`, `import-discover`, `init`, `import`, `insert`,
-`fold`, `move`, `split`, `submit`, `sync`, `pr`, `land`, `clean`.
+`fold`, `move`, `split`, `submit`, `sync`, `pr`, `land`, `clean`, `archive`.
 `lib/config.ts` and `lib/submit-plan.ts` are libraries shared across commands;
 import their functions directly.
 
@@ -119,12 +119,15 @@ every stack returned by `getAllStackTrees`: it fetches every base once,
 fast-forwards local base branches when safe (warning on divergence), prunes
 branches whose PRs merged on GitHub (reparenting children and retargeting their
 PR bases), then composes `restack` + force-push per stack. It stops at the first
-failure. `pr` is a thin lookup over `gh pr list` that delegates browser-opening
-to `gh pr view --web`. Both `submit` and `sync` share a tri-modal CLI shape:
-`--dry-run` prints the plan only, default (no flags) prompts `[y/N]`, and
-`--force` executes without prompting. This matches the SKILL.md
-confirmation-gate philosophy: Claude uses `--dry-run` to inspect, then `--force`
-after approval.
+failure. `sync` skips stacks marked archived (`stack.<name>.archived`), listing
+them under `archivedSkipped` in the plan, unless `--archived` is passed.
+`archive` toggles that flag (a single config write, no confirmation gate);
+defaults to the current branch's stack when no name is given. `pr` is a thin
+lookup over `gh pr list` that delegates browser-opening to `gh pr view --web`.
+Both `submit` and `sync` share a tri-modal CLI shape: `--dry-run` prints the
+plan only, default (no flags) prompts `[y/N]`, and `--force` executes without
+prompting. This matches the SKILL.md confirmation-gate philosophy: Claude uses
+`--dry-run` to inspect, then `--force` after approval.
 
 ## Architecture
 
@@ -183,6 +186,7 @@ can be continued across process invocations.
 | `src/lib/config.ts`               | Library: metadata mutations (insert/fold/move/split/land cleanup)     | Imported by commands that mutate stack metadata                         |
 | `src/lib/submit-plan.ts`          | Library: submit planning (consumed by `submit.ts`)                    | Imported by `commands/submit.ts` and tests                              |
 | `src/commands/clean.ts`           | Stale config detection and removal                                    | `cli.ts clean [--force] [--json]`                                       |
+| `src/commands/archive.ts`         | Toggle a stack's archived flag (`stack.<name>.archived`)              | `cli.ts archive [<stack>] [--unarchive] [--json]`                       |
 | `src/commands/create.ts`          | Branch creation with optional worktree                                | `cli.ts create <branch> [flags]`                                        |
 | `src/commands/status.ts`          | Read stack state + PR info                                            | `cli.ts status [--json]`                                                |
 | `src/commands/restack.ts`         | Per-branch topological rebase                                         | `cli.ts restack [--dry-run] [--json] [--resume]`                        |
@@ -213,6 +217,7 @@ stack.<stack-name>.landed-branches # Multi-value: branch names landed from this 
 stack.<stack-name>.landed-pr       # Multi-value: "<branch>:<pr-number>" per landed branch, written at land time so nav comments can keep rendering merged PRs after the branch is deleted
 stack.<stack-name>.landed-parent   # Multi-value: "<branch>:<parent-branch>" per landed branch, written at land time so the tombstone keeps its structural position in the tree after `git branch -D` wipes its live branch-level config
 stack.<stack-name>.color           # (Optional) hex color override for TUI and clean output
+stack.<stack-name>.archived        # (Optional) "true" when archived; hidden by default from status/TUI and skipped by sync. Key absent = not archived. Read via getStackArchived(), written via setStackArchived().
 stack.default-merge-strategy       # (Optional) default for init/import/auto-init create; "merge" or "squash". Falls back to "squash" when unset. Read via getDefaultMergeStrategy(). Respects --local/--global/--system precedence.
 ```
 

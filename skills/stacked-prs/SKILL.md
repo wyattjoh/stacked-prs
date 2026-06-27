@@ -7,7 +7,7 @@ description: >-
   stack", "stack PRs", "stacked branches", "push to stack", "dependent PRs",
   "chained branches", "rebase my stack", "sync stack", "submit stack",
   "land stack", "import stack", "split branch", "fold branch".
-argument-hint: "[init|create|insert|split|fold|move|sync|restack|submit|status|pr|land|import|clean]"
+argument-hint: "[init|create|insert|split|fold|move|sync|restack|submit|status|pr|land|import|clean|archive]"
 allowed-tools: >-
   Bash(git *), Bash(gh *),
   Bash(${CLAUDE_PLUGIN_ROOT}/skills/stacked-prs/scripts/stacked-prs *),
@@ -518,7 +518,9 @@ Show current stack state. **No confirmation needed** (read-only).
    ◯─┘      feature/auth        #101 (open)   up-to-date
    ```
 3. When the user wants every stack at once, run `cli.ts status --all`. It
-   renders every configured stack grouped by base branch.
+   renders every configured stack grouped by base branch. Archived stacks are
+   hidden; add `--archived` to include them. In the TUI, press `a` to toggle
+   archived stacks (they render dimmed with an `(archived)` tag).
 
 #### Interactive view
 
@@ -600,6 +602,21 @@ full git-config schema.
 5. Run `cli.ts clean [--stack-name=<name>] --force` to apply.
 6. Report the removed keys.
 
+### `archive`
+
+Mark a stack as archived (or clear the flag with `--unarchive`). An archived
+stack keeps all of its config but is hidden by default from `status`, the TUI,
+and is skipped by `sync`. **No confirmation needed** (single config
+write, no git/gh mutation).
+
+**Flags:** `[<stack>]` (defaults to the current branch's stack), `--unarchive`,
+`--json`
+
+1. Run `cli.ts archive [<stack>]` to archive, or
+   `cli.ts archive [<stack>] --unarchive` to restore.
+2. Reveal archived stacks on demand: `cli.ts status --archived`,
+   `cli.ts sync --archived`, or the `a` key in the TUI.
+
 ## Confirmation Gate Rules
 
 **CRITICAL: Never execute any of these without showing the plan first:**
@@ -624,6 +641,7 @@ full git-config schema.
 - `stacked-prs verify-refs`
 - `stacked-prs restack --dry-run` (with or without `--json`)
 - `stacked-prs clean --json` (report-only; `--force` mutates)
+- `stacked-prs archive` / `archive --unarchive` (single config write, no gate)
 - `stacked-prs create --dry-run` (with or without `--json`)
 - `stacked-prs land --dry-run` (with or without `--json`)
 - `stacked-prs submit --dry-run` (with or without `--json`)
@@ -656,7 +674,7 @@ provided.
 
 ```bash
 ${CLAUDE_PLUGIN_ROOT}/skills/stacked-prs/scripts/stacked-prs status \
-  [--stack-name=<name>] [--owner=<owner> --repo=<repo>] [--json] [--pr|-p] [--all] [--interactive|-i] [--theme <theme>]
+  [--stack-name=<name>] [--owner=<owner> --repo=<repo>] [--json] [--pr|-p] [--all] [--archived] [--interactive|-i] [--theme <theme>]
 ```
 
 Returns human-readable ladder output by default. Pass `--json` for structured
@@ -669,7 +687,10 @@ branch where it starts on the all-stacks view. The TUI renders every stack as a
 horizontal tree with per-stack colors, PR state, sync status, and a live commit
 detail pane. PR metadata is opt-in: pass `--pr` / `-p` to load PRs from GitHub;
 otherwise status stays local-only and skips PR fetching. Pass `--theme light` or
-`--theme dark` to override auto-detection.
+`--theme dark` to override auto-detection. Archived stacks are hidden from the
+`--all` view by default; pass `--archived` to include them (`--json` always
+includes every stack with an `archived` flag, and the TUI toggles them with the
+`a` key).
 
 ### `restack`
 
@@ -774,17 +795,19 @@ stack-wide; the CLI errors out if the branch is not a live member.
 
 ```bash
 ${CLAUDE_PLUGIN_ROOT}/skills/stacked-prs/scripts/stacked-prs sync \
-  [--dry-run] [--force] [--filter=<globs>] [--json]
+  [--dry-run] [--force] [--filter=<globs>] [--archived] [--json]
 ```
 
-Applies to **every** stack in the repo by default. Fetches each distinct base
-branch from origin once, fast-forwards each local base branch when safe (warning
-and continuing past any that have diverged), prunes branches whose PRs merged
-(deleting the branch locally, reparenting its children, retargeting their PR
-bases on GitHub, and refreshing nav comments), then for each surviving stack
-runs `restack` and force-pushes with `--force-with-lease`. Stops at the first
-conflict or push failure; the returned JSON (`--json`) records
-`failedAt: <stackName>` so the caller can resume that stack with
+Applies to **every** non-archived stack in the repo by default. Archived stacks
+are skipped (and listed under `Archived (skipped):` in the plan); pass
+`--archived` to include them. Fetches each distinct base branch from origin
+once, fast-forwards each local base branch when safe (warning and continuing
+past any that have diverged), prunes branches whose PRs merged (deleting the
+branch locally, reparenting its children, retargeting their PR bases on GitHub,
+and refreshing nav comments), then for each surviving stack runs `restack` and
+force-pushes with `--force-with-lease`. Stops at the first conflict or push
+failure; the returned JSON (`--json`) records `failedAt: <stackName>` so the
+caller can resume that stack with
 `cli.ts restack --stack-name=<failed> --resume` and then re-run `cli.ts sync`
 for the rest. Same three-mode shape as submit: `--dry-run`, interactive default,
 `--force`.
@@ -836,6 +859,18 @@ references a deleted ref), stale stack-parent (parent ref does not exist), empty
 stacks (stack metadata with no member branches), and stale resume-state (resume
 marker but no rebase in progress). Default: print report and prompt to apply.
 Pass `--force` for non-interactive use. Pass `--json` for structured output.
+
+### `archive`
+
+```bash
+${CLAUDE_PLUGIN_ROOT}/skills/stacked-prs/scripts/stacked-prs archive \
+  [<stack>] [--unarchive] [--json]
+```
+
+Sets (or clears with `--unarchive`) `stack.<name>.archived`. Defaults to the
+current branch's stack when no name is given. Archived stacks are hidden by
+default from `status`/TUI and skipped by `sync`; reveal them with `--archived`
+(CLI) or the `a` key (TUI).
 
 ### `init`
 

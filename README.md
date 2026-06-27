@@ -182,8 +182,9 @@ the specified new parent.
 
 ### `/stacked-prs sync`
 
-Bring **every stack** in the repo back in line with origin. Mirrors `gt sync`.
-In one pass `sync`:
+Bring **every non-archived stack** in the repo back in line with origin. Mirrors
+`gt sync`. Archived stacks are skipped (pass `--archived` to include them). In
+one pass `sync`:
 
 1. Fetches every base branch (for example, `main`).
 2. Fast-forwards each local base branch when safe, warning and skipping any that
@@ -197,6 +198,7 @@ In one pass `sync`:
 /stacked-prs sync --dry-run       # preview plan across all stacks
 /stacked-prs sync                 # prompts [y/N] before executing
 /stacked-prs sync --force         # execute without prompting
+/stacked-prs sync --archived      # also sync archived stacks
 /stacked-prs sync --json          # structured output
 ```
 
@@ -286,6 +288,26 @@ Pass `--all` / `-a` to render every configured stack grouped by base branch:
 ◯─┘      feature/auth      up-to-date
 ◯        feature/payments  behind-parent
 ```
+
+Archived stacks (see [`/stacked-prs archive`](#stacked-prs-archive)) are hidden
+from the all-stacks view by default. Pass `--archived` to include them; `--json`
+always lists every stack with an `archived` flag.
+
+### `/stacked-prs archive`
+
+Mark a stack as archived when you are done with it but want to keep its
+metadata:
+
+```
+stacked-prs archive                 # archive the current branch's stack
+stacked-prs archive my-stack        # archive a named stack
+stacked-prs archive --unarchive     # restore the current branch's stack
+```
+
+An archived stack keeps all of its configuration but is hidden by default from
+`status` and the interactive TUI, and is skipped by `sync`. Reveal archived
+stacks on demand with `status --archived`, `sync --archived`, or the `a` key in
+the TUI.
 
 ### Interactive view
 
