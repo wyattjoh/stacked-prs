@@ -375,6 +375,7 @@ export interface StackTree {
   stackName: string;
   baseBranch: string;
   mergeStrategy: MergeStrategy | undefined;
+  archived: boolean;
   roots: StackNode[];
 }
 
@@ -561,6 +562,32 @@ export async function setBaseBranch(
   await gitConfigSet(dir, `stack.${stackName}.base-branch`, baseBranch);
 }
 
+/** Read whether a stack is archived. True only when the key is exactly "true". */
+export async function getStackArchived(
+  dir: string,
+  stackName: string,
+): Promise<boolean> {
+  return (await gitConfig(dir, `stack.${stackName}.archived`)) === "true";
+}
+
+/** Archive or unarchive a stack. Unarchiving unsets the key entirely. */
+export async function setStackArchived(
+  dir: string,
+  stackName: string,
+  archived: boolean,
+): Promise<void> {
+  const key = `stack.${stackName}.archived`;
+  if (archived) {
+    await gitConfigSet(dir, key, "true");
+    return;
+  }
+  // Tolerate exit 5 ("key absent"); any other non-zero is a real failure.
+  const { code, stderr } = await runGitCommand(dir, "config", "--unset", key);
+  if (code !== 0 && code !== 5) {
+    throw new Error(`git config --unset ${key} failed: ${stderr}`);
+  }
+}
+
 /**
  * Remove all stack-level config keys for a stack.
  * Used when a stack is fully landed or split and its namespace should be freed.
@@ -576,6 +603,7 @@ export async function clearStackConfig(
     `stack.${stackName}.merge-strategy`,
     `stack.${stackName}.resume-state`,
     `stack.${stackName}.color`,
+    `stack.${stackName}.archived`,
   ];
   for (const key of singleValueKeys) {
     const { code, stderr } = await runGitCommand(dir, "config", "--unset", key);
@@ -676,6 +704,7 @@ export async function getStackTree(
   let baseBranch = await getBaseBranch(dir, resolvedStackName);
 
   const mergeStrategy = await getMergeStrategy(dir, resolvedStackName);
+  const archived = await getStackArchived(dir, resolvedStackName);
 
   // Single scan of every `branch.<name>.stack-*` key. One fork replaces
   // what used to be O(N) per-key shell-outs (stack-name, stack-parent,
@@ -824,6 +853,7 @@ export async function getStackTree(
     stackName: resolvedStackName,
     baseBranch,
     mergeStrategy,
+    archived,
     roots: [...legacyTombstones, ...roots],
   };
 }

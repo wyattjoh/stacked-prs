@@ -510,6 +510,7 @@ export async function getAllStackStatuses(
         stackName: `base:${baseBranch}`,
         baseBranch,
         mergeStrategy: undefined,
+        archived: false,
         roots: group.flatMap((stack) =>
           treeByStackName.get(stack.stackName)?.roots ?? []
         ),
