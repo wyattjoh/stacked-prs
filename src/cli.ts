@@ -1194,6 +1194,7 @@ const command = new Command()
     "--filter <globs:string>",
     "Comma-separated stack-name globs; prefix with ! to exclude (e.g. --filter='!di*')",
   )
+  .option("--archived", "Include archived stacks in the sync")
   .option("--json", "Output as JSON")
   .action(async (options) => {
     // Resolve owner/repo once so every `listPrsForBranch` call (planner
@@ -1210,7 +1211,10 @@ const command = new Command()
     })();
 
     const run = async (): Promise<void> => {
-      const plan = await computeSyncPlan(dir, { filter: options.filter });
+      const plan = await computeSyncPlan(dir, {
+        filter: options.filter,
+        archived: options.archived,
+      });
 
       if (plan.filter && plan.stacks.length === 0) {
         if (options.json) {

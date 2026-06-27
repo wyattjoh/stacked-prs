@@ -69,6 +69,8 @@ export interface SyncPlan {
   filter?: string;
   /** Stack names that existed but were filtered out, for reporting. */
   filteredOut: string[];
+  /** Archived stack names excluded from the plan (empty when --archived). */
+  archivedSkipped: string[];
 }
 
 export interface StackSyncResult {
@@ -329,14 +331,20 @@ async function planStackSync(
  */
 export async function computeSyncPlan(
   dir: string,
-  options: { filter?: string } = {},
+  options: { filter?: string; archived?: boolean } = {},
 ): Promise<SyncPlan> {
   const filter = options.filter;
+  const includeArchived = options.archived === true;
   const allTrees = await getAllStackTrees(dir);
 
   const trees: StackTree[] = [];
   const filteredOut: string[] = [];
+  const archivedSkipped: string[] = [];
   for (const tree of allTrees) {
+    if (!includeArchived && tree.archived) {
+      archivedSkipped.push(tree.stackName);
+      continue;
+    }
     if (stackNameMatchesFilter(tree.stackName, filter)) {
       trees.push(tree);
     } else {
@@ -380,6 +388,7 @@ export async function computeSyncPlan(
     isNoOp,
     filter,
     filteredOut,
+    archivedSkipped,
   };
 }
 
@@ -649,6 +658,11 @@ export function renderSyncPlan(plan: SyncPlan): string {
     if (plan.filteredOut.length > 0) {
       lines.push(`  · skipped: ${plan.filteredOut.join(", ")}`);
     }
+    lines.push("");
+  }
+
+  if (plan.archivedSkipped.length > 0) {
+    lines.push(`Archived (skipped): ${plan.archivedSkipped.join(", ")}`);
     lines.push("");
   }
 

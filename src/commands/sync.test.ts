@@ -8,7 +8,12 @@ import {
   makeMockDir,
   makeTempDir,
 } from "../lib/testdata/helpers.ts";
-import { runGitCommand, setBaseBranch, setStackNode } from "../lib/stack.ts";
+import {
+  runGitCommand,
+  setBaseBranch,
+  setStackArchived,
+  setStackNode,
+} from "../lib/stack.ts";
 import { writeFixture } from "../lib/gh.ts";
 import {
   computeSyncPlan,
@@ -97,6 +102,41 @@ describe("computeSyncPlan", () => {
       "stack-b",
     ]);
     expect(plan.isNoOp).toBe(true);
+  });
+
+  test("skips archived stacks by default and reports them", async () => {
+    await using repo = await createTestRepo();
+    await using mock = await makeMockDir();
+    await writeRepoViewFixture(mock.path);
+    await addBranch(repo.dir, "a/1", "main");
+    await addBranch(repo.dir, "b/1", "main");
+    await setupStack(repo.dir, "stack-a", [["a/1", "main"]]);
+    await setupStack(repo.dir, "stack-b", [["b/1", "main"]]);
+    await setStackArchived(repo.dir, "stack-b", true);
+    await using _bare = await wireOrigin(repo.dir);
+
+    const plan = await computeSyncPlan(repo.dir);
+    expect(plan.stacks.map((s) => s.stackName)).toEqual(["stack-a"]);
+    expect(plan.archivedSkipped).toEqual(["stack-b"]);
+  });
+
+  test("includes archived stacks when archived option is set", async () => {
+    await using repo = await createTestRepo();
+    await using mock = await makeMockDir();
+    await writeRepoViewFixture(mock.path);
+    await addBranch(repo.dir, "a/1", "main");
+    await addBranch(repo.dir, "b/1", "main");
+    await setupStack(repo.dir, "stack-a", [["a/1", "main"]]);
+    await setupStack(repo.dir, "stack-b", [["b/1", "main"]]);
+    await setStackArchived(repo.dir, "stack-b", true);
+    await using _bare = await wireOrigin(repo.dir);
+
+    const plan = await computeSyncPlan(repo.dir, { archived: true });
+    expect(plan.stacks.map((s) => s.stackName).sort()).toEqual([
+      "stack-a",
+      "stack-b",
+    ]);
+    expect(plan.archivedSkipped).toEqual([]);
   });
 
   test("marks stacks behind their base as needing a push", async () => {
@@ -253,6 +293,7 @@ describe("computeSyncPlan", () => {
       baseBranches: ["main"],
       isNoOp: false,
       filteredOut: [],
+      archivedSkipped: [],
       stacks: [
         {
           stackName: "s",
@@ -380,6 +421,7 @@ describe("computeSyncPlan", () => {
         isNoOp: true,
         filter: "!di*",
         filteredOut: ["dingus"],
+        archivedSkipped: [],
       }),
     ).toContain("No stacks match --filter=!di*");
   });
@@ -392,6 +434,7 @@ describe("computeSyncPlan", () => {
         baseBranches: [],
         isNoOp: true,
         filteredOut: [],
+        archivedSkipped: [],
       }),
     ).toContain("All stacks are already synced");
   });
@@ -535,6 +578,7 @@ describe("executeSync", () => {
       ],
       isNoOp: false,
       filteredOut: [],
+      archivedSkipped: [],
     };
 
     const result = await executeSync(repo.dir, plan);
