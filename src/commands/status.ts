@@ -44,6 +44,7 @@ export interface StackStatus {
   stackName: string;
   baseBranch: string;
   mergeStrategy: string | undefined;
+  archived: boolean;
   branches: BranchStatus[];
   display: string;
 }
@@ -80,6 +81,7 @@ export async function queryPr(
 
 export interface StatusOptions {
   loadPrs?: boolean;
+  showArchived?: boolean;
 }
 
 /** Walk the tree DFS and compute depth + isLastChild for each node. */
@@ -450,6 +452,7 @@ async function buildStackStatus(
     stackName: tree.stackName,
     baseBranch: tree.baseBranch,
     mergeStrategy: tree.mergeStrategy,
+    archived: tree.archived,
     branches,
     display,
   };
@@ -496,8 +499,17 @@ export async function getAllStackStatuses(
     [...new Set(trees.map((tree) => tree.stackName))],
   );
 
+  const showArchived = opts.showArchived === true;
+  const displayStacks = showArchived
+    ? stacks
+    : stacks.filter((stack) => !stack.archived);
+
+  if (displayStacks.length === 0) {
+    return { stacks, display: "No stacks found." };
+  }
+
   const sections = new Map<string, StackStatus[]>();
-  for (const stack of stacks) {
+  for (const stack of displayStacks) {
     const group = sections.get(stack.baseBranch) ?? [];
     group.push(stack);
     sections.set(stack.baseBranch, group);

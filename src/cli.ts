@@ -276,6 +276,7 @@ const command = new Command()
   .option("--json", "Output as JSON")
   .option("--pr, -p", "Load PR data from GitHub")
   .option("--all, -a", "Show all stacks grouped by base branch")
+  .option("--archived", "Include archived stacks (hidden by default)")
   .option("--interactive, -i", "Launch the interactive TUI")
   .option(
     "--theme <theme:string>",
@@ -467,6 +468,7 @@ const command = new Command()
       if (statusAll) {
         return await getAllStackStatuses(dir, owner, repo, {
           loadPrs,
+          showArchived: options.archived === true,
         });
       }
       const stackName = await resolveStackName(dir, options.stackName);

@@ -12,6 +12,7 @@ import {
   runGitCommand,
   setBaseBranch,
   setMergeStrategy,
+  setStackArchived,
   setStackNode,
 } from "../lib/stack.ts";
 import { writeFixture } from "../lib/gh.ts";
@@ -515,5 +516,44 @@ describe("getAllStackStatuses", () => {
     expect(display).toMatch(/^◯\s+release\/1.0\s*$/m);
     expect(display).not.toContain("[release-stack]");
     expect(display).not.toContain("(no PR)");
+  });
+
+  test("includes archived stacks in stacks[] with the flag, hidden from display by default", async () => {
+    await using repo = await createTestRepo();
+    await using _mock = await makeMockDir();
+    await addBranch(repo.dir, "a/1", "main");
+    await addBranch(repo.dir, "b/1", "main");
+    await setBaseBranch(repo.dir, "stack-a", "main");
+    await setStackNode(repo.dir, "a/1", "stack-a", "main");
+    await setBaseBranch(repo.dir, "stack-b", "main");
+    await setStackNode(repo.dir, "b/1", "stack-b", "main");
+    await setStackArchived(repo.dir, "stack-b", true);
+
+    const status = await getAllStackStatuses(repo.dir);
+    // stacks[] always carries every stack with its archived flag.
+    const byName = new Map(status.stacks.map((s) => [s.stackName, s]));
+    expect(byName.get("stack-a")?.archived).toBe(false);
+    expect(byName.get("stack-b")?.archived).toBe(true);
+    // display hides the archived branch by default.
+    expect(status.display).toContain("a/1");
+    expect(status.display).not.toContain("b/1");
+  });
+
+  test("showArchived includes archived stacks in display", async () => {
+    await using repo = await createTestRepo();
+    await using _mock = await makeMockDir();
+    await addBranch(repo.dir, "a/1", "main");
+    await addBranch(repo.dir, "b/1", "main");
+    await setBaseBranch(repo.dir, "stack-a", "main");
+    await setStackNode(repo.dir, "a/1", "stack-a", "main");
+    await setBaseBranch(repo.dir, "stack-b", "main");
+    await setStackNode(repo.dir, "b/1", "stack-b", "main");
+    await setStackArchived(repo.dir, "stack-b", true);
+
+    const status = await getAllStackStatuses(repo.dir, undefined, undefined, {
+      showArchived: true,
+    });
+    expect(status.display).toContain("a/1");
+    expect(status.display).toContain("b/1");
   });
 });
