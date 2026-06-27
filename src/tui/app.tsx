@@ -25,7 +25,7 @@ import {
 } from "./state/navigation.ts";
 import { copyToClipboard } from "./lib/clipboard.ts";
 import { gh, listPrsForBranch } from "../lib/gh.ts";
-import { runGitCommand } from "../lib/stack.ts";
+import { runGitCommand, setStackArchived } from "../lib/stack.ts";
 import { HeaderBox } from "./components/header-box.tsx";
 import { StackMap } from "./components/stack-map.tsx";
 import { DetailPane } from "./components/detail-pane.tsx";
@@ -581,6 +581,39 @@ export function App(props: AppProps): React.ReactElement {
       const cell = state.grid.byBranch.get(state.cursor.branch);
       if (!cell) return;
       dispatch({ type: "LAND_START", stackName: cell.stackName });
+      return;
+    }
+    if (input === "A") {
+      if (!state.cursor) return;
+      const cell = state.grid.byBranch.get(state.cursor.branch);
+      if (!cell) {
+        dispatch({
+          type: "NOTICE_SHOW",
+          message: "Select a branch in a stack to archive",
+        });
+        return;
+      }
+      const stackName = cell.stackName;
+      const tree = state.allTrees.find((t: StackTree) =>
+        t.stackName === stackName
+      );
+      if (!tree) return;
+      const next = !tree.archived;
+      setStackArchived(props.dir, stackName, next)
+        .then(() => {
+          dispatch({ type: "STACK_ARCHIVED_SET", stackName, archived: next });
+          dispatch({
+            type: "NOTICE_SHOW",
+            message: `${next ? "Archived" : "Unarchived"} ${stackName}`,
+          });
+        })
+        .catch((err) => {
+          dispatch({ type: "ERROR_LOG", message: (err as Error).message });
+          dispatch({
+            type: "NOTICE_SHOW",
+            message: `Failed to archive ${stackName}`,
+          });
+        });
       return;
     }
     if (input === "b") {

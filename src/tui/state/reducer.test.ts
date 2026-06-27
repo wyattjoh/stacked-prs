@@ -315,4 +315,36 @@ describe("ARCHIVED_TOGGLE", () => {
     expect(back.showArchived).toBe(false);
     expect(back.trees.map((t) => t.stackName)).toEqual(["active"]);
   });
+
+  test("STACK_ARCHIVED_SET hides the stack when archived and show is off", () => {
+    const trees = [treeFixture("active", false), treeFixture("other", false)];
+    const loaded = reducer(makeState(), {
+      type: "LOCAL_LOADED",
+      trees,
+      syncByBranch: new Map(),
+      worktreeByBranch: new Map(),
+      grid: buildGrid(trees, new Map()),
+      colorByStack: new Map(),
+      currentBranch: null,
+      totalBranches: 2,
+    });
+    expect(loaded.trees.map((t) => t.stackName)).toEqual(["active", "other"]);
+
+    const archived = reducer(loaded, {
+      type: "STACK_ARCHIVED_SET",
+      stackName: "other",
+      archived: true,
+    });
+    // allTrees keeps both with the updated flag; visible drops the archived one.
+    expect(archived.allTrees.find((t) => t.stackName === "other")?.archived)
+      .toBe(true);
+    expect(archived.trees.map((t) => t.stackName)).toEqual(["active"]);
+
+    const restored = reducer(archived, {
+      type: "STACK_ARCHIVED_SET",
+      stackName: "other",
+      archived: false,
+    });
+    expect(restored.trees.map((t) => t.stackName)).toEqual(["active", "other"]);
+  });
 });

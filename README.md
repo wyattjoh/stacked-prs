@@ -320,8 +320,9 @@ Launches a terminal UI that shows every stack in the repo as a horizontal tree,
 with per-stack colors, PR state glyphs, sync-status connectors, and a live
 commit detail pane. `--interactive` / `-i` opens the current stack by default,
 except on the default branch where it starts on the all-stacks view; add `--all`
-to force that view explicitly. Mostly read-only: the only write operation is the
-`L` binding, which lands a stack whose root PR has been merged.
+to force that view explicitly. Mostly read-only: the two write operations are
+the `L` binding, which lands a stack whose root PR has been merged, and the `A`
+binding, which archives or unarchives the focused stack.
 
 Key bindings:
 
@@ -331,6 +332,9 @@ Key bindings:
 - `g` / `G`: first / last branch in the current stack
 - `pgup` / `pgdn`: previous / next stack
 - `r`: refresh all
+- `a`: toggle whether archived stacks are shown
+- `A`: archive / unarchive the focused stack (applies immediately, with a status
+  notice; if archived stacks are hidden, the stack drops out of view)
 - `p`: open focused PR in browser
 - `b`: copy branch name to clipboard
 - `L`: land the focused stack (root merged, or every branch merged). Opens a

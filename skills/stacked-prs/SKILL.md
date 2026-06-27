@@ -534,7 +534,9 @@ detail pane for the focused branch.
 Key bindings: `?` shows the full list. Press `L` on a branch whose stack is
 eligible to land (root PR merged, or every PR merged) to open the land modal,
 which plans and executes the full cleanup automatically without requiring
-Claude.
+Claude. Press `a` to toggle whether archived stacks are shown, and `A` to
+archive or unarchive the focused stack (applied immediately, with a status
+notice). The TUI's two write operations are `L` (land) and `A` (archive).
 
 ### `land`
 

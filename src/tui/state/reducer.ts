@@ -10,6 +10,41 @@ function visibleTrees(
   return showArchived ? trees : trees.filter((tree) => !tree.archived);
 }
 
+/**
+ * Recompute the visible tree subset, grid, active tab, and cursor after the set
+ * of trees or the show-archived flag changes. Drops the active tab back to
+ * "all" when its stack is no longer visible, and snaps the cursor to the first
+ * visible cell when its branch dropped out of view.
+ */
+function applyVisibility(
+  state: State,
+  allTrees: StackTree[],
+  showArchived: boolean,
+): State {
+  const visible = visibleTrees(allTrees, showArchived);
+  const grid = buildGrid(visible, state.syncByBranch);
+  const prevTab = state.activeTab;
+  const activeTab: TabId = prevTab !== "all" &&
+      !visible.some((tree) => tree.stackName === prevTab.stack)
+    ? "all"
+    : prevTab;
+  const cursorCell = state.cursor
+    ? grid.byBranch.get(state.cursor.branch)
+    : undefined;
+  const cursor = cursorCell
+    ? state.cursor
+    : (grid.cells[0] ? { branch: grid.cells[0].branch } : null);
+  return {
+    ...state,
+    allTrees,
+    showArchived,
+    trees: visible,
+    grid,
+    activeTab,
+    cursor,
+  };
+}
+
 export function initialState(
   activeTab: TabId = "all",
   showArchived = false,
@@ -186,29 +221,15 @@ export function reducer(state: State, action: Action): State {
       return { ...state, viewport: action.viewport };
     case "HELP_TOGGLE":
       return { ...state, showHelp: !state.showHelp };
-    case "ARCHIVED_TOGGLE": {
-      const showArchived = !state.showArchived;
-      const visible = visibleTrees(state.allTrees, showArchived);
-      const grid = buildGrid(visible, state.syncByBranch);
-      const prevTab = state.activeTab;
-      const activeTab: TabId = prevTab !== "all" &&
-          !visible.some((tree) => tree.stackName === prevTab.stack)
-        ? "all"
-        : prevTab;
-      const cursorCell = state.cursor
-        ? grid.byBranch.get(state.cursor.branch)
-        : undefined;
-      const cursor = cursorCell
-        ? state.cursor
-        : (grid.cells[0] ? { branch: grid.cells[0].branch } : null);
-      return {
-        ...state,
-        showArchived,
-        trees: visible,
-        grid,
-        activeTab,
-        cursor,
-      };
+    case "ARCHIVED_TOGGLE":
+      return applyVisibility(state, state.allTrees, !state.showArchived);
+    case "STACK_ARCHIVED_SET": {
+      const allTrees = state.allTrees.map((tree) =>
+        tree.stackName === action.stackName
+          ? { ...tree, archived: action.archived }
+          : tree
+      );
+      return applyVisibility(state, allTrees, state.showArchived);
     }
     case "TERMINAL_SIZE":
       return { ...state, terminalTooNarrow: action.tooNarrow };

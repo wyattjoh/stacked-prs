@@ -232,9 +232,9 @@ branch rebase, and cleared on successful completion. If it exists,
 
 The TUI is an Ink + React app launched by `cli.ts status --interactive`. It
 reads the same data sources as non-interactive `status` (`getAllStackTrees`,
-`git merge-base`, `gh pr list`), and owns one write path: the `L` key (land).
-The code is split along a strict purity boundary so most of it is testable
-without Ink:
+`git merge-base`, `gh pr list`), and owns two write paths: the `L` key (land)
+and the `A` key (archive/unarchive the focused stack). The code is split along a
+strict purity boundary so most of it is testable without Ink:
 
 - Pure (`lib/layout.ts`, `lib/scroll.ts`, `state/reducer.ts`,
   `state/navigation.ts`) — unit tested with synthetic inputs, no Ink, no git.
@@ -297,6 +297,8 @@ Keyboard navigation:
 - `p`: open focused PR in browser.
 - `b`: copy branch name to clipboard.
 - `L`: land stack; `r`: refresh all.
+- `a`: toggle archived-stack visibility; `A`: archive/unarchive the focused
+  stack (immediate, dispatches `STACK_ARCHIVED_SET` after the config write).
 - In the land modal: `↑`/`↓` (or `k`/`j`) scroll content; `y`/`n`
   confirm/cancel.
 
@@ -304,13 +306,18 @@ The status bar at the bottom is built dynamically from `STATUS_BAR_ITEMS` in
 `help-overlay.tsx`: `buildStatusBar(termSize.cols)` greedily includes shortcuts
 until the next one would overflow the terminal width.
 
-The TUI now owns one write operation: the `L` key lands a stack whose root PR
-has been merged (or every PR in the stack is merged). The logic lives in
+The TUI owns two write operations. The `L` key lands a stack whose root PR has
+been merged (or every PR in the stack is merged). The logic lives in
 `src/commands/land.ts` (pure `planLand` plus impure `executeLand` with a
 snapshot-based rollback path); the TUI is a launcher that shows a plan modal,
 streams progress events, and displays a rollback report on failure. Confirmation
 gates move into the Ink modal (`[y]`/`[n]`) for this path; the `SKILL.md` `land`
-runbook remains the Claude-orchestrated alternative.
+runbook remains the Claude-orchestrated alternative. The `A` key archives or
+unarchives the focused stack: `app.tsx` calls `setStackArchived(dir, ...)`
+directly and, on success, dispatches `STACK_ARCHIVED_SET` (which updates
+`allTrees` and recomputes the visible subset / grid / cursor via the reducer's
+`applyVisibility` helper) plus a status notice. It is unconfirmed, matching the
+non-gated `archive` CLI command, because it is a single reversible config write.
 
 ### Testing
 

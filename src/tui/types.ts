@@ -152,6 +152,7 @@ export type Action =
   | { type: "SCROLL"; viewport: Viewport }
   | { type: "HELP_TOGGLE" }
   | { type: "ARCHIVED_TOGGLE" }
+  | { type: "STACK_ARCHIVED_SET"; stackName: string; archived: boolean }
   | { type: "TERMINAL_SIZE"; tooNarrow: boolean }
   | { type: "FOCUS_SET"; section: FocusedSection }
   | { type: "DETAIL_SCROLL"; viewport: Viewport }
