@@ -608,8 +608,8 @@ full git-config schema.
 
 Mark a stack as archived (or clear the flag with `--unarchive`). An archived
 stack keeps all of its config but is hidden by default from `status`, the TUI,
-and is skipped by `sync`. **No confirmation needed** (single config
-write, no git/gh mutation).
+and is skipped by `sync`. **No confirmation needed** (single config write, no
+git/gh mutation).
 
 **Flags:** `[<stack>]` (defaults to the current branch's stack), `--unarchive`,
 `--json`
