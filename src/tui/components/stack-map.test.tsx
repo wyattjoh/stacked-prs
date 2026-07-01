@@ -13,6 +13,7 @@ function makeTree(name: string, root: string): StackTree {
     stackName: name,
     baseBranch: "main",
     mergeStrategy: "merge",
+    archived: false,
     roots: [{ branch: root, stackName: name, parent: "main", children: [] }],
   };
 }

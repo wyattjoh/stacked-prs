@@ -24,6 +24,7 @@ function tree(
     stackName,
     baseBranch: "main",
     mergeStrategy: "merge",
+    archived: false,
     roots: [build(rootBranch, "main")],
   };
 }
@@ -196,6 +197,7 @@ describe("buildGrid with merged nodes", () => {
       stackName: "my-stack",
       baseBranch: "main",
       mergeStrategy: undefined,
+      archived: false,
       roots: [mergedNode, liveNode],
     };
 

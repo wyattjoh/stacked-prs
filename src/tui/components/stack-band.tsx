@@ -11,6 +11,7 @@ export interface TrunkSegment {
 export interface StackBandProps {
   stackName: string;
   mergeStrategy: string | undefined;
+  archived?: boolean;
   color: string;
   cells: GridCell[];
   focusedBranch: string | null;
@@ -161,9 +162,10 @@ function renderCell(
 }
 
 export function StackBand(props: StackBandProps): React.ReactElement {
-  const header = props.mergeStrategy
+  const baseHeader = props.mergeStrategy
     ? `Stack: ${props.stackName} (${props.mergeStrategy})`
     : `Stack: ${props.stackName}`;
+  const header = props.archived ? `${baseHeader} (archived)` : baseHeader;
 
   const sorted = [...props.cells].sort((a, b) => a.row - b.row);
   const mergedCells = sorted.filter((c) => c.merged);
@@ -175,7 +177,9 @@ export function StackBand(props: StackBandProps): React.ReactElement {
       <Box flexDirection="column" flexShrink={0}>
         <Box flexDirection="row" flexShrink={0}>
           <TrunkSegments segs={props.headerPrefix} />
-          <Text color={props.color} bold>{header}</Text>
+          <Text color={props.color} bold dimColor={props.archived}>
+            {header}
+          </Text>
         </Box>
         {sorted.map((cell, i) =>
           renderCell(
@@ -195,7 +199,7 @@ export function StackBand(props: StackBandProps): React.ReactElement {
       {/* Stack header row */}
       <Box flexDirection="row" flexShrink={0}>
         <TrunkSegments segs={props.headerPrefix} />
-        <Text color={props.color} bold>{header}</Text>
+        <Text color={props.color} bold dimColor={props.archived}>{header}</Text>
       </Box>
 
       {/* Gap row after header */}

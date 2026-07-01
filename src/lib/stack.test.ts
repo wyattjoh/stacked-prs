@@ -5,6 +5,7 @@ import {
   addLandedBranch,
   addLandedParent,
   addLandedPr,
+  clearStackConfig,
   effectiveParent,
   findNode,
   getAllNodes,
@@ -17,6 +18,7 @@ import {
   getLiveSubtreeRoots,
   getMergeStrategy,
   getPathTo,
+  getStackArchived,
   getStackTree,
   getSubtree,
   listAllStacks,
@@ -25,6 +27,7 @@ import {
   runGitCommand,
   setBaseBranch,
   setMergeStrategy,
+  setStackArchived,
   setStackBranch,
   setStackNode,
   validateStackTree,
@@ -396,6 +399,7 @@ describe("tree traversal utilities", () => {
     stackName: "auth-stack",
     baseBranch: "main",
     mergeStrategy: undefined,
+    archived: false,
     roots: [auth],
   };
 
@@ -493,6 +497,7 @@ describe("renderTree", () => {
     stackName: "auth-stack",
     baseBranch: "main",
     mergeStrategy: undefined,
+    archived: false,
     roots: [auth],
   };
 
@@ -574,6 +579,7 @@ describe("renderTree", () => {
       stackName: "s",
       baseBranch: "main",
       mergeStrategy: undefined,
+      archived: false,
       roots: [step1],
     };
     const output = renderTree(linearTree, {});
@@ -1043,6 +1049,7 @@ describe("effectiveParent", () => {
       stackName: "s",
       baseBranch,
       mergeStrategy: undefined,
+      archived: false,
       roots,
     };
   }
@@ -1155,6 +1162,7 @@ describe("getLiveSubtreeRoots", () => {
       stackName: "s",
       baseBranch,
       mergeStrategy: undefined,
+      archived: false,
       roots,
     };
   }
@@ -1257,5 +1265,41 @@ describe("getLiveSubtreeRoots", () => {
     };
     const tree = makeTree("main", [root]);
     expect(getLiveSubtreeRoots(tree)).toEqual([]);
+  });
+});
+
+describe("archived flag", () => {
+  test("defaults to false when unset", async () => {
+    await using repo = await createTestRepo();
+    expect(await getStackArchived(repo.dir, "s")).toBe(false);
+  });
+
+  test("set true then read true, unset returns false", async () => {
+    await using repo = await createTestRepo();
+    await setStackArchived(repo.dir, "s", true);
+    expect(await getStackArchived(repo.dir, "s")).toBe(true);
+    await setStackArchived(repo.dir, "s", false);
+    expect(await getStackArchived(repo.dir, "s")).toBe(false);
+  });
+
+  test("getStackTree populates archived", async () => {
+    await using repo = await createTestRepo();
+    await addBranch(repo.dir, "feat/a", "main");
+    await setBaseBranch(repo.dir, "s", "main");
+    await setStackNode(repo.dir, "feat/a", "s", "main");
+
+    let tree = await getStackTree(repo.dir, "s");
+    expect(tree.archived).toBe(false);
+
+    await setStackArchived(repo.dir, "s", true);
+    tree = await getStackTree(repo.dir, "s");
+    expect(tree.archived).toBe(true);
+  });
+
+  test("clearStackConfig removes the archived key", async () => {
+    await using repo = await createTestRepo();
+    await setStackArchived(repo.dir, "s", true);
+    await clearStackConfig(repo.dir, "s");
+    expect(await getStackArchived(repo.dir, "s")).toBe(false);
   });
 });

@@ -235,6 +235,7 @@ export function StackMap(props: StackMapProps): React.ReactElement {
               <StackBand
                 stackName={tree.stackName}
                 mergeStrategy={tree.mergeStrategy}
+                archived={tree.archived}
                 color={colors[S]}
                 cells={cells}
                 focusedBranch={cursor?.branch ?? null}

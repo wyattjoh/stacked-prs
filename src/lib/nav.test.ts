@@ -51,6 +51,7 @@ function makeTree(
     stackName,
     baseBranch: roots[0]?.parent ?? "main",
     mergeStrategy: undefined,
+    archived: false,
     roots,
   };
 }
@@ -209,6 +210,7 @@ describe("generateNavMarkdown", () => {
       stackName: "my-stack",
       baseBranch: "main",
       mergeStrategy: undefined,
+      archived: false,
       roots: [nodeA, nodeB],
     };
 

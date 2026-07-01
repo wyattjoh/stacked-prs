@@ -18,6 +18,8 @@ export const STATUS_BAR_ITEMS: readonly string[] = [
   "[tab]",
   "[←↑↓→]",
   "[L]",
+  "[a]",
+  "[A]",
   "[p]",
   "[b]",
   "[r]",
@@ -64,6 +66,8 @@ export const KEY_BINDINGS_BY_SECTION: readonly KeyBindingSection[] = [
     title: "Actions",
     bindings: [
       { keys: "L", action: "land stack (merged root or all merged)" },
+      { keys: "a", action: "toggle archived stacks visibility" },
+      { keys: "A", action: "archive / unarchive the focused stack" },
       { keys: "p", action: "open focused PR in browser" },
       { keys: "b", action: "copy branch name to clipboard" },
       { keys: "r", action: "refresh all" },

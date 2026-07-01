@@ -27,6 +27,7 @@ function linearTree(name: string, branches: string[]): StackTree {
     stackName: name,
     baseBranch: "main",
     mergeStrategy: "merge",
+    archived: false,
     roots: chainChildren(0),
   };
 }

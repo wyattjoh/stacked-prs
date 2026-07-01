@@ -182,8 +182,9 @@ the specified new parent.
 
 ### `/stacked-prs sync`
 
-Bring **every stack** in the repo back in line with origin. Mirrors `gt sync`.
-In one pass `sync`:
+Bring **every non-archived stack** in the repo back in line with origin. Mirrors
+`gt sync`. Archived stacks are skipped (pass `--archived` to include them). In
+one pass `sync`:
 
 1. Fetches every base branch (for example, `main`).
 2. Fast-forwards each local base branch when safe, warning and skipping any that
@@ -197,6 +198,7 @@ In one pass `sync`:
 /stacked-prs sync --dry-run       # preview plan across all stacks
 /stacked-prs sync                 # prompts [y/N] before executing
 /stacked-prs sync --force         # execute without prompting
+/stacked-prs sync --archived      # also sync archived stacks
 /stacked-prs sync --json          # structured output
 ```
 
@@ -287,6 +289,26 @@ Pass `--all` / `-a` to render every configured stack grouped by base branch:
 ◯        feature/payments  behind-parent
 ```
 
+Archived stacks (see [`/stacked-prs archive`](#stacked-prs-archive)) are hidden
+from the all-stacks view by default. Pass `--archived` to include them; `--json`
+always lists every stack with an `archived` flag.
+
+### `/stacked-prs archive`
+
+Mark a stack as archived when you are done with it but want to keep its
+metadata:
+
+```
+stacked-prs archive                 # archive the current branch's stack
+stacked-prs archive my-stack        # archive a named stack
+stacked-prs archive --unarchive     # restore the current branch's stack
+```
+
+An archived stack keeps all of its configuration but is hidden by default from
+`status` and the interactive TUI, and is skipped by `sync`. Reveal archived
+stacks on demand with `status --archived`, `sync --archived`, or the `a` key in
+the TUI.
+
 ### Interactive view
 
 ```
@@ -298,8 +320,9 @@ Launches a terminal UI that shows every stack in the repo as a horizontal tree,
 with per-stack colors, PR state glyphs, sync-status connectors, and a live
 commit detail pane. `--interactive` / `-i` opens the current stack by default,
 except on the default branch where it starts on the all-stacks view; add `--all`
-to force that view explicitly. Mostly read-only: the only write operation is the
-`L` binding, which lands a stack whose root PR has been merged.
+to force that view explicitly. Mostly read-only: the two write operations are
+the `L` binding, which lands a stack whose root PR has been merged, and the `A`
+binding, which archives or unarchives the focused stack.
 
 Key bindings:
 
@@ -309,6 +332,9 @@ Key bindings:
 - `g` / `G`: first / last branch in the current stack
 - `pgup` / `pgdn`: previous / next stack
 - `r`: refresh all
+- `a`: toggle whether archived stacks are shown
+- `A`: archive / unarchive the focused stack (applies immediately, with a status
+  notice; if archived stacks are hidden, the stack drops out of view)
 - `p`: open focused PR in browser
 - `b`: copy branch name to clipboard
 - `L`: land the focused stack (root merged, or every branch merged). Opens a
