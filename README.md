@@ -32,7 +32,11 @@ stacked-prs status --interactive
 Install the Deno-based CLI from JSR:
 
 ```
-deno install --global --allow-run=git,gh,pbcopy,xclip,wl-copy --allow-env --allow-read -n stacked-prs jsr:@wyattjoh/stacked-prs
+# macOS
+deno install --global --allow-run=git,gh,pbcopy,open --allow-env --allow-read --allow-net -n stacked-prs jsr:@wyattjoh/stacked-prs
+
+# Linux
+deno install --global --allow-run=git,gh,xclip,wl-copy,xdg-open --allow-env --allow-read --allow-net -n stacked-prs jsr:@wyattjoh/stacked-prs
 ```
 
 This installs the same command name:
@@ -125,7 +129,7 @@ All write operations require explicit confirmation:
 | `git push`, `git rebase`        | `git status`, `git log`, `git fetch`       |
 | `git branch -d`                 | `gh pr list`, `gh pr view`, `gh repo view` |
 | `gh pr create`, `gh pr edit`    | `cli.ts status`, `cli.ts verify-refs`      |
-| `gh pr comment`, `gh api PATCH` | `cli.ts nav --dry-run`                     |
+| `gh pr comment`, `gh api PATCH` | `cli.ts nav --dry-run`, `cli.ts serve`     |
 
 ## Commands
 
@@ -296,8 +300,7 @@ always lists every stack with an `archived` flag.
 
 ### `/stacked-prs checkout`
 
-Open a status-style branch picker and check out the selected stack or base
-branch:
+Open a status-style branch picker and check out the selected stack branch:
 
 ```
 stacked-prs checkout
@@ -356,14 +359,89 @@ stacked-prs archive --unarchive     # restore the current branch's stack
 ```
 
 An archived stack keeps all of its configuration but is hidden by default from
-`status` and the interactive TUI, and is skipped by `sync`. Reveal archived
-stacks on demand with `status --archived`, `sync --archived`, or the `a` key in
-the TUI.
+`status`, the interactive TUI, and `serve`, and is skipped by `sync`. Reveal
+archived stacks on demand with `status --archived`, `sync --archived`, the `a`
+key in the TUI, or the **Show archived** switch in the browser view. Explicit
+single-stack commands still work on archived stacks.
+
+### Browser view
+
+```
+stacked-prs serve [folders...]
+```
+
+Starts a local web server and opens your browser for the repositories you pass
+as folder arguments. If no folders are provided, `serve` uses the current
+working directory as the only repository. Repository folders can be nested
+paths. The page opens on a stack switcher: pick **All stacks** for an overview
+where each repository is rooted at its base branch and every stack descends off
+a shared trunk, or pick a single stack to see each repository's branches drawn
+as a vertical lane. Every branch row shows its sync status, a PR badge that
+links to the pull request when available, and a marker for the currently
+checked-out branch. Each stack's branch rows are tinted in that stack's color
+(alternating subtly row to row) so you can tell at a glance where one stack's
+branches end and the next begins; the checked-out row gets a stronger tint.
+Hovering a branch row brightens it and highlights its graph dot, making it easy
+to see which node lines up with the row. Requested repositories with no
+stacked-prs metadata are omitted from the browser view. Next to each stack's
+name (and in the single-stack view, on each repository header) a muted label
+shows how long ago the most recent commit on that stack was made, for example
+`2 days ago`.
+
+Stacks are grouped by name across repositories, so a stack that exists in more
+than one repository appears once in the switcher and renders every contributing
+repository together. Stacks are ordered with the most recently committed stack
+first, in both the overview and the switcher dropdown (each switcher entry also
+shows that relative commit time).
+
+When you serve more than one repository, an **All repositories** dropdown
+appears at the left of the header. It lists every served repository with a
+checkbox (plus a master "All repositories" toggle); unchecking a repository
+removes it from the view, narrowing the stacks shown to those that live in the
+repositories you keep selected. Deselecting every repository shows a prompt to
+pick one.
+
+Your selections (the active stack and the repository filter) are remembered per
+browser tab for the life of that tab, so reloading restores the view. They are
+not stored in the URL: separate `serve` windows keep independent selections, and
+closing the tab clears them.
+
+Archived stacks are hidden by default. When any archived stack exists, a **Show
+archived** switch appears in the header to reveal them (dimmed, with an
+`(archived)` badge); the choice is remembered across reloads.
+
+`serve` is read-only. It loads stack metadata from each provided repo folder and
+uses GitHub PR metadata when the repository's `origin` remote is on GitHub and
+`gh` can read PRs. While loading, the page shows a per-repository progress
+screen (each repository moves `queued -> loading -> done`, or `error` with a
+reason) before swapping to the stack view once every repository settles.
+Repositories are loaded a few at a time (a concurrency cap) so large repo sets
+do not fire dozens of GitHub calls at once.
+
+The view updates live by default. `serve` watches each repository's `.git` for
+local changes (commits, branches, rebases, stack-metadata edits) and polls
+GitHub for PR changes, then re-renders just the repository that changed and
+shows a brief toast, so you do not need to reload the page. Pass `--no-watch` to
+turn this off, or `--poll-interval <seconds>` to change how often PRs are polled
+(default 60, `0` disables PR polling while keeping the file watch). Pass
+`--debug` to print why each live repository refresh ran, including the relevant
+Git file category (`refs`, `config`, `HEAD`, `ORIG_HEAD`, or `packed-refs`) or
+the PR poll interval.
+
+```
+stacked-prs serve
+stacked-prs serve ../repo-a nested/path/repo-b
+stacked-prs serve --port 8787
+stacked-prs serve --host 0.0.0.0 --no-open
+stacked-prs serve --no-watch
+stacked-prs serve --poll-interval 30
+stacked-prs serve --debug
+```
 
 ### Interactive view
 
 ```
-deno run --allow-run=git,gh,pbcopy,wl-copy,clip.exe --allow-env --allow-read \
+deno run --allow-run=git,gh,pbcopy,open --allow-env --allow-read --allow-net \
   src/cli.ts status --interactive
 ```
 
@@ -466,23 +544,24 @@ metadata mutations. You generally do not need to run them directly, but they can
 be useful for debugging. All commands go through a single entry point:
 
 ```bash
-deno run --allow-run=git,gh --allow-env --allow-read \
+deno run --allow-run=git,gh,open --allow-env --allow-read --allow-net \
   src/cli.ts <subcommand> [flags]
 ```
 
-| Subcommand                                       | Purpose                                                                |
-| ------------------------------------------------ | ---------------------------------------------------------------------- |
-| `cli.ts status [--json] [--all] [--description]` | Ladder output (or JSON) with PR info, sync status, and descriptions    |
-| `cli.ts checkout [--all] [--description]`        | Interactive status-style branch picker that runs `git checkout`        |
-| `cli.ts create <branch> [--create-worktree]`     | Create a child branch; auto-inits stack when on default branch         |
-| `cli.ts restack [--json]`                        | Segment-based tree rebase; handles conflicts across segments           |
-| `cli.ts nav [--dry-run]`                         | Builds and executes navigation comment plans                           |
-| `cli.ts verify-refs`                             | Checks branch ancestry after rebase, outputs repair commands           |
-| `cli.ts import-discover`                         | Discovers branch trees between a branch and main                       |
-| `cli.ts submit [--dry-run] [--force]`            | Plan (with `--dry-run`) or run submit: push + PR create/edit + nav     |
-| `cli.ts sync [--dry-run] [--force]`              | Fetch + ff bases + prune merged PRs + restack + push across all stacks |
-| `cli.ts pr [--branch=<name>] [--print]`          | Open the branch's PR in the browser via `gh pr view --web`             |
-| `cli.ts land [--dry-run] [--json] [--resume]`    | Land a merged PR; plan only with `--dry-run`, resume after conflicts   |
+| Subcommand                                                          | Purpose                                                                |
+| ------------------------------------------------------------------- | ---------------------------------------------------------------------- |
+| `cli.ts status [--json] [--all] [--description]`                    | Ladder output (or JSON) with PR info, sync status, and descriptions    |
+| `cli.ts checkout [--all] [--description]`                           | Interactive status-style branch picker that runs `git checkout`        |
+| `cli.ts serve [folders...] [--port] [--host] [--no-open] [--debug]` | Local browser view for visualizing provided repository folders         |
+| `cli.ts create <branch> [--create-worktree]`                        | Create a child branch; auto-inits stack when on default branch         |
+| `cli.ts restack [--json]`                                           | Segment-based tree rebase; handles conflicts across segments           |
+| `cli.ts nav [--dry-run]`                                            | Builds and executes navigation comment plans                           |
+| `cli.ts verify-refs`                                                | Checks branch ancestry after rebase, outputs repair commands           |
+| `cli.ts import-discover`                                            | Discovers branch trees between a branch and main                       |
+| `cli.ts submit [--dry-run] [--force]`                               | Plan (with `--dry-run`) or run submit: push + PR create/edit + nav     |
+| `cli.ts sync [--dry-run] [--force]`                                 | Fetch + ff bases + prune merged PRs + restack + push across all stacks |
+| `cli.ts pr [--branch=<name>] [--print]`                             | Open the branch's PR in the browser via `gh pr view --web`             |
+| `cli.ts land [--dry-run] [--json] [--resume]`                       | Land a merged PR; plan only with `--dry-run`, resume after conflicts   |
 
 `--stack-name` auto-detects from the current branch's git config when omitted.
 `--owner` and `--repo` auto-detect from `gh repo view` when omitted.

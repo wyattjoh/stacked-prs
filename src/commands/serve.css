@@ -1,0 +1,221 @@
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: #010409;
+  color: #e6edf3;
+  font-family:
+    "Space Grotesk", ui-sans-serif, system-ui, -apple-system,
+    BlinkMacSystemFont, "Segoe UI", sans-serif;
+  min-height: 100vh;
+}
+
+button {
+  font-family: inherit;
+}
+
+a {
+  color: inherit;
+}
+
+/* The page is the darker outer surface; the header sits directly on it. */
+.page {
+  width: 100%;
+  min-height: 100vh;
+  background: #010409;
+  padding: 0;
+}
+
+.app-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  position: relative;
+  padding: 18px 32px;
+  border-bottom: 1px solid #21262d;
+}
+
+/* The main content floats in a lighter card so it reads against the page. */
+.app-content {
+  max-width: 1080px;
+  margin: 24px auto 48px;
+  padding: 22px 26px 28px;
+  background: #0d1117;
+  border: 1px solid #21262d;
+  border-radius: 12px;
+}
+
+/* Branch rows carry their per-stack tint (and a brighter hover variant) as the
+   `--row-tint` / `--row-tint-hover` CSS variables set inline by serve.client.js,
+   so the tint lives only in the stylesheet and brightens on hover. */
+.branch-row {
+  background: var(--row-tint);
+  transition: background-color 0.12s ease;
+}
+
+.branch-row:hover {
+  background: var(--row-tint-hover);
+}
+
+.name-action-group {
+  display: none;
+  align-items: center;
+  gap: 5px;
+  flex: none;
+}
+
+.branch-name-action-group {
+  margin-left: 6px;
+}
+
+.name-action-button {
+  width: 22px;
+  height: 22px;
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 1px solid rgba(48, 54, 61, 0.8);
+  border-radius: 5px;
+  background: rgba(22, 27, 34, 0.72);
+  color: #8b949e;
+  cursor: pointer;
+  transform: translateY(1px);
+  transition:
+    color 0.12s ease,
+    border-color 0.12s ease,
+    background-color 0.12s ease;
+}
+
+.name-action-button:hover {
+  background: rgba(33, 38, 45, 0.95);
+  border-color: #444c56;
+  color: #c9d1d9;
+}
+
+.branch-row:hover .name-action-group,
+.stack-header-row:hover .name-action-group {
+  display: inline-flex;
+}
+
+.name-action-button:focus-visible {
+  outline: 2px solid rgba(83, 155, 245, 0.7);
+  outline-offset: 2px;
+}
+
+/* Branch node dot: centered via transform here so the hover rule can override
+   it. On row hover the dot grows and gains a ring in the stack color
+   (`--node-ring`, inherited from the row) so it is easy to see which dot the
+   hovered row lines up with. */
+.branch-node {
+  transform: translate(-50%, -50%);
+  transition: box-shadow 0.12s ease, transform 0.12s ease;
+}
+
+.branch-node--current {
+  box-shadow: 0 0 0 3px var(--node-ring);
+}
+
+.branch-row:hover .branch-node {
+  box-shadow: 0 0 0 4px var(--node-ring);
+  transform: translate(-50%, -50%) scale(1.25);
+}
+
+.dc-switcher {
+  transition: background-color 0.12s ease, border-color 0.12s ease;
+}
+
+.dc-switcher:hover {
+  background: #1c2330;
+  border-color: #444c56;
+}
+
+.dc-menu-item:hover {
+  background: #21262d;
+}
+
+.dc-pr {
+  transition: filter 0.12s ease;
+}
+
+.dc-pr:hover {
+  filter: brightness(1.18);
+}
+
+/* Loading screen: per-repository progress rows shown until every repo settles. */
+.repo-load-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid #21262d;
+  background: #0d1117;
+  font:
+    500 13px/1.4 "JetBrains Mono",
+    ui-monospace,
+    SFMono-Regular,
+    Menlo,
+    monospace;
+  color: #c9d1d9;
+}
+
+.repo-load-spinner {
+  width: 12px;
+  height: 12px;
+  flex: none;
+  border-radius: 50%;
+  border: 2px solid #30363d;
+  border-top-color: #539bf5;
+  animation: spp-spin 0.7s linear infinite;
+}
+
+@keyframes spp-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.toast-host {
+  position: fixed;
+  right: 18px;
+  bottom: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  z-index: 9999;
+  pointer-events: none;
+}
+
+.toast {
+  background: #161b22;
+  border: 1px solid #30363d;
+  border-left: 3px solid #539bf5;
+  color: #e6edf3;
+  font:
+    500 12px/1.4 "JetBrains Mono",
+    ui-monospace,
+    SFMono-Regular,
+    Menlo,
+    monospace;
+  padding: 10px 14px;
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+  opacity: 0;
+  transform: translateY(8px);
+  transition: opacity 0.2s ease, transform 0.2s ease;
+}
+
+.toast--show {
+  opacity: 1;
+  transform: translateY(0);
+}

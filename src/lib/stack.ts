@@ -47,6 +47,34 @@ export async function runGitCommand(
   };
 }
 
+/**
+ * Return the most recent committer date (ISO 8601, UTC `Z`) across the given
+ * branch names, or null when the list is empty or no ref resolves. Branches
+ * without a live ref (e.g. deleted landed branches) are skipped. Uses one
+ * `git for-each-ref` subprocess regardless of branch count.
+ */
+export async function getLatestCommitDate(
+  dir: string,
+  branches: string[],
+): Promise<string | null> {
+  if (branches.length === 0) return null;
+  const refs = branches.map((b) => `refs/heads/${b}`);
+  const { code, stdout } = await runGitCommand(
+    dir,
+    "for-each-ref",
+    "--format=%(committerdate:unix)",
+    ...refs,
+  );
+  if (code !== 0 || !stdout) return null;
+  let max = 0;
+  for (const line of stdout.split("\n")) {
+    const n = Number.parseInt(line.trim(), 10);
+    if (Number.isFinite(n) && n > max) max = n;
+  }
+  if (max === 0) return null;
+  return new Date(max * 1000).toISOString().replace(/\.\d{3}Z$/, "Z");
+}
+
 /** Run `git config` with given args, return trimmed stdout or undefined on failure. */
 export async function gitConfig(
   dir: string,

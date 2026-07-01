@@ -34,12 +34,16 @@ src/
 │   ├── submit-plan.ts          # Computes the full submit plan (consumed by submit.ts)
 │   ├── colors.ts               # Per-stack color assignment (shared by TUI and clean output)
 │   ├── ansi.ts                 # ANSI escape code helpers
+│   ├── graph.ts                # layoutLanes: shared fork/lane placement (CLI status ladder + serve graph)
 │   ├── markdown.ts             # Markdown subset parser + ANSI/Ink-span renderers
 │   └── testdata/helpers.ts     # Test utilities (createTestRepo, addBranch, commitFile)
 ├── commands/                   # One file per `cli.ts <name>` subcommand
 │   ├── clean.ts                # Stale config detection and removal
 │   ├── create.ts               # Branch creation: child / auto-init / auto-init + worktree
 │   ├── status.ts               # Stack state + PR info
+│   ├── serve.ts                # Hono server for explicit multi-repo stack visualization
+│   ├── serve.css               # serve UI styles; read at runtime by serve.ts
+│   ├── serve.client.js         # serve UI browser client; read at runtime by serve.ts
 │   ├── restack.ts              # Per-branch topological rebase
 │   ├── nav.ts                  # PR navigation comment management
 │   ├── verify-refs.ts          # Post-rebase branch ancestry verification
@@ -90,7 +94,8 @@ deno test --allow-env --allow-read src/tui/components/stack-band.test.tsx
 deno task check
 
 # Invoke a CLI subcommand directly
-deno run --allow-run=git,gh --allow-env --allow-read src/cli.ts status --json
+deno run --allow-run=git,gh,open --allow-env --allow-read --allow-net \
+  src/cli.ts status --json
 
 # Launch the interactive TUI from this repo
 deno task tui
@@ -109,10 +114,10 @@ deno publish --dry-run --allow-dirty
 ```
 
 Subcommands: `status` (add `--interactive`/`-i` to launch the TUI), `checkout`,
-`create`, `restack`, `nav`, `verify-refs`, `import-discover`, `init`, `import`,
-`insert`, `fold`, `move`, `split`, `submit`, `sync`, `pr`, `land`, `clean`,
-`archive`. `lib/config.ts` and `lib/submit-plan.ts` are libraries shared across
-commands; import their functions directly.
+`serve`, `create`, `restack`, `nav`, `verify-refs`, `import-discover`, `init`,
+`import`, `insert`, `fold`, `move`, `split`, `submit`, `sync`, `pr`, `land`,
+`clean`, `archive`. `lib/config.ts` and `lib/submit-plan.ts` are libraries
+shared across commands; import their functions directly.
 
 Branch descriptions come from the native `branch.<name>.description` key via
 `readAllBranchStackConfig`; that helper uses NUL-separated `--get-regexp`
@@ -140,7 +145,116 @@ that delegates browser-opening to `gh pr view --web`. Both `submit` and `sync`
 share a tri-modal CLI shape: `--dry-run` prints the plan only, default (no
 flags) prompts `[y/N]`, and `--force` executes without prompting. This matches
 the SKILL.md confirmation-gate philosophy: Claude uses `--dry-run` to inspect,
-then `--force` after approval.
+then `--force` after approval. `serve` is a read-only local browser view: it binds a
+Hono HTTP server (`createServeApp`, served via `Deno.serve(app.fetch)`), opens
+the platform browser, resolves the provided repository folder arguments
+(defaulting to the current working directory), and renders status metadata by
+reusing `getAllStackStatuses`. The browser loads via a Server-Sent Events route
+(`/api/status/stream`): `createServeApp` emits an `init` event (the full repo
+list), then `repo-start`/`repo-done`/`repo-error` events as a concurrency-capped
+worker pool (`loadRepositoryStatuses`, cap `LOAD_CONCURRENCY`) loads each
+repository, then a final `complete` event carrying the same payload
+`/api/status` returns. The client shows a per-repository
+`queued -> loading -> done | error` progress screen and swaps to the full stack
+view on `complete`. `/api/status` remains for the buffered (non-streaming)
+payload and shares the same pool via `finalizeServeStatus`. When live watch is
+enabled (the default; disable with `--no-watch`), `createServeApp` also serves a
+long-lived `/api/watch` SSE route. After the initial load the client opens it as
+a second `EventSource`; the server emits a `ready` event, then a `repo-updated`
+event (one repo's fresh `ServeRepositoryStatus`) whenever that repo changes. Two
+triggers feed a coalescing per-repo reload scheduler (`createReloadScheduler`):
+a `Deno.watchFs` watcher per repo (`watchRepoFs`, scoped to the git dirs from
+`resolveGitWatchPaths`, filtered by `isRelevantGitChange`, debounced) and a PR
+poll timer (`--poll-interval`, default 60s, 0 disables) that re-triggers
+GitHub-backed repos. When `serve
+--debug` is enabled, the server prints one
+stderr line before each live refresh, including the repository, trigger source,
+and relevant Git file category. Each connection closes its watchers and timer on
+disconnect. The client upserts the changed repo into its model and shows a
+transient toast. The browser client is authored as `serve.client.js` (and
+`serve.css`); `serve.ts` reads both at runtime (relative to `import.meta.url`)
+and inlines them into the Hono-rendered document. It is a dark "Stack View" page
+(darker page, full-width header, lighter content card): a stack-switcher
+dropdown toggles between an "All stacks" overview (each repo rooted at its base
+branch with every stack descending off a shared trunk) and a single-stack view
+(each repo's branches drawn as a vertical lane). Each branch row shows its sync
+status (`diverged`/`behind`/`landed`), a PR badge linking to the PR, and a
+checked-out marker for the current branch. Each stack-name row (in the
+all-stacks overview) and each repo header (in the single-stack view) carries a
+muted relative time of the stack's most recent commit (for example
+`2 days ago`), formatted client-side by `formatRelativeTime` from a per-stack
+`StackStatus.latestCommitAt` ISO timestamp; `latestCommitAt` is the max
+committer date across the stack's branch refs (computed once via
+`getLatestCommitDate` in `src/lib/stack.ts`, `null` when no ref resolves) and
+flows into the serve payload through the `stripStatusAnsi` spread. Branch rows
+are zebra-tinted in their stack's own color at alternating opacity (a faint
+`hexToRgba(stackColor, ~0.05/0.02)` background) so each stack reads as one color
+band and neighboring rows stay separable; the checked-out row uses a stronger
+fill (~0.13, no accent bar) to stand out above the zebra. Tints full-bleed to
+the card's inner edges via negative margins (offset by equal padding so the
+lane/label content stays aligned with the untinted `main` and stack-name rows);
+`CARD_PAD_X` in `serve.client.js` must match the `.app-content` horizontal
+padding in `serve.css`. The base/`main` and stack-name rows stay untinted. Each
+row passes its tint, a brighter hover variant, and a node-ring color as inline
+CSS variables (`--row-tint`/`--row-tint-hover`/ `--node-ring`); `serve.css`
+`.branch-row:hover` brightens the row and grows the `.branch-node` dot with a
+ring in the stack color so it is easy to see which dot the hovered row lines up
+with (the `.branch-node` centering transform lives in CSS so the hover rule can
+override it without `!important`). The client groups stacks by name entirely
+from the `/api/status` payload's `repositories`, so a stack name shared across
+repos collapses into one switcher entry; the server still computes `graph` and
+`sharedStacks` for the payload but the current client derives its own grouping.
+Stacks are ordered most-recent-commit first (by each stack's `latestCommitAt`
+max across its visible repos, ties broken alphabetically, undated stacks last)
+in both the all-stacks overview and the switcher dropdown; the ordering is
+applied in `visibleStacks` (after the archived + repo filters) so colors stay
+stable (`stackColors` is still keyed by stack id and assigned in `buildModel`'s
+alphabetical pass). Each switcher menu item appends that relative commit time to
+its `N repos · M branches` summary. The per-stack `graph` lane/fork placement is
+shared with the CLI status ladder via `layoutLanes` in `src/lib/graph.ts` (first
+child continues its parent's lane, each additional child branches one lane to
+the right). `buildServeGraph` runs it parent-first (the CLI runs it leaf-first)
+and then emits, per row, explicit `rails` (per-lane `up`/`down` half segments
+with dashed flags) plus `forkTargets`. The client draws those rails verbatim
+instead of inferring connectivity from adjacency, so two separate same-lane
+segments never fuse and forks never cross. The lane-gutter width that precedes
+each branch label is sized once to the widest `maxLane` across every visible
+stack and repo (via `maxLaneAcross`), not per stack, so all branch labels share
+one left edge down the whole page regardless of fork depth. Within that shared
+gutter each stack's lanes are right-aligned by a per-stack `laneOffset`
+(`globalMaxLane - graph.maxLane`), so a shallow stack's node sits in the same
+column just left of the labels as a deep stack's rightmost node instead of
+hugging the far-left trunk; the main-trunk elbow lands on that offset lane-0
+column. The gutter width (`laneAreaWidth`) leaves a fixed 21px gap past the
+rightmost node column, and the all-stacks view drives both the `main` base-label
+column and each stack-name section header off that same `laneAreaW`, so `main`,
+the stack names, and every branch name line up on one vertical column.
+Repositories with no configured stacks are omitted from the browser payload;
+archived stacks are still sent (each carries an `archived` flag) but the client
+hides them by default behind a "Show archived" header switch whose state
+persists in `localStorage`. The header also carries a repository-filter dropdown
+(left of the stack switcher, styled like it via `renderRepoFilter`), shown only
+when more than one repository is served. It lists every served repository with a
+checkbox plus an "All repositories" master toggle; deselecting a repository
+removes it from the all-stacks view, the single-stack view, the stack-switcher
+list, the summary, and the count tags (a stack stays visible while it lives in
+at least one selected repository). Filtering is pure client work over the
+existing `/api/status` payload: `visibleStacks()` clones each stack with its
+`repos` narrowed to the selected paths (identified by the unique `repo.path`,
+never the basename `name`) and drops stacks left with no selected repo;
+per-stack colors are unaffected because `stackColors` is keyed by stack id and
+assigned once in `buildModel`. Repositories render alphabetically by name
+(tie-broken on `path`) in the filter menu, the all-stacks repo sections, and
+each stack's lanes. View state lives in per-tab `sessionStorage`, not the URL:
+the selected stack (key `stacked-prs:selected-stack`) and the repository filter
+(key `stacked-prs:selected-repos`, a JSON array of paths) both survive reloads,
+never bleed across separate `serve` windows, and are cleared when the tab
+closes. Both are reconciled on load against the stacks/repos actually present
+(an unknown selected stack resets to the all-stacks overview; a stored repo set
+that is empty or fully stale falls back to all-selected so the page never loads
+blank). Deselecting every repository renders a "No repositories selected" empty
+state. The server serves the SPA shell only at `/` (see `createServeApp`); there
+is no `/stack/*` route, so stale deep-links 404.
 
 ## Architecture
 
@@ -192,40 +306,41 @@ can be continued across process invocations.
 
 ### Script roles
 
-| File                              | Role                                                                  | Invoked as                                                              |
-| --------------------------------- | --------------------------------------------------------------------- | ----------------------------------------------------------------------- |
-| `src/lib/stack.ts`                | Library only, not a CLI                                               | Imported by all other scripts                                           |
-| `src/lib/gh.ts`                   | Library only, not a CLI                                               | Imported by scripts needing GitHub data                                 |
-| `src/lib/config.ts`               | Library: metadata mutations (insert/fold/move/split/land cleanup)     | Imported by commands that mutate stack metadata                         |
-| `src/lib/submit-plan.ts`          | Library: submit planning (consumed by `submit.ts`)                    | Imported by `commands/submit.ts` and tests                              |
-| `src/lib/markdown.ts`             | Markdown subset parser + ANSI/Ink-span renderers                      | Imported by status and TUI description renderers                        |
-| `src/commands/clean.ts`           | Stale config detection and removal                                    | `cli.ts clean [--force] [--json]`                                       |
-| `src/commands/archive.ts`         | Toggle a stack's archived flag (`stack.<name>.archived`)              | `cli.ts archive [<stack>] [--unarchive] [--json]`                       |
-| `src/commands/create.ts`          | Branch creation with optional worktree                                | `cli.ts create <branch> [flags]`                                        |
-| `src/commands/checkout.ts`        | Pure checkout picker helpers and `git checkout <branch>` wrapper      | `cli.ts checkout [--all] [--description]`                               |
-| `src/commands/status.ts`          | Read stack state + PR info                                            | `cli.ts status [--description] [--json]`                                |
-| `src/commands/restack.ts`         | Per-branch topological rebase                                         | `cli.ts restack [--dry-run] [--json] [--resume]`                        |
-| `src/commands/nav.ts`             | Navigation comments                                                   | `cli.ts nav [--dry-run]`                                                |
-| `src/commands/verify-refs.ts`     | Post-rebase verification                                              | `cli.ts verify-refs`                                                    |
-| `src/commands/import-discover.ts` | Branch tree detection                                                 | `cli.ts import-discover`                                                |
-| `src/commands/submit.ts`          | Plan (with `--dry-run`) and execute submit                            | `cli.ts submit [--only <branch>] [--dry-run] [--force] [--json]`        |
-| `src/commands/sync.ts`            | Fetch + ff base + prune merged PRs + restack + push across all stacks | `cli.ts sync [--dry-run] [--force] [--json]`                            |
-| `src/commands/pr.ts`              | Branch-to-PR lookup                                                   | `cli.ts pr [--branch=<name>] [--print] [--json]`                        |
-| `src/commands/land.ts`            | Land planning and execution (pure planLand + impure executeLand)      | `cli.ts land [--dry-run] [--json] [--resume]`; also imported by the TUI |
-| `src/commands/init.ts`            | Register current branch as a new stack                                | `cli.ts init [flags]`                                                   |
-| `src/commands/import.ts`          | Wrap import-discover with a config-write step                         | `cli.ts import [flags]`                                                 |
-| `src/commands/insert.ts`          | Insert a new branch between a branch and its parent                   | `cli.ts insert <branch> [flags]`                                        |
-| `src/commands/fold.ts`            | Merge a branch into its parent and remove it from the stack           | `cli.ts fold [flags]`                                                   |
-| `src/commands/move.ts`            | Reparent a branch + `git rebase --onto`                               | `cli.ts move --new-parent <name> [flags]`                               |
-| `src/commands/split.ts`           | Split a branch (--by-commit / --by-file) into two                     | `cli.ts split --new-branch <name> [flags]`                              |
-| `src/tui/app.tsx`                 | Root Ink component, owns reducer + effects                            | Launched by `cli.ts status --interactive`                               |
+| File                              | Role                                                                  | Invoked as                                                                                         |
+| --------------------------------- | --------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
+| `src/lib/stack.ts`                | Library only, not a CLI                                               | Imported by all other scripts                                                                      |
+| `src/lib/gh.ts`                   | Library only, not a CLI                                               | Imported by scripts needing GitHub data                                                            |
+| `src/lib/config.ts`               | Library: metadata mutations (insert/fold/move/split/land cleanup)     | Imported by commands that mutate stack metadata                                                    |
+| `src/lib/submit-plan.ts`          | Library: submit planning (consumed by `submit.ts`)                    | Imported by `commands/submit.ts` and tests                                                         |
+| `src/lib/markdown.ts`             | Markdown subset parser + ANSI/Ink-span renderers                      | Imported by status and TUI description renderers                                                   |
+| `src/commands/clean.ts`           | Stale config detection and removal                                    | `cli.ts clean [--force] [--json]`                                                                  |
+| `src/commands/archive.ts`         | Toggle a stack's archived flag (`stack.<name>.archived`)              | `cli.ts archive [<stack>] [--unarchive] [--json]`                                                  |
+| `src/commands/create.ts`          | Branch creation with optional worktree                                | `cli.ts create <branch> [flags]`                                                                   |
+| `src/commands/checkout.ts`        | Pure checkout picker helpers and `git checkout <branch>` wrapper      | `cli.ts checkout [--all] [--description]`                                                          |
+| `src/commands/status.ts`          | Read stack state + PR info                                            | `cli.ts status [--description] [--json]`                                                           |
+| `src/commands/serve.ts`           | Local HTTP server + static browser UI for explicit repo folders       | `cli.ts serve [folders...] [--port] [--host] [--no-open] [--no-watch] [--poll-interval] [--debug]` |
+| `src/commands/restack.ts`         | Per-branch topological rebase                                         | `cli.ts restack [--dry-run] [--json] [--resume]`                                                   |
+| `src/commands/nav.ts`             | Navigation comments                                                   | `cli.ts nav [--dry-run]`                                                                           |
+| `src/commands/verify-refs.ts`     | Post-rebase verification                                              | `cli.ts verify-refs`                                                                               |
+| `src/commands/import-discover.ts` | Branch tree detection                                                 | `cli.ts import-discover`                                                                           |
+| `src/commands/submit.ts`          | Plan (with `--dry-run`) and execute submit                            | `cli.ts submit [--only <branch>] [--dry-run] [--force] [--json]`                                   |
+| `src/commands/sync.ts`            | Fetch + ff base + prune merged PRs + restack + push across all stacks | `cli.ts sync [--dry-run] [--force] [--json]`                                                       |
+| `src/commands/pr.ts`              | Branch-to-PR lookup                                                   | `cli.ts pr [--branch=<name>] [--print] [--json]`                                                   |
+| `src/commands/land.ts`            | Land planning and execution (pure planLand + impure executeLand)      | `cli.ts land [--dry-run] [--json] [--resume]`; also imported by the TUI                            |
+| `src/commands/init.ts`            | Register current branch as a new stack                                | `cli.ts init [flags]`                                                                              |
+| `src/commands/import.ts`          | Wrap import-discover with a config-write step                         | `cli.ts import [flags]`                                                                            |
+| `src/commands/insert.ts`          | Insert a new branch between a branch and its parent                   | `cli.ts insert <branch> [flags]`                                                                   |
+| `src/commands/fold.ts`            | Merge a branch into its parent and remove it from the stack           | `cli.ts fold [flags]`                                                                              |
+| `src/commands/move.ts`            | Reparent a branch + `git rebase --onto`                               | `cli.ts move --new-parent <name> [flags]`                                                          |
+| `src/commands/split.ts`           | Split a branch (--by-commit / --by-file) into two                     | `cli.ts split --new-branch <name> [flags]`                                                         |
+| `src/tui/app.tsx`                 | Root Ink component, owns reducer + effects                            | Launched by `cli.ts status --interactive`                                                          |
 
 ### Git config schema
 
 ```
 branch.<name>.stack-name           # Which stack this branch belongs to
 branch.<name>.stack-parent         # Parent branch name (or the base branch, e.g. "main")
-branch.<name>.description          # (Optional, native git key) markdown description; rendered by status/TUI and used by submit as the PR body
+branch.<name>.description          # (Optional, native git key) markdown description; rendered by status, TUI, and serve; used by submit as the PR body
 stack.<stack-name>.merge-strategy  # "merge" or "squash"
 stack.<stack-name>.base-branch     # Base branch name, e.g. "main" or "master"
 stack.<stack-name>.resume-state    # Transient JSON for in-progress restack recovery
@@ -233,7 +348,7 @@ stack.<stack-name>.landed-branches # Multi-value: branch names landed from this 
 stack.<stack-name>.landed-pr       # Multi-value: "<branch>:<pr-number>" per landed branch, written at land time so nav comments can keep rendering merged PRs after the branch is deleted
 stack.<stack-name>.landed-parent   # Multi-value: "<branch>:<parent-branch>" per landed branch, written at land time so the tombstone keeps its structural position in the tree after `git branch -D` wipes its live branch-level config
 stack.<stack-name>.color           # (Optional) hex color override for TUI and clean output
-stack.<stack-name>.archived        # (Optional) "true" when archived; hidden by default from status/TUI and skipped by sync. Key absent = not archived. Read via getStackArchived(), written via setStackArchived().
+stack.<stack-name>.archived        # (Optional) "true" when archived; hidden by default from status/TUI/serve and skipped by sync. Key absent = not archived. Read via getStackArchived(), written via setStackArchived().
 stack.default-merge-strategy       # (Optional) default for init/import/auto-init create; "merge" or "squash". Falls back to "squash" when unset. Read via getDefaultMergeStrategy(). Respects --local/--global/--system precedence.
 ```
 
@@ -386,6 +501,44 @@ this distinction when editing the runbook.
   `cli.ts restack` rather than constructing rebase commands manually.
 - When adding a new command, register it in the "Scripts" section of `SKILL.md`
   with its full `cli.ts` invocation.
+- Browser UI for `serve`: the server is a Hono app in `src/commands/serve.ts`
+  (`createServeApp` serves `/` via `hono/html` templating and `/api/status` as
+  JSON; `startServeServer` runs it with `Deno.serve(app.fetch)`).
+  `createServeApp` also serves `/api/status/stream` (SSE via `streamSSE` from
+  `hono/streaming`) for progressive per-repository loading; both routes load
+  through `loadRepositoryStatuses` (capped at `LOAD_CONCURRENCY`) and finalize
+  via `finalizeServeStatus`. `createServeApp` also serves `/api/watch` (a
+  long-lived SSE route) when watch is enabled, emitting `ready` then
+  `repo-updated` events driven by a `Deno.watchFs` watcher per repo plus a PR
+  poll timer; `serve` has `--no-watch`, `--poll-interval`, and `--debug` flags,
+  and the rendered document inlines `window.__STACKED_PRS__ = { watch }` so the
+  client knows whether to open the channel. The page is authored as two real
+  source files, `serve.css` and `serve.client.js` (the vanilla browser client /
+  SPA). `renderServeDocument` reads both at runtime via
+  `Deno.readTextFile(new URL("./serve.css", import.meta.url))` (and the client),
+  so there is no build step or generated file: edit a source file and the next
+  page load reflects it. When run from source (e.g. the `deno task install`
+  linked binary) these are the live files; `deno compile` binaries embed them
+  via `--include src/commands/serve.css --include src/commands/serve.client.js`,
+  which is wired into `compile:macos`/`compile:linux`, the skill wrapper
+  (`skills/stacked-prs/scripts/stacked-prs`), and `release.yml`. If you add or
+  rename a serve asset file, update all three compile sites and
+  `publish.include` in `deno.json`. Keep the UI read-only, use positional folder
+  arguments as the repository list, and reuse `getAllStackStatuses` for stack
+  metadata. The client renders the "Stack View" page: a darker page with a
+  full-width header and a lighter content card, a stack-switcher toggling an
+  all-stacks overview (repos rooted at their base branch) and a single-stack
+  lane view, with stacks grouped by name across repositories. Omit repositories
+  that have no configured stacks from the rendered status payload. Archived
+  stacks stay in the payload (each carries `archived`); the client hides them by
+  default behind a "Show archived" header switch (state persisted in
+  `localStorage`) and renders revealed ones dimmed with an `(archived)` badge. A
+  repository-filter dropdown (shown only when more than one repository is
+  served) narrows every view to the selected repositories; it is pure client
+  work over the existing payload, keyed by the unique `repo.path`. View state
+  (selected stack and repository filter) lives in per-tab `sessionStorage`, not
+  the URL, so `createServeApp` serves the SPA shell only at `/` (no `/stack/*`
+  route).
 - Ink/TUI code lives under `src/tui/`, not `src/commands/`. The pure-function
   rule for commands is preserved; the TUI is a view layer that owns stdout and
   runs an event loop, which can't fit the command contract. State is managed via

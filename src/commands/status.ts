@@ -4,6 +4,7 @@ import {
   effectiveParent,
   getAllNodes,
   getAllStackTrees,
+  getLatestCommitDate,
   getStackTree,
   runGitCommand,
   type StackNode,
@@ -11,6 +12,7 @@ import {
   type SyncStatus,
 } from "../lib/stack.ts";
 import { listPrsForBranch } from "../lib/gh.ts";
+import { type LaneTreeNode, layoutLanes } from "../lib/graph.ts";
 import { ansiColor } from "../lib/ansi.ts";
 import {
   assignColors,
@@ -53,6 +55,8 @@ export interface StackStatus {
   mergeStrategy: string | undefined;
   archived: boolean;
   branches: BranchStatus[];
+  /** ISO 8601 of the most recent commit across the stack's branches, or null. */
+  latestCommitAt: string | null;
   display: string;
 }
 
@@ -120,6 +124,10 @@ function computeDepths(
   return result;
 }
 
+function toLaneNode(node: StackNode): LaneTreeNode<StackNode> {
+  return { value: node, children: node.children.map(toLaneNode) };
+}
+
 function flattenPostorder(tree: StackTree): Array<{
   branch: string;
   stackName: string;
@@ -128,46 +136,21 @@ function flattenPostorder(tree: StackTree): Array<{
   hasBranchingChildren: boolean;
   merged: boolean;
 }> {
-  const out: Array<{
-    branch: string;
-    stackName: string;
-    rootIndex: number;
-    pipeCount: number;
-    hasBranchingChildren: boolean;
-    merged: boolean;
-  }> = [];
-
-  const visit = (
-    node: StackNode,
-    rowPipeCount: number,
-    rootIndex: number,
-  ): void => {
-    const [primaryChild, ...secondaryChildren] = node.children;
-
-    if (primaryChild) {
-      visit(primaryChild, rowPipeCount, rootIndex);
-    }
-
-    for (const child of secondaryChildren) {
-      visit(child, rowPipeCount + 1, rootIndex);
-    }
-
-    out.push({
-      branch: node.branch,
-      stackName: node.stackName,
-      rootIndex,
-      pipeCount: rowPipeCount,
-      hasBranchingChildren: secondaryChildren.length > 0,
-      merged: node.merged === true,
-    });
-  };
-
-  // Preserve StackTree root order so the compact renderer follows the same
-  // parent/child/root ordering the TUI gets from getStackTree/getAllStackTrees.
-  for (let i = 0; i < tree.roots.length; i++) {
-    visit(tree.roots[i], i, i);
-  }
-  return out;
+  // Leaf-first orientation with each root starting in its own column is the
+  // ladder layout the compact renderer expects. Lane placement is shared with
+  // the browser serve view via layoutLanes (see lib/graph.ts).
+  const { rows } = layoutLanes(tree.roots.map(toLaneNode), {
+    orientation: "leaf-first",
+    rootLane: (rootIndex) => rootIndex,
+  });
+  return rows.map((row) => ({
+    branch: row.value.branch,
+    stackName: row.value.stackName,
+    rootIndex: row.rootIndex,
+    pipeCount: row.lane,
+    hasBranchingChildren: row.isFork,
+    merged: row.value.merged === true,
+  }));
 }
 
 function colorGraphText(
@@ -510,6 +493,10 @@ async function buildStackStatus(
     currentBranch,
     opts.fullDescriptions === true,
   );
+  const latestCommitAt = await getLatestCommitDate(
+    dir,
+    nodes.map((node) => node.branch),
+  );
 
   return {
     stackName: tree.stackName,
@@ -517,6 +504,7 @@ async function buildStackStatus(
     mergeStrategy: tree.mergeStrategy,
     archived: tree.archived,
     branches,
+    latestCommitAt,
     display,
   };
 }

@@ -24,6 +24,20 @@ function stripAnsi(text: string): string {
 }
 
 describe("getStackStatus", () => {
+  test("populates latestCommitAt from the stack's branches", async () => {
+    await using repo = await createTestRepo();
+    await using _mock = await makeMockDir();
+    await addBranch(repo.dir, "feat/a", "main");
+    await addBranch(repo.dir, "feat/b", "feat/a");
+    await setStackNode(repo.dir, "feat/a", "my-stack", "main");
+    await setStackNode(repo.dir, "feat/b", "my-stack", "feat/a");
+    await setBaseBranch(repo.dir, "my-stack", "main");
+
+    const status = await getStackStatus(repo.dir, "my-stack");
+    expect(status.latestCommitAt).not.toBeNull();
+    expect(Number.isNaN(Date.parse(status.latestCommitAt!))).toBe(false);
+  });
+
   test("returns tree-structured status with depth info for a forked tree (a -> b + c)", async () => {
     await using repo = await createTestRepo();
     await using _mock = await makeMockDir();

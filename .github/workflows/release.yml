@@ -139,6 +139,8 @@ jobs:
         run: |
           deno compile \
             --config deno.json \
+            --include src/commands/serve.css \
+            --include src/commands/serve.client.js \
             --allow-run=git,gh,${{ matrix.clipboard }} \
             --allow-env \
             --allow-read \

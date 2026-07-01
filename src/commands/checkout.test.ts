@@ -179,6 +179,7 @@ describe("moveCheckoutSelection", () => {
           baseBranch: "main",
           mergeStrategy: undefined,
           archived: false,
+          latestCommitAt: null,
           display: "",
           branches: [
             branch("a/leaf", "a/root"),
@@ -190,6 +191,7 @@ describe("moveCheckoutSelection", () => {
           baseBranch: "main",
           mergeStrategy: undefined,
           archived: false,
+          latestCommitAt: null,
           display: "",
           branches: [
             branch("b/leaf", "b/root"),
