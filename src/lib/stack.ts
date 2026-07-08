@@ -381,6 +381,8 @@ export interface StackNode {
   children: StackNode[];
   /** True when this branch has been landed. Source: stack.<stackName>.landed-branches or legacy branch.<name>.stack-merged. */
   merged?: boolean;
+  /** Raw markdown from git's native branch.<name>.description key. */
+  description?: string;
 }
 
 export interface StackTree {
@@ -648,10 +650,12 @@ export interface BranchStackEntry {
   parent?: string;
   merged?: boolean;
   order?: number;
+  /** Raw markdown from git's native branch.<name>.description key. */
+  description?: string;
 }
 
 /**
- * Scan every `branch.<name>.stack-*` key in the repo in a single git
+ * Scan every `branch.<name>.stack-*` key and branch description in a single git
  * subprocess and parse the result into a per-branch entry map. Cheap to
  * call once at the top of a planner; callers that previously issued
  * N parallel `git config branch.<b>.stack-*` lookups should use this
@@ -660,14 +664,20 @@ export interface BranchStackEntry {
 export async function readAllBranchStackConfig(
   dir: string,
 ): Promise<Map<string, BranchStackEntry>> {
-  const entries = await gitConfigGetRegexp(dir, "^branch\\..*\\.stack-");
+  const entries = await gitConfigGetRegexp(
+    dir,
+    "^branch\\..*\\.(stack-|description)",
+  );
   const out = new Map<string, BranchStackEntry>();
   for (const [key, value] of entries) {
-    const match = key.match(/^branch\.(.+)\.stack-(name|parent|merged|order)$/);
+    const match = key.match(
+      /^branch\.(.+)\.(?:stack-(name|parent|merged|order)|(description))$/,
+    );
     if (!match) continue;
-    const [, branch, field] = match;
+    const [, branch, field, descriptionKey] = match;
     const entry = out.get(branch) ?? {};
-    if (field === "name") entry.stackName = value;
+    if (descriptionKey) entry.description = value;
+    else if (field === "name") entry.stackName = value;
     else if (field === "parent") entry.parent = value;
     else if (field === "merged") entry.merged = value === "true";
     else if (field === "order") entry.order = Number(value);
@@ -813,12 +823,14 @@ export async function getStackTree(
   // branches whose live config was wiped on `branch -D`).
   const buildNode = (branch: string): StackNode => {
     const children = (childrenMap.get(branch) ?? []).map(buildNode);
+    const description = branchConfig.get(branch)?.description;
     return {
       branch,
       stackName: resolvedStackName!,
       parent: branchParents.get(branch)!,
       children,
       ...(mergedFlags.get(branch) ? { merged: true } : {}),
+      ...(description ? { description } : {}),
     };
   };
 
