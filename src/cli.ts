@@ -168,6 +168,7 @@ interface CliStatusOptions {
   owner: string | undefined;
   repo: string | undefined;
   showArchived: boolean;
+  fetch: boolean;
   fullDescriptions: boolean;
 }
 
@@ -196,12 +197,14 @@ async function loadStatusForCli(
       return await getAllStackStatuses(dir, owner, repo, {
         loadPrs: options.loadPrs,
         showArchived: options.showArchived,
+        fetch: options.fetch,
         fullDescriptions: options.fullDescriptions,
       });
     }
     const stackName = await resolveStackName(dir, options.stackName);
     return await getStackStatus(dir, stackName, owner, repo, {
       loadPrs: options.loadPrs,
+      fetch: options.fetch,
       fullDescriptions: options.fullDescriptions,
     });
   };
@@ -590,6 +593,10 @@ const command = new Command()
   .option("--all, -a", "Show all stacks grouped by base branch")
   .option("--archived", "Include archived stacks (hidden by default)")
   .option(
+    "--fetch",
+    "Fetch base branches from origin before computing sync status",
+  )
+  .option(
     "--description",
     "Show full branch descriptions in the ladder output",
   )
@@ -730,6 +737,7 @@ const command = new Command()
             dir,
             initialTab,
             loadPrs,
+            fetch: options.fetch === true,
             theme,
             showArchived: options.archived === true,
             onRequestExit: (code = 0) => {
@@ -777,8 +785,12 @@ const command = new Command()
       owner: options.owner,
       repo: options.repo,
       showArchived: options.archived === true,
+      fetch: options.fetch === true,
       fullDescriptions: options.description === true,
     });
+    for (const warning of status.fetchWarnings ?? []) {
+      console.error(`⚠ ${warning}`);
+    }
     if (options.json) {
       logJson(status);
     } else {
@@ -800,6 +812,10 @@ const command = new Command()
   .option("--all, -a", "Show all stacks grouped by base branch")
   .option("--archived", "Include archived stacks (hidden by default)")
   .option(
+    "--fetch",
+    "Fetch base branches from origin before computing sync status",
+  )
+  .option(
     "--description",
     "Show full branch descriptions in the ladder output",
   )
@@ -811,8 +827,12 @@ const command = new Command()
       owner: options.owner,
       repo: options.repo,
       showArchived: options.archived === true,
+      fetch: options.fetch === true,
       fullDescriptions: options.description === true,
     });
+    for (const warning of status.fetchWarnings ?? []) {
+      console.error(`⚠ ${warning}`);
+    }
 
     const branches = visibleCheckoutBranches(status, {
       showArchived: options.archived === true,

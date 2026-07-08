@@ -563,7 +563,11 @@ Show current stack state. **No confirmation needed** (read-only).
    renders every configured stack grouped by base branch. Archived stacks are
    hidden; add `--archived` to include them. In the TUI, press `a` to toggle
    archived stacks (they render dimmed with an `(archived)` tag).
-4. Branch descriptions: when `branch.<name>.description` is set (markdown,
+4. Sync status compares each root branch against `origin/<base>` when that
+   remote-tracking ref exists (falling back to the local base branch when there
+   is no origin). Add `--fetch` to refresh the remote-tracking ref first; a
+   fetch failure prints a warning and falls back to the last-fetched ref.
+5. Branch descriptions: when `branch.<name>.description` is set (markdown,
    written with `git branch --edit-description <branch>` or
    `git config branch.<name>.description "..."`), `status` shows the dimmed
    first line under the branch; add `--description` to print descriptions in
@@ -613,7 +617,8 @@ confirmation surface.
 
 Use the same display scoping as `status`: on a non-default branch it defaults to
 the current stack, on the default branch it defaults to `--all`, and the `--all`
-/ `-a`, `--stack-name`, `--archived`, `--pr` / `-p`, and `--description` flags
+/ `-a`, `--stack-name`, `--archived`, `--pr` / `-p`, `--fetch`, and
+`--description` flags
 carry over.
 
 ### `serve`
@@ -789,7 +794,7 @@ provided.
 
 ```bash
 ${CLAUDE_PLUGIN_ROOT}/skills/stacked-prs/scripts/stacked-prs status \
-  [--stack-name=<name>] [--owner=<owner> --repo=<repo>] [--json] [--pr|-p] [--all] [--archived] [--description] [--interactive|-i] [--theme <theme>]
+  [--stack-name=<name>] [--owner=<owner> --repo=<repo>] [--json] [--pr|-p] [--all] [--archived] [--fetch] [--description] [--interactive|-i] [--theme <theme>]
 ```
 
 Returns human-readable ladder output by default. Pass `--json` for structured
@@ -808,14 +813,18 @@ metadata is opt-in: pass `--pr` / `-p` to load PRs from GitHub; otherwise status
 stays local-only and skips PR fetching. Pass `--theme light` or `--theme dark`
 to override auto-detection. Archived stacks are hidden from the `--all` view by
 default; pass `--archived` to include them (`--json` always includes every stack
-with an `archived` flag, and the TUI toggles them with the `a` key).
+with an `archived` flag, and the TUI toggles them with the `a` key). Root
+branches compare against
+`origin/<base>` when that remote-tracking ref exists, falling back to the local
+base branch otherwise; pass `--fetch` to refresh the ref first. Fetch failures
+degrade to warnings on stderr.
 
 ### `checkout`
 
 ```bash
 ${CLAUDE_PLUGIN_ROOT}/skills/stacked-prs/scripts/stacked-prs checkout \
   [--stack-name=<name>] [--owner=<owner> --repo=<repo>] [--pr|-p] \
-  [--all|-a] [--archived] [--description]
+  [--all|-a] [--archived] [--fetch] [--description]
 ```
 
 Renders the same ladder as `status`, lets the user move a `>` cursor with

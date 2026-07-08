@@ -119,6 +119,11 @@ Subcommands: `status` (add `--interactive`/`-i` to launch the TUI), `checkout`,
 `clean`, `archive`. `lib/config.ts` and `lib/submit-plan.ts` are libraries
 shared across commands; import their functions directly.
 
+`status` (and the TUI loader) computes each branch's sync status against
+`origin/<base>` when that remote-tracking ref exists, falling back to the local
+base branch for repositories without an origin. `status --fetch` refreshes the
+remote-tracking ref first and surfaces failures as warnings.
+
 Branch descriptions come from the native `branch.<name>.description` key via
 `readAllBranchStackConfig`; that helper uses NUL-separated `--get-regexp`
 parsing so multi-line values survive. `status` renders the first line by default
@@ -316,8 +321,8 @@ can be continued across process invocations.
 | `src/commands/clean.ts`           | Stale config detection and removal                                    | `cli.ts clean [--force] [--json]`                                                                  |
 | `src/commands/archive.ts`         | Toggle a stack's archived flag (`stack.<name>.archived`)              | `cli.ts archive [<stack>] [--unarchive] [--json]`                                                  |
 | `src/commands/create.ts`          | Branch creation with optional worktree                                | `cli.ts create <branch> [flags]`                                                                   |
-| `src/commands/checkout.ts`        | Pure checkout picker helpers and `git checkout <branch>` wrapper      | `cli.ts checkout [--all] [--description]`                                                          |
-| `src/commands/status.ts`          | Read stack state + PR info                                            | `cli.ts status [--description] [--json]`                                                           |
+| `src/commands/checkout.ts`        | Pure checkout picker helpers and `git checkout <branch>` wrapper      | `cli.ts checkout [--all] [--fetch] [--description]`                                                |
+| `src/commands/status.ts`          | Read stack state + PR info                                            | `cli.ts status [--fetch] [--description] [--json]`                                                 |
 | `src/commands/serve.ts`           | Local HTTP server + static browser UI for explicit repo folders       | `cli.ts serve [folders...] [--port] [--host] [--no-open] [--no-watch] [--poll-interval] [--debug]` |
 | `src/commands/restack.ts`         | Per-branch topological rebase                                         | `cli.ts restack [--dry-run] [--json] [--resume]`                                                   |
 | `src/commands/nav.ts`             | Navigation comments                                                   | `cli.ts nav [--dry-run]`                                                                           |

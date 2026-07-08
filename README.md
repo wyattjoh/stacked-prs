@@ -298,6 +298,11 @@ Archived stacks (see [`/stacked-prs archive`](#stacked-prs-archive)) are hidden
 from the all-stacks view by default. Pass `--archived` to include them; `--json`
 always lists every stack with an `archived` flag.
 
+Root branches compare against `origin/<base>` when that remote-tracking ref
+exists, falling back to the local base branch for repositories without an
+origin. Pass `--fetch` to refresh the remote-tracking ref before computing sync
+status. Fetch failures print a warning and use the last-fetched ref.
+
 ### `/stacked-prs checkout`
 
 Open a status-style branch picker and check out the selected stack branch:
@@ -317,13 +322,13 @@ branch, and the selected row overrides status colors with white text. Split
 escape and UTF-8 input sequences are buffered; unsupported escape sequences are
 ignored. The picker accepts the status scoping and PR-loading flags:
 `--stack-name`, `--all` / `-a`, `--archived`, and `--pr` / `-p` (with optional
-`--owner` and `--repo`), plus `--description`. It renders inline in the current
-terminal scrollback, leaving the final picker frame visible with checkout or
-abort output below it. When the ladder is taller than the terminal, the picker
-keeps a viewport-sized window around the selected row and counts physical rows
-created by wrapped ladder and prompt lines. Terminal dimensions are re-read on
-every redraw, so a resize is reflected after the next handled keypress. The
-picker includes the base branch shown at the bottom of the ladder.
+`--owner` and `--repo`), plus `--fetch` and `--description`. It renders inline
+in the current terminal scrollback, leaving the final picker frame visible with
+checkout or abort output below it. When the ladder is taller than the terminal,
+the picker keeps a viewport-sized window around the selected row and counts
+physical rows created by wrapped ladder and prompt lines. Terminal dimensions
+are re-read on every redraw, so a resize is reflected after the next handled
+keypress. The picker includes the base branch shown at the bottom of the ladder.
 
 ### Branch descriptions
 
@@ -550,8 +555,8 @@ deno run --allow-run=git,gh,open --allow-env --allow-read --allow-net \
 
 | Subcommand                                                          | Purpose                                                                |
 | ------------------------------------------------------------------- | ---------------------------------------------------------------------- |
-| `cli.ts status [--json] [--all] [--description]`                    | Ladder output (or JSON) with PR info, sync status, and descriptions    |
-| `cli.ts checkout [--all] [--description]`                           | Interactive status-style branch picker that runs `git checkout`        |
+| `cli.ts status [--json] [--all] [--fetch] [--description]`          | Ladder output (or JSON) with PR info, sync status, and descriptions    |
+| `cli.ts checkout [--all] [--fetch] [--description]`                 | Interactive status-style branch picker that runs `git checkout`        |
 | `cli.ts serve [folders...] [--port] [--host] [--no-open] [--debug]` | Local browser view for visualizing provided repository folders         |
 | `cli.ts create <branch> [--create-worktree]`                        | Create a child branch; auto-inits stack when on default branch         |
 | `cli.ts restack [--json]`                                           | Segment-based tree rebase; handles conflicts across segments           |

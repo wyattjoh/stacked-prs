@@ -1,8 +1,10 @@
 import {
   computeSyncStatus,
+  fetchBaseBranches,
   getAllNodes,
   getAllStackTrees,
   getLandedPrs,
+  resolveBaseSyncRef,
   runGitCommand,
   type StackTree,
 } from "../../lib/stack.ts";
@@ -24,10 +26,37 @@ export interface LoadLocalResult {
    */
   landedPrByBranch: Map<string, PrInfo>;
   currentBranch: string | null;
+  /** Fetch failures when `LoadLocalOptions.fetch` was set; empty otherwise. */
+  fetchWarnings: string[];
 }
 
-export async function loadLocal(dir: string): Promise<LoadLocalResult> {
+export interface LoadLocalOptions {
+  /**
+   * Run `git fetch origin <base>` for each distinct base branch before
+   * computing sync status. Fetch failures degrade to `fetchWarnings`.
+   */
+  fetch?: boolean;
+}
+
+export async function loadLocal(
+  dir: string,
+  opts: LoadLocalOptions = {},
+): Promise<LoadLocalResult> {
   const trees = await getAllStackTrees(dir);
+
+  const fetchWarnings = opts.fetch === true && trees.length > 0
+    ? await fetchBaseBranches(dir, trees.map((tree) => tree.baseBranch))
+    : [];
+
+  // Root branches compare against origin/<base> (when it exists) rather than
+  // the local base branch, so a stale local base doesn't mask divergence.
+  // Resolved once per distinct base to keep the subprocess count flat.
+  const baseSyncRefs = new Map<string, string>();
+  await Promise.all(
+    [...new Set(trees.map((tree) => tree.baseBranch))].map(async (base) => {
+      baseSyncRefs.set(base, await resolveBaseSyncRef(dir, base));
+    }),
+  );
 
   const syncByBranch = new Map<string, SyncStatus>();
   const allBranches: string[] = [];
@@ -63,8 +92,11 @@ export async function loadLocal(dir: string): Promise<LoadLocalResult> {
           });
         }
       } else {
+        const parent = node.parent === tree.baseBranch
+          ? baseSyncRefs.get(tree.baseBranch) ?? node.parent
+          : node.parent;
         syncProbes.push(
-          computeSyncStatus(dir, node.branch, node.parent).then(
+          computeSyncStatus(dir, node.branch, parent).then(
             (status) => [node.branch, status],
           ),
         );
@@ -95,6 +127,7 @@ export async function loadLocal(dir: string): Promise<LoadLocalResult> {
     allBranches,
     landedPrByBranch,
     currentBranch,
+    fetchWarnings,
   };
 }
 

@@ -2,10 +2,12 @@ import * as colors from "@std/fmt/colors";
 import {
   computeSyncStatus,
   effectiveParent,
+  fetchBaseBranches,
   getAllNodes,
   getAllStackTrees,
   getLatestCommitDate,
   getStackTree,
+  resolveBaseSyncRef,
   runGitCommand,
   type StackNode,
   type StackTree,
@@ -58,11 +60,15 @@ export interface StackStatus {
   /** ISO 8601 of the most recent commit across the stack's branches, or null. */
   latestCommitAt: string | null;
   display: string;
+  /** Fetch failures when `StatusOptions.fetch` was set; absent otherwise. */
+  fetchWarnings?: string[];
 }
 
 export interface AllStacksStatus {
   stacks: StackStatus[];
   display: string;
+  /** Fetch failures when `StatusOptions.fetch` was set; absent otherwise. */
+  fetchWarnings?: string[];
 }
 
 interface RenderRow {
@@ -94,6 +100,11 @@ export async function queryPr(
 export interface StatusOptions {
   loadPrs?: boolean;
   showArchived?: boolean;
+  /**
+   * Run `git fetch origin <base>` before computing sync status so the
+   * origin comparison reflects the current remote state.
+   */
+  fetch?: boolean;
   /**
    * Render each branch's full markdown description in the ladder instead of
    * the dimmed first line. Set by `status --description`.
@@ -449,6 +460,7 @@ async function buildStackStatus(
   const depthMap = computeDepths(tree);
   const nodes = getAllNodes(tree);
   const loadPrs = opts.loadPrs === true;
+  const baseSyncRef = await resolveBaseSyncRef(dir, tree.baseBranch);
 
   const branches = await Promise.all(
     nodes.map(async (node): Promise<BranchStatus> => {
@@ -457,12 +469,13 @@ async function buildStackStatus(
       // is folded into the base, so the literal `node.parent` may be a
       // dangling name; rev-list then fails and the old code returned a
       // spurious "diverged". This matches the parent restack would target.
+      const parent = effectiveParent(tree, node);
       const syncStatus: SyncStatus = node.merged
         ? "landed"
         : await computeSyncStatus(
           dir,
           node.branch,
-          effectiveParent(tree, node),
+          parent === tree.baseBranch ? baseSyncRef : parent,
         );
       const pr = loadPrs ? await queryPr(node.branch, owner, repo) : null;
 
@@ -521,7 +534,18 @@ export async function getStackStatus(
     getCurrentBranch(dir),
   ]);
 
-  return await buildStackStatus(dir, tree, currentBranch, owner, repo, opts);
+  const fetchWarnings = opts.fetch === true
+    ? await fetchBaseBranches(dir, [tree.baseBranch])
+    : undefined;
+  const status = await buildStackStatus(
+    dir,
+    tree,
+    currentBranch,
+    owner,
+    repo,
+    opts,
+  );
+  return fetchWarnings !== undefined ? { ...status, fetchWarnings } : status;
 }
 
 export async function getAllStackStatuses(
@@ -534,13 +558,18 @@ export async function getAllStackStatuses(
     getAllStackTrees(dir),
     getCurrentBranch(dir),
   ]);
+  const fetchWarnings = opts.fetch === true && trees.length > 0
+    ? await fetchBaseBranches(dir, trees.map((tree) => tree.baseBranch))
+    : undefined;
   const stacks = await Promise.all(
     trees.map((tree) =>
       buildStackStatus(dir, tree, currentBranch, owner, repo, opts)
     ),
   );
+  const withWarnings = (result: AllStacksStatus): AllStacksStatus =>
+    fetchWarnings !== undefined ? { ...result, fetchWarnings } : result;
   if (stacks.length === 0) {
-    return { stacks, display: "No stacks found." };
+    return withWarnings({ stacks, display: "No stacks found." });
   }
   const treeByStackName = new Map(
     trees.map((tree) => [tree.stackName, tree] as const),
@@ -556,7 +585,7 @@ export async function getAllStackStatuses(
     : stacks.filter((stack) => !stack.archived);
 
   if (displayStacks.length === 0) {
-    return { stacks, display: "No stacks found." };
+    return withWarnings({ stacks, display: "No stacks found." });
   }
 
   const sections = new Map<string, StackStatus[]>();
@@ -589,5 +618,5 @@ export async function getAllStackStatuses(
     })
     .join("\n\n");
 
-  return { stacks, display };
+  return withWarnings({ stacks, display });
 }
