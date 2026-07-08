@@ -632,7 +632,8 @@ configured stacks. **No confirmation needed** (read-only).
 3. The browser renders branch relationships as a lane graph and includes the
    same status metadata as the CLI for those repositories: stack name, base
    branch, merge strategy, branch parentage, PR number/state/draft state when
-   available, sync status, and current-branch markers.
+   available, sync status, current-branch markers, and expanded markdown branch
+   descriptions when `branch.<name>.description` is set.
 4. When multiple repositories have a stack with the same name, the top selector
    can show that shared stack as one combined graph. Each repository appears as
    the root node, then connects to its base branch, then to its stack branches.
@@ -864,7 +865,8 @@ default; a "Show archived" switch in the header reveals them (the preference is
 remembered across reloads). The view updates live by default (a `.git` file
 watch plus GitHub polling re-render changed repositories with a toast); pass
 `--no-watch` to disable it or `--poll-interval <seconds>` to change the PR poll
-cadence (0 disables polling).
+cadence (0 disables polling). Branch descriptions render expanded as muted
+markdown blocks under each branch.
 
 ### `restack`
 

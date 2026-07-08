@@ -159,10 +159,6 @@ const loadState = new Map();
 const loadError = new Map();
 const loadInfo = new Map();
 
-// Branch-description rows expanded by click. Keyed by repo path + branch so
-// the same branch name in two repos expands independently.
-const expandedDescriptions = new Set();
-
 function el(tag, attrs = {}, children = []) {
   const node = document.createElement(tag);
   for (const [key, value] of Object.entries(attrs)) {
@@ -518,12 +514,14 @@ function branchLabel(prefix, mainName, mainColor, size) {
 // Vertical lane segment centered on column x. `half` is "top" (connect up),
 // "bottom" (connect down), or "full". The 2px border is offset by 1px so the
 // line centers on x, aligning with node dots and curved corners. Dashed mirrors
-// the CLI's diverged styling.
-function vseg(x, color, half, dashed) {
+// the CLI's diverged styling. Branch rows can grow taller than the label row
+// when descriptions render, so branch rows pass `center` to keep rail halves
+// anchored to the fixed node center instead of the full row midpoint.
+function vseg(x, color, half, dashed, center = null) {
   const pos = half === "top"
-    ? "top:0;height:50%;"
+    ? center == null ? "top:0;height:50%;" : `top:0;height:${center}px;`
     : half === "bottom"
-    ? "top:50%;bottom:0;"
+    ? center == null ? "top:50%;bottom:0;" : `top:${center}px;bottom:0;`
     : "top:0;bottom:0;";
   return el("span", {
     style: `position:absolute;left:${x - 1}px;${pos}width:0;border-left:2px ${
@@ -548,8 +546,8 @@ function curveCorner(xFrom, xTo, vstyle, color, dashed, radius) {
   });
 }
 
-function nodeEl(x, color, current, isBase, rowHeight) {
-  const top = !isBase && rowHeight ? `${Math.round(rowHeight / 2)}px` : "50%";
+function nodeEl(x, color, current, isBase, nodeCenter) {
+  const top = !isBase && nodeCenter ? `${nodeCenter}px` : "50%";
   const base =
     `position:absolute;left:${x}px;top:${top};width:12px;height:12px;border-radius:50%;border:2px solid ${CARD};z-index:2;`;
   if (isBase) {
@@ -598,6 +596,7 @@ function renderGraphRows(graph, ctx) {
   // their label) instead of leaving a wide gap when deeper stacks are present.
   const laneX = (lane) => ctx.pad + (lane + (ctx.laneOffset || 0)) * ctx.laneW;
   return rows.map((row, i) => {
+    const nodeCenter = Math.round(ctx.row / 2);
     const status = row.branchStatus;
     const diverged = !!(status && status.syncStatus === "diverged");
     const co = !!(status && status.isCurrent);
@@ -611,25 +610,31 @@ function renderGraphRows(graph, ctx) {
     // Vertical trunk rails: draw the up/down halves the server marked active.
     for (const rail of row.rails || []) {
       const x = laneX(rail.lane);
-      if (rail.up) lane.append(vseg(x, ctx.color, "top", rail.upDashed));
+      if (rail.up) {
+        lane.append(vseg(x, ctx.color, "top", rail.upDashed, nodeCenter));
+      }
       if (rail.down && !forkLanes.has(rail.lane)) {
-        lane.append(vseg(x, ctx.color, "bottom", rail.downDashed));
+        lane.append(
+          vseg(x, ctx.color, "bottom", rail.downDashed, nodeCenter),
+        );
       }
     }
     // Single-stack view: link the first branch up to the base node above it.
     if (ctx.firstConnectsUp && i === 0) {
-      lane.append(vseg(laneX(row.lane), ctx.color, "top", diverged));
+      lane.append(
+        vseg(laneX(row.lane), ctx.color, "top", diverged, nodeCenter),
+      );
     }
     // Fork: curve out and down to each branching child's lane, matching the
     // rounded main-branch elbow rather than a sharp right-angle turn.
     if (row.isFork) {
-      const radius = Math.min(12, ctx.laneW, Math.round(ctx.row / 2));
+      const radius = Math.min(12, ctx.laneW, nodeCenter);
       for (const target of row.forkTargets) {
         lane.append(
           curveCorner(
             laneX(row.lane),
             laneX(target.lane),
-            "top:50%;bottom:0;",
+            `top:${nodeCenter}px;bottom:0;`,
             ctx.color,
             target.dashed,
             radius,
@@ -637,7 +642,7 @@ function renderGraphRows(graph, ctx) {
         );
       }
     }
-    lane.append(nodeEl(laneX(row.lane), ctx.color, co, false, ctx.row));
+    lane.append(nodeEl(laneX(row.lane), ctx.color, co, false, nodeCenter));
     const nm = splitName(row.branch);
     const mainChildren = [
       branchLabel(nm.prefix, nm.mainName, "#e6edf3", ctx.font),
@@ -656,23 +661,10 @@ function renderGraphRows(graph, ctx) {
 
     const contentChildren = [mainLine];
     if (status && status.descriptionHtml) {
-      const key = `${ctx.repoPath || ""}:${row.branch}`;
-      const expanded = expandedDescriptions.has(key);
       const desc = el("div", {
-        class: "branch-desc" + (expanded ? " expanded" : ""),
-        title: expanded ? "Click to collapse" : "Click to expand",
+        class: "branch-desc",
       });
-      if (expanded) {
-        desc.innerHTML = status.descriptionHtml;
-      } else {
-        desc.textContent = status.descriptionSummary || "";
-      }
-      desc.addEventListener("click", (event) => {
-        event.stopPropagation();
-        if (expanded) expandedDescriptions.delete(key);
-        else expandedDescriptions.add(key);
-        render();
-      });
+      desc.innerHTML = status.descriptionHtml;
       contentChildren.push(desc);
     }
     const content = el("div", {
@@ -740,7 +732,6 @@ function renderSingle(stack) {
       laneAreaW,
       laneOffset: globalMaxLane - (graph.maxLane || 0),
       firstConnectsUp: true,
-      repoPath: repo.path,
     };
     const wrap = el("div", { style: "margin-bottom:14px;" });
     wrap.append(
@@ -917,7 +908,6 @@ function renderAll(stacksList) {
         laneAreaW,
         laneOffset,
         firstConnectsUp: false,
-        repoPath: g.repo.path,
       };
       for (const r of renderGraphRows(graph, ctx)) inner.append(r);
       stackWrap.append(inner);

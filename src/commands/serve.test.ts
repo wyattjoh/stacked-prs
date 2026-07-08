@@ -765,6 +765,28 @@ describe("serve client watch wiring", () => {
     expect(html).not.toContain("name-actions-dismissed");
     expect(html).toContain("selectStack(stackId)");
   });
+
+  test("client renders branch descriptions expanded without click state", async () => {
+    const html = await getServeHtmlForTest(true);
+
+    expect(html).toContain("desc.innerHTML = status.descriptionHtml");
+    expect(html).toContain(".branch-desc p");
+    expect(html).not.toContain("expandedDescriptions");
+    expect(html).not.toContain("Click to expand");
+    expect(html).not.toContain("descriptionSummary ||");
+  });
+
+  test("client anchors branch graph connectors to the label row center", async () => {
+    const html = await getServeHtmlForTest(true);
+
+    expect(html).toContain("const nodeCenter = Math.round(ctx.row / 2);");
+    expect(html).toContain("top:${center}px;bottom:0;");
+    expect(html).toContain("height:${center}px;");
+    expect(html).toContain("top:${nodeCenter}px;bottom:0;");
+    expect(html).toContain(
+      "nodeEl(laneX(row.lane), ctx.color, co, false, nodeCenter)",
+    );
+  });
 });
 
 function branchStatus(
