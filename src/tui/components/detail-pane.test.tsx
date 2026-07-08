@@ -107,7 +107,7 @@ describe("DetailPane", () => {
           commits: [{ sha: "abc1234", subject: "Add cache" }],
         }}
         worktree={undefined}
-        description={"reduce upstream calls\n\n- cache reads"}
+        description="reduce upstream calls\n\n- cache reads"
         width={60}
       />,
     );
