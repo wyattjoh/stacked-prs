@@ -659,7 +659,7 @@ describe("/api/watch", () => {
     const decoder = new TextDecoder();
 
     const readUntil = (needle: string) => {
-      let timer = 0;
+      let timer: ReturnType<typeof setTimeout> | undefined;
       const wait = new Promise<never>((_, reject) => {
         timer = setTimeout(
           () => reject(new Error(`timed out waiting for ${needle}`)),

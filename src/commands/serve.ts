@@ -334,7 +334,7 @@ export async function watchRepoFs(
     return () => Promise.resolve();
   }
 
-  let timer: number | undefined;
+  let timer: ReturnType<typeof setTimeout> | undefined;
   const pendingChanges = new Map<string, ServeGitWatchChange>();
   let closed = false;
   const loop = (async () => {
@@ -953,7 +953,7 @@ export function createServeApp(
     app.get("/api/watch", (c) =>
       streamSSE(c, async (stream) => {
         const closers: Array<() => Promise<void>> = [];
-        let pollTimer: number | undefined;
+        let pollTimer: ReturnType<typeof setInterval> | undefined;
         const cleanup = async () => {
           if (pollTimer !== undefined) clearInterval(pollTimer);
           pollTimer = undefined;
