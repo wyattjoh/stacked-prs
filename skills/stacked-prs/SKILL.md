@@ -7,7 +7,7 @@ description: >-
   stack", "stack PRs", "stacked branches", "push to stack", "dependent PRs",
   "chained branches", "rebase my stack", "sync stack", "submit stack",
   "land stack", "import stack", "split branch", "fold branch".
-argument-hint: "[init|create|insert|split|fold|move|sync|restack|submit|status|pr|land|import|clean|archive]"
+argument-hint: "[init|create|insert|split|fold|move|sync|restack|submit|status|checkout|pr|land|import|clean|archive]"
 allowed-tools: >-
   Bash(git *), Bash(gh *),
   Bash(${CLAUDE_PLUGIN_ROOT}/skills/stacked-prs/scripts/stacked-prs *),
@@ -538,6 +538,18 @@ Claude. Press `a` to toggle whether archived stacks are shown, and `A` to
 archive or unarchive the focused stack (applied immediately, with a status
 notice). The TUI's two write operations are `L` (land) and `A` (archive).
 
+### `checkout`
+
+Open an interactive branch picker that renders the same ladder output as
+`status`, prefixes the selected branch row with a cursor, and runs
+`git checkout <branch>` when Enter is pressed. Esc or Ctrl-C aborts without
+changing branches. This is a local working-tree operation, not a stack rewrite,
+so the picker itself is the confirmation surface.
+
+Use the same display scoping as `status`: on a non-default branch it defaults to
+the current stack, on the default branch it defaults to `--all`, and flags like
+`--all`, `--stack-name`, `--archived`, and `--pr` carry over.
+
 ### `land`
 
 Handle cleanup after a PR merges. Auto-splits the stack if landing creates
@@ -570,6 +582,8 @@ Two supported shapes are handled by `executeLandFromCli` (in
 Read-only operations (`cli.ts status`, `cli.ts land --dry-run --json`) run
 without confirmation. The `cli.ts land` command itself requires no separate
 confirmation step -- the plan is built and executed in one call.
+`cli.ts checkout` is also unplanned: it renders an interactive picker and only
+runs `git checkout <branch>` after the user presses Enter.
 
 ### `clean`
 
@@ -639,6 +653,7 @@ git/gh mutation).
 - `stacked-prs status`
 - `stacked-prs status --json`
 - `stacked-prs status --interactive` / `-i`
+- `stacked-prs checkout` (local branch switch after interactive selection)
 - `stacked-prs nav --dry-run`
 - `stacked-prs verify-refs`
 - `stacked-prs restack --dry-run` (with or without `--json`)
@@ -693,6 +708,18 @@ otherwise status stays local-only and skips PR fetching. Pass `--theme light` or
 `--all` view by default; pass `--archived` to include them (`--json` always
 includes every stack with an `archived` flag, and the TUI toggles them with the
 `a` key).
+
+### `checkout`
+
+```bash
+${CLAUDE_PLUGIN_ROOT}/skills/stacked-prs/scripts/stacked-prs checkout \
+  [--stack-name=<name>] [--owner=<owner> --repo=<repo>] [--pr|-p] [--all] [--archived]
+```
+
+Renders the same ladder as `status`, lets the user move a `>` cursor with
+up/down, and runs `git checkout <branch>` on Enter. Esc or Ctrl-C aborts. The
+branch list excludes landed tombstone rows because those refs no longer exist
+locally.
 
 ### `restack`
 

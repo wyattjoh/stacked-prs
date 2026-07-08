@@ -293,6 +293,20 @@ Archived stacks (see [`/stacked-prs archive`](#stacked-prs-archive)) are hidden
 from the all-stacks view by default. Pass `--archived` to include them; `--json`
 always lists every stack with an `archived` flag.
 
+### `/stacked-prs checkout`
+
+Open a status-style branch picker and check out the selected stack branch:
+
+```
+stacked-prs checkout
+stacked-prs checkout --all
+stacked-prs checkout --archived
+```
+
+Use up/down to move the cursor. Press Enter to run `git checkout <branch>`, or
+press Esc/Ctrl-C to abort without changing branches. The picker accepts the same
+display options as `status`, including `--pr`.
+
 ### `/stacked-prs archive`
 
 Mark a stack as archived when you are done with it but want to keep its
@@ -421,6 +435,7 @@ deno run --allow-run=git,gh --allow-env --allow-read \
 | Subcommand                                    | Purpose                                                                |
 | --------------------------------------------- | ---------------------------------------------------------------------- |
 | `cli.ts status [--json] [--all]`              | Ladder output (or JSON) with PR info and sync status                   |
+| `cli.ts checkout [--all]`                     | Interactive status-style branch picker that runs `git checkout`        |
 | `cli.ts create <branch> [--create-worktree]`  | Create a child branch; auto-inits stack when on default branch         |
 | `cli.ts restack [--json]`                     | Segment-based tree rebase; handles conflicts across segments           |
 | `cli.ts nav [--dry-run]`                      | Builds and executes navigation comment plans                           |

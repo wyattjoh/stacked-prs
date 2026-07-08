@@ -107,11 +107,11 @@ deno task compile:linux   # Linux (xclip/wl-copy clipboard support)
 deno publish --dry-run --allow-dirty
 ```
 
-Subcommands: `status` (add `--interactive`/`-i` to launch the TUI), `create`,
-`restack`, `nav`, `verify-refs`, `import-discover`, `init`, `import`, `insert`,
-`fold`, `move`, `split`, `submit`, `sync`, `pr`, `land`, `clean`, `archive`.
-`lib/config.ts` and `lib/submit-plan.ts` are libraries shared across commands;
-import their functions directly.
+Subcommands: `status` (add `--interactive`/`-i` to launch the TUI), `checkout`,
+`create`, `restack`, `nav`, `verify-refs`, `import-discover`, `init`, `import`,
+`insert`, `fold`, `move`, `split`, `submit`, `sync`, `pr`, `land`, `clean`,
+`archive`. `lib/config.ts` and `lib/submit-plan.ts` are libraries shared across
+commands; import their functions directly.
 
 `submit` wraps `computeSubmitPlan` with an execution path: force-push, then
 `gh pr create|edit|ready` per branch, then apply nav comments. `sync` iterates
@@ -188,6 +188,7 @@ can be continued across process invocations.
 | `src/commands/clean.ts`           | Stale config detection and removal                                    | `cli.ts clean [--force] [--json]`                                       |
 | `src/commands/archive.ts`         | Toggle a stack's archived flag (`stack.<name>.archived`)              | `cli.ts archive [<stack>] [--unarchive] [--json]`                       |
 | `src/commands/create.ts`          | Branch creation with optional worktree                                | `cli.ts create <branch> [flags]`                                        |
+| `src/commands/checkout.ts`        | Pure checkout picker helpers and `git checkout <branch>` wrapper      | `cli.ts checkout [--all]`                                               |
 | `src/commands/status.ts`          | Read stack state + PR info                                            | `cli.ts status [--json]`                                                |
 | `src/commands/restack.ts`         | Per-branch topological rebase                                         | `cli.ts restack [--dry-run] [--json] [--resume]`                        |
 | `src/commands/nav.ts`             | Navigation comments                                                   | `cli.ts nav [--dry-run]`                                                |
@@ -339,8 +340,10 @@ showing a plan and waiting for user confirmation: any `git push`, `git rebase`,
 `git branch -d`, `gh pr create|edit|ready|comment`, and `gh api --method PATCH`.
 Read-only operations (`git status`, `git log`, `git fetch`, `gh pr list|view`,
 `gh repo view`, `cli.ts status`, `cli.ts verify-refs`, `cli.ts nav --dry-run`,
-`cli.ts restack --json`) run without confirmation. Preserve this distinction
-when editing the runbook.
+`cli.ts restack --json`) run without confirmation. `cli.ts checkout` is a local
+interactive branch switch: the terminal picker is the confirmation surface and
+then it runs one `git checkout <branch>`. Preserve this distinction when editing
+the runbook.
 
 ## Development rules
 

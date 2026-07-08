@@ -11,7 +11,19 @@ import {
 import { gh, listPrsForBranch, resolveRepo, withPrIndex } from "./lib/gh.ts";
 import { withRefLoader } from "./lib/loaders.ts";
 import { prStateFrom } from "./commands/land.ts";
-import { getAllStackStatuses, getStackStatus } from "./commands/status.ts";
+import {
+  type AllStacksStatus,
+  getAllStackStatuses,
+  getStackStatus,
+  type StackStatus,
+} from "./commands/status.ts";
+import {
+  checkoutBranch,
+  moveCheckoutSelection,
+  parseCheckoutKeypress,
+  renderCheckoutDisplay,
+  visibleCheckoutBranches,
+} from "./commands/checkout.ts";
 import { restack } from "./commands/restack.ts";
 import { buildNavPlan, executeNavAction } from "./lib/nav.ts";
 import { verifyRefs } from "./commands/verify-refs.ts";
@@ -135,6 +147,164 @@ async function shouldStatusAll(
     return currentBranch === await detectDefaultBranch(dir);
   } catch {
     return false;
+  }
+}
+
+interface CliStatusOptions {
+  loadPrs: boolean;
+  explicitAll: boolean;
+  stackName: string | undefined;
+  owner: string | undefined;
+  repo: string | undefined;
+  showArchived: boolean;
+}
+
+async function loadStatusForCli(
+  options: CliStatusOptions,
+): Promise<StackStatus | AllStacksStatus> {
+  let owner = options.owner;
+  let repo = options.repo;
+  if (options.loadPrs && (!owner || !repo)) {
+    try {
+      const resolved = await resolveRepo(owner, repo);
+      owner = resolved.owner;
+      repo = resolved.repo;
+    } catch {
+      // PR info will be unavailable, that's ok for status
+    }
+  }
+
+  const statusAll = await shouldStatusAll(
+    dir,
+    options.explicitAll,
+    options.stackName,
+  );
+  const runStatus = async () => {
+    if (statusAll) {
+      return await getAllStackStatuses(dir, owner, repo, {
+        loadPrs: options.loadPrs,
+        showArchived: options.showArchived,
+      });
+    }
+    const stackName = await resolveStackName(dir, options.stackName);
+    return await getStackStatus(dir, stackName, owner, repo, {
+      loadPrs: options.loadPrs,
+    });
+  };
+  return options.loadPrs && owner && repo
+    ? await withRefLoader(
+      dir,
+      () => withPrIndex(owner as string, repo as string, runStatus),
+    )
+    : await withRefLoader(dir, runStatus);
+}
+
+function selectedCheckoutIndex(
+  status: StackStatus | AllStacksStatus,
+  branches: string[],
+): number {
+  const stacks = "stacks" in status ? status.stacks : [status];
+  const current = stacks.flatMap((stack) => stack.branches).find((branch) =>
+    branch.isCurrent && branches.includes(branch.branch)
+  );
+  if (!current) return 0;
+  return branches.indexOf(current.branch);
+}
+
+async function writeStdout(text: string): Promise<void> {
+  await Deno.stdout.write(new TextEncoder().encode(text));
+}
+
+async function readCheckoutKeypress(): Promise<
+  ReturnType<typeof parseCheckoutKeypress>
+> {
+  const buffer = new Uint8Array(8);
+  const read = await Deno.stdin.read(buffer);
+  if (read === null) return "abort";
+  return parseCheckoutKeypress(buffer.subarray(0, read));
+}
+
+async function promptForCheckoutBranch(
+  status: StackStatus | AllStacksStatus,
+  branches: string[],
+): Promise<string | null> {
+  if (!Deno.stdin.isTerminal() || !Deno.stdout.isTerminal()) {
+    console.error("checkout requires an interactive terminal.");
+    Deno.exit(1);
+  }
+
+  let selectedIndex = selectedCheckoutIndex(status, branches);
+  const ENTER_ALT_SCREEN = "\x1b[?1049h";
+  const LEAVE_ALT_SCREEN = "\x1b[?1049l";
+  const HIDE_CURSOR = "\x1b[?25l";
+  const SHOW_CURSOR = "\x1b[?25h";
+  const CLEAR_SCREEN = "\x1b[2J\x1b[H";
+  const FOOTER = "Up/Down select  Enter checkout  Esc/Ctrl-C abort";
+
+  let restored = false;
+  const restore = () => {
+    if (restored) return;
+    restored = true;
+    try {
+      Deno.stdin.setRaw(false);
+    } catch {
+      // ignore
+    }
+    try {
+      Deno.stdout.writeSync(new TextEncoder().encode(SHOW_CURSOR));
+      Deno.stdout.writeSync(new TextEncoder().encode(LEAVE_ALT_SCREEN));
+    } catch {
+      // ignore
+    }
+  };
+  const onSignal = () => {
+    restore();
+    Deno.exit(130);
+  };
+
+  const render = async () => {
+    const selectedBranch = branches[selectedIndex];
+    await writeStdout(
+      `${CLEAR_SCREEN}${
+        renderCheckoutDisplay(status.display, branches, selectedBranch)
+      }\n\n${FOOTER}`,
+    );
+  };
+
+  try {
+    Deno.addSignalListener("SIGINT", onSignal);
+    Deno.addSignalListener("SIGTERM", onSignal);
+    Deno.stdin.setRaw(true);
+    await writeStdout(`${ENTER_ALT_SCREEN}${HIDE_CURSOR}`);
+    await render();
+    while (true) {
+      const key = await readCheckoutKeypress();
+      if (key === "abort") return null;
+      if (key === "enter") return branches[selectedIndex];
+      if (key === "up") {
+        selectedIndex = moveCheckoutSelection(
+          selectedIndex,
+          -1,
+          branches.length,
+        );
+        await render();
+      } else if (key === "down") {
+        selectedIndex = moveCheckoutSelection(
+          selectedIndex,
+          1,
+          branches.length,
+        );
+        await render();
+      }
+    }
+  } finally {
+    try {
+      Deno.removeSignalListener("SIGINT", onSignal);
+      Deno.removeSignalListener("SIGTERM", onSignal);
+    } catch {
+      // ignore
+    }
+    restore();
   }
 }
 
@@ -284,12 +454,13 @@ const command = new Command()
   )
   .action(async (options) => {
     const loadPrs = options.pr === true;
-    const statusAll = await shouldStatusAll(
-      dir,
-      options.all === true,
-      options.stackName,
-    );
+    const explicitAll = options.all === true;
     if (options.interactive) {
+      const statusAll = await shouldStatusAll(
+        dir,
+        explicitAll,
+        options.stackName,
+      );
       const initialTab = statusAll
         ? "all"
         : { stack: await resolveStackName(dir, options.stackName) } as const;
@@ -441,18 +612,6 @@ const command = new Command()
       Deno.exit(tuiExitCode);
     }
 
-    let owner = options.owner;
-    let repo = options.repo;
-    if (loadPrs && (!owner || !repo)) {
-      try {
-        const resolved = await resolveRepo(owner, repo);
-        owner = resolved.owner;
-        repo = resolved.repo;
-      } catch {
-        // PR info will be unavailable, that's ok for status
-      }
-    }
-
     // Install a repo-wide PR index so per-branch `listPrsForBranch`
     // calls inside `getStackStatus` / `getAllStackStatuses` all share
     // one `gh pr list` fetch instead of N per-branch round-trips. If
@@ -465,29 +624,63 @@ const command = new Command()
     // single `git cat-file --batch-check` subprocess instead of one
     // `git rev-parse` per ref. Status is read-only, so caching refs
     // for the scope of this handler is safe.
-    const runStatus = async () => {
-      if (statusAll) {
-        return await getAllStackStatuses(dir, owner, repo, {
-          loadPrs,
-          showArchived: options.archived === true,
-        });
-      }
-      const stackName = await resolveStackName(dir, options.stackName);
-      return await getStackStatus(dir, stackName, owner, repo, {
-        loadPrs,
-      });
-    };
-    const status = loadPrs && owner && repo
-      ? await withRefLoader(
-        dir,
-        () => withPrIndex(owner as string, repo as string, runStatus),
-      )
-      : await withRefLoader(dir, runStatus);
+    const status = await loadStatusForCli({
+      loadPrs,
+      explicitAll,
+      stackName: options.stackName,
+      owner: options.owner,
+      repo: options.repo,
+      showArchived: options.archived === true,
+    });
     if (options.json) {
       logJson(status);
     } else {
       console.log(status.display);
     }
+  })
+  // --- checkout ---
+  .command(
+    "checkout",
+    "Select a stack branch from status output and check it out",
+  )
+  .option(
+    "--stack-name <name:string>",
+    "Stack name (auto-detected from current branch)",
+  )
+  .option("--owner <owner:string>", "GitHub repo owner")
+  .option("--repo <repo:string>", "GitHub repo name")
+  .option("--pr, -p", "Load PR data from GitHub")
+  .option("--all, -a", "Show all stacks grouped by base branch")
+  .option("--archived", "Include archived stacks (hidden by default)")
+  .action(async (options) => {
+    const status = await loadStatusForCli({
+      loadPrs: options.pr === true,
+      explicitAll: options.all === true,
+      stackName: options.stackName,
+      owner: options.owner,
+      repo: options.repo,
+      showArchived: options.archived === true,
+    });
+
+    const branches = visibleCheckoutBranches(status, {
+      showArchived: options.archived === true,
+    });
+    if (branches.length === 0) {
+      console.log(status.display);
+      console.error("No stack branches available to checkout.");
+      Deno.exit(1);
+    }
+
+    const branch = await promptForCheckoutBranch(status, branches);
+    if (!branch) {
+      console.log("Aborted.");
+      return;
+    }
+
+    const result = await checkoutBranch(dir, branch);
+    if (result.stdout) console.log(result.stdout);
+    if (result.stderr) console.error(result.stderr);
+    if (!result.ok) Deno.exit(result.code || 1);
   })
   // --- create ---
   .command("create <branch:string>", "Create a new branch in the stack")
