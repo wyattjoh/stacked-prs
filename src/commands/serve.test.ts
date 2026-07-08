@@ -114,6 +114,35 @@ describe("buildServeStatus", () => {
     expect(stack?.archived).toBe(true);
   });
 
+  test("branch descriptions ship as escaped html and plain summary", async () => {
+    await using repo = await createTestRepo();
+    await addBranch(repo.dir, "feat/a", "main");
+    await setStackNode(repo.dir, "feat/a", "alpha", "main");
+    await setBaseBranch(repo.dir, "alpha", "main");
+    await runGit(
+      repo.dir,
+      "config",
+      "branch.feat/a.description",
+      "adds the **api** client\nsecond line",
+    );
+
+    const status = await buildServeStatus([
+      { name: "repo", path: repo.dir },
+    ]);
+    const branch = status.repositories[0].status!.stacks[0].branches[0];
+    expect(branch.description).toBe("adds the **api** client\nsecond line");
+    expect(branch.descriptionHtml).toBe(
+      "<p>adds the <strong>api</strong> client second line</p>",
+    );
+    expect(branch.descriptionSummary).toBe("adds the api client");
+    const row = status.repositories[0].status!.stacks[0].graph.rows.find(
+      (r) => r.branch === "feat/a",
+    );
+    expect(row?.branchStatus?.descriptionHtml).toContain(
+      "<strong>api</strong>",
+    );
+  });
+
   test("excludes repositories with no stacked PR metadata", async () => {
     await using stackedRepo = await createTestRepo();
     await using plainRepo = await createTestRepo();

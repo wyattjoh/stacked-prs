@@ -65,6 +65,46 @@ a {
   background: var(--row-tint-hover);
 }
 
+/* Collapsed branch description: one muted ellipsis line under the branch
+   name; click toggles the expanded markdown block. */
+.branch-desc {
+  color: #8b949e;
+  font-size: 12px;
+  line-height: 1.4;
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  padding: 0 0 6px;
+}
+
+.branch-desc.expanded {
+  white-space: normal;
+  overflow: visible;
+  text-overflow: clip;
+}
+
+.branch-desc p {
+  margin: 0 0 4px;
+}
+
+.branch-desc ul {
+  margin: 0 0 4px;
+  padding-left: 18px;
+}
+
+.branch-desc code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  background: rgba(110, 118, 129, 0.2);
+  border-radius: 3px;
+  padding: 0 3px;
+}
+
+.branch-desc a {
+  color: #58a6ff;
+}
+
 .name-action-group {
   display: none;
   align-items: center;

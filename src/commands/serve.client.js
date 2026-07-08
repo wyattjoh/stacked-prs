@@ -159,6 +159,10 @@ const loadState = new Map();
 const loadError = new Map();
 const loadInfo = new Map();
 
+// Branch-description rows expanded by click. Keyed by repo path + branch so
+// the same branch name in two repos expands independently.
+const expandedDescriptions = new Set();
+
 function el(tag, attrs = {}, children = []) {
   const node = document.createElement(tag);
   for (const [key, value] of Object.entries(attrs)) {
@@ -544,9 +548,10 @@ function curveCorner(xFrom, xTo, vstyle, color, dashed, radius) {
   });
 }
 
-function nodeEl(x, color, current, isBase) {
+function nodeEl(x, color, current, isBase, rowHeight) {
+  const top = !isBase && rowHeight ? `${Math.round(rowHeight / 2)}px` : "50%";
   const base =
-    `position:absolute;left:${x}px;top:50%;width:12px;height:12px;border-radius:50%;border:2px solid ${CARD};z-index:2;`;
+    `position:absolute;left:${x}px;top:${top};width:12px;height:12px;border-radius:50%;border:2px solid ${CARD};z-index:2;`;
   if (isBase) {
     return el("span", {
       style:
@@ -632,26 +637,55 @@ function renderGraphRows(graph, ctx) {
         );
       }
     }
-    lane.append(nodeEl(laneX(row.lane), ctx.color, co, false));
+    lane.append(nodeEl(laneX(row.lane), ctx.color, co, false, ctx.row));
     const nm = splitName(row.branch);
-    const children = [
-      lane,
+    const mainChildren = [
       branchLabel(nm.prefix, nm.mainName, "#e6edf3", ctx.font),
     ];
-    children.push(inlineStatus(status));
-    if (co) children.push(checkedOutBadge(ctx.color));
-    children.push(el("span", {
+    mainChildren.push(inlineStatus(status));
+    if (co) mainChildren.push(checkedOutBadge(ctx.color));
+    mainChildren.push(el("span", {
       class: "name-action-group branch-name-action-group",
     }, [
       copyNameButton("branch", row.branch),
     ]));
-    children.push(prRail(status ? status.pr : null));
+    mainChildren.push(prRail(status ? status.pr : null));
+    const mainLine = el("div", {
+      style: `display:flex;align-items:center;min-height:${ctx.row}px;`,
+    }, mainChildren);
+
+    const contentChildren = [mainLine];
+    if (status && status.descriptionHtml) {
+      const key = `${ctx.repoPath || ""}:${row.branch}`;
+      const expanded = expandedDescriptions.has(key);
+      const desc = el("div", {
+        class: "branch-desc" + (expanded ? " expanded" : ""),
+        title: expanded ? "Click to collapse" : "Click to expand",
+      });
+      if (expanded) {
+        desc.innerHTML = status.descriptionHtml;
+      } else {
+        desc.textContent = status.descriptionSummary || "";
+      }
+      desc.addEventListener("click", (event) => {
+        event.stopPropagation();
+        if (expanded) expandedDescriptions.delete(key);
+        else expandedDescriptions.add(key);
+        render();
+      });
+      contentChildren.push(desc);
+    }
+    const content = el("div", {
+      style:
+        "flex:1;min-width:0;display:flex;flex-direction:column;justify-content:center;",
+    }, contentChildren);
+
     // Full-bleed each tinted row to the card's inner edges so a stack reads as
     // an edge-to-edge color band. Negative margins push the background into the
     // card's horizontal padding; equal padding keeps the lane/label content
     // aligned with the untinted main and stack-name rows.
     let rowStyle =
-      `display:flex;align-items:center;min-height:${ctx.row}px;position:relative;` +
+      `display:flex;align-items:stretch;min-height:${ctx.row}px;position:relative;` +
       `margin-left:-${CARD_PAD_X}px;margin-right:-${CARD_PAD_X}px;` +
       `padding-left:${CARD_PAD_X}px;padding-right:${CARD_PAD_X}px;`;
     // Zebra-stripe each branch row in the stack's own color at alternating
@@ -667,7 +701,7 @@ function renderGraphRows(graph, ctx) {
     rowStyle += `--row-tint:${hexToRgba(ctx.color, tintAlpha)};` +
       `--row-tint-hover:${hexToRgba(ctx.color, hoverAlpha)};` +
       `--node-ring:${hexToRgba(ctx.color, 0.5)};`;
-    return el("div", { class: "branch-row", style: rowStyle }, children);
+    return el("div", { class: "branch-row", style: rowStyle }, [lane, content]);
   });
 }
 
@@ -706,6 +740,7 @@ function renderSingle(stack) {
       laneAreaW,
       laneOffset: globalMaxLane - (graph.maxLane || 0),
       firstConnectsUp: true,
+      repoPath: repo.path,
     };
     const wrap = el("div", { style: "margin-bottom:14px;" });
     wrap.append(
@@ -882,6 +917,7 @@ function renderAll(stacksList) {
         laneAreaW,
         laneOffset,
         firstConnectsUp: false,
+        repoPath: g.repo.path,
       };
       for (const r of renderGraphRows(graph, ctx)) inner.append(r);
       stackWrap.append(inner);

@@ -9,6 +9,7 @@ import { createPrIndex, type PrIndex, setActivePrIndex } from "../lib/gh.ts";
 import { type LaneTreeNode, layoutLanes } from "../lib/graph.ts";
 import { runGitCommand } from "../lib/stack.ts";
 import { withRefLoader } from "../lib/loaders.ts";
+import { firstLine, renderHtml, stripInline } from "../lib/markdown.ts";
 import { Hono } from "hono";
 import { html, raw } from "hono/html";
 import { streamSSE } from "hono/streaming";
@@ -67,7 +68,7 @@ export interface ServeBranchGraphRow {
   nodeKind: ServeBranchGraphNodeKind;
   repositoryName: string | null;
   sourceBranch: string | null;
-  branchStatus: BranchStatus | null;
+  branchStatus: ServeBranchStatus | null;
   lane: number;
   isFork: boolean;
   forkTargets: ServeBranchGraphTarget[];
@@ -87,9 +88,20 @@ export interface ServeBranchGraph {
 }
 
 /**
+ * Branch status enriched with server-rendered description variants.
+ */
+export type ServeBranchStatus = BranchStatus & {
+  /** Escaped HTML of the full markdown description. */
+  descriptionHtml?: string;
+  /** Plain-text first line for the collapsed row. */
+  descriptionSummary?: string;
+};
+
+/**
  * Stack status enriched with browser graph metadata.
  */
-export interface ServeStackStatus extends StackStatus {
+export interface ServeStackStatus extends Omit<StackStatus, "branches"> {
+  branches: ServeBranchStatus[];
   graph: ServeBranchGraph;
 }
 
@@ -207,7 +219,7 @@ interface ServeBranchGraphSourceNode {
   nodeKind: ServeBranchGraphNodeKind;
   repositoryName: string | null;
   sourceBranch: string | null;
-  branchStatus: BranchStatus | null;
+  branchStatus: ServeBranchStatus | null;
   indentChildren: boolean;
 }
 
@@ -506,7 +518,9 @@ function buildServeGraph(
  * The first child continues its parent's lane. Additional children allocate
  * lanes, matching the branching style used by the Gloamy flow sidebar.
  */
-export function buildServeBranchGraph(stack: StackStatus): ServeBranchGraph {
+export function buildServeBranchGraph(
+  stack: { branches: ServeBranchStatus[] },
+): ServeBranchGraph {
   const branches = new Set(stack.branches.map((branch) => branch.branch));
   return buildServeGraph(stack.branches.map((branch) => ({
     id: branch.branch,
@@ -521,15 +535,28 @@ export function buildServeBranchGraph(stack: StackStatus): ServeBranchGraph {
   })));
 }
 
+function withDescriptionVariants(branch: BranchStatus): ServeBranchStatus {
+  if (!branch.description) return branch;
+  return {
+    ...branch,
+    descriptionHtml: renderHtml(branch.description),
+    descriptionSummary: stripInline(firstLine(branch.description)),
+  };
+}
+
 function stripStatusAnsi(status: AllStacksStatus): ServeAllStacksStatus {
   return {
     ...status,
     display: stripAnsi(status.display),
-    stacks: status.stacks.map((stack) => ({
-      ...stack,
-      display: stripAnsi(stack.display),
-      graph: buildServeBranchGraph(stack),
-    })),
+    stacks: status.stacks.map((stack) => {
+      const branches = stack.branches.map(withDescriptionVariants);
+      return {
+        ...stack,
+        branches,
+        display: stripAnsi(stack.display),
+        graph: buildServeBranchGraph({ branches }),
+      };
+    }),
   };
 }
 
