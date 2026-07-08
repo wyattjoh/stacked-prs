@@ -162,6 +162,7 @@ interface CliStatusOptions {
   owner: string | undefined;
   repo: string | undefined;
   showArchived: boolean;
+  fullDescriptions: boolean;
 }
 
 async function loadStatusForCli(
@@ -189,11 +190,13 @@ async function loadStatusForCli(
       return await getAllStackStatuses(dir, owner, repo, {
         loadPrs: options.loadPrs,
         showArchived: options.showArchived,
+        fullDescriptions: options.fullDescriptions,
       });
     }
     const stackName = await resolveStackName(dir, options.stackName);
     return await getStackStatus(dir, stackName, owner, repo, {
       loadPrs: options.loadPrs,
+      fullDescriptions: options.fullDescriptions,
     });
   };
   return options.loadPrs && owner && repo
@@ -580,6 +583,10 @@ const command = new Command()
   .option("--pr, -p", "Load PR data from GitHub")
   .option("--all, -a", "Show all stacks grouped by base branch")
   .option("--archived", "Include archived stacks (hidden by default)")
+  .option(
+    "--description",
+    "Show full branch descriptions in the ladder output",
+  )
   .option("--interactive, -i", "Launch the interactive TUI")
   .option(
     "--theme <theme:string>",
@@ -764,6 +771,7 @@ const command = new Command()
       owner: options.owner,
       repo: options.repo,
       showArchived: options.archived === true,
+      fullDescriptions: options.description === true,
     });
     if (options.json) {
       logJson(status);
@@ -785,6 +793,10 @@ const command = new Command()
   .option("--pr, -p", "Load PR data from GitHub")
   .option("--all, -a", "Show all stacks grouped by base branch")
   .option("--archived", "Include archived stacks (hidden by default)")
+  .option(
+    "--description",
+    "Show full branch descriptions in the ladder output",
+  )
   .action(async (options) => {
     const status = await loadStatusForCli({
       loadPrs: options.pr === true,
@@ -793,6 +805,7 @@ const command = new Command()
       owner: options.owner,
       repo: options.repo,
       showArchived: options.archived === true,
+      fullDescriptions: options.description === true,
     });
 
     const branches = visibleCheckoutBranches(status, {

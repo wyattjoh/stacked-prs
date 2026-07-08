@@ -448,6 +448,72 @@ describe("getStackStatus with merged nodes", () => {
   });
 });
 
+describe("branch descriptions in status", () => {
+  test("ladder shows a dimmed first line under a described branch", async () => {
+    await using repo = await createTestRepo();
+    await using _mock = await makeMockDir();
+    await addBranch(repo.dir, "feat/a", "main");
+    await setStackNode(repo.dir, "feat/a", "my-stack", "main");
+    await setBaseBranch(repo.dir, "my-stack", "main");
+    await runGit(
+      repo.dir,
+      "config",
+      "branch.feat/a.description",
+      "adds the **api** client\nsecond line detail",
+    );
+
+    const status = await getStackStatus(repo.dir, "my-stack");
+    const lines = stripAnsi(status.display).split("\n");
+    expect(status.branches[0].description).toBe(
+      "adds the **api** client\nsecond line detail",
+    );
+    expect(lines[1]).toContain("adds the api client");
+    expect(lines[1].trimStart().startsWith("│")).toBe(true);
+    expect(status.display).not.toContain("second line detail");
+  });
+
+  test("no description means no extra line", async () => {
+    await using repo = await createTestRepo();
+    await using _mock = await makeMockDir();
+    await addBranch(repo.dir, "feat/a", "main");
+    await setStackNode(repo.dir, "feat/a", "my-stack", "main");
+    await setBaseBranch(repo.dir, "my-stack", "main");
+
+    const status = await getStackStatus(repo.dir, "my-stack");
+    expect(stripAnsi(status.display).split("\n")).toHaveLength(2);
+    expect(status.branches[0].description).toBeUndefined();
+  });
+
+  test("fullDescriptions renders the whole markdown body with rails", async () => {
+    await using repo = await createTestRepo();
+    await using _mock = await makeMockDir();
+    await addBranch(repo.dir, "feat/a", "main");
+    await setStackNode(repo.dir, "feat/a", "my-stack", "main");
+    await setBaseBranch(repo.dir, "my-stack", "main");
+    await runGit(
+      repo.dir,
+      "config",
+      "branch.feat/a.description",
+      "summary line\n\n- cache reads\n- invalidate on submit",
+    );
+
+    const status = await getStackStatus(
+      repo.dir,
+      "my-stack",
+      undefined,
+      undefined,
+      { fullDescriptions: true },
+    );
+    const display = stripAnsi(status.display);
+    expect(display).toContain("summary line");
+    expect(display).toContain("• cache reads");
+    expect(display).toContain("• invalidate on submit");
+    for (const line of display.split("\n").slice(1, -1)) {
+      expect(line.trimStart().startsWith("│")).toBe(true);
+    }
+  });
+});
+
 describe("getAllStackStatuses", () => {
   test("renders all stacks grouped under their shared base branch", async () => {
     await using repo = await createTestRepo();
