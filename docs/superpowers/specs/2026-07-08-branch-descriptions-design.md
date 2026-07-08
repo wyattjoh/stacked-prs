@@ -156,7 +156,8 @@ markers (`↑ N more` / `↓ N more`) now account for description rows too.
 When the detail pane is focused (via `tab`), `j` / `k` become aliases for
 down / up scrolling, matching the land modal's keys (arrows keep working;
 `←`/`→` still scroll horizontally). `STATUS_BAR_ITEMS` / help overlay gain
-the hint for the detail-focused context.
+the hint for the detail-focused context, and the overflow marker row carries
+a right-aligned dimmed `j/k for navigation` hint inline.
 
 ```
 ┌──────────────────────────────────────────────────┐
@@ -167,13 +168,14 @@ the hint for the detail-focused context.
 │  • cache GET /summary for 60s                    │
 │                                                  │
 │a1b2c3d Add cache layer with TTL eviction         │
-│↓ 4 more                                          │
+│↓ 4 more                        j/k for navigation│
 └──────────────────────────────────────────────────┘
 ```
 
 (Rows 3-5 are the markdown-rendered description; `↓ 4 more` covers the
-remaining body rows, scrollable with `j`/`k`. Without a description the pane
-is unchanged from today.)
+remaining body rows, scrollable with `j`/`k`; the hint on its right edge is
+dimmed and appears only when a marker row is shown. Without a description
+the pane is unchanged from today.)
 
 ### `serve` web UI
 
