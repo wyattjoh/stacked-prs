@@ -57,6 +57,7 @@ export const KEY_BINDINGS_BY_SECTION: readonly KeyBindingSection[] = [
     title: "Navigation",
     bindings: [
       { keys: "tab / shift-tab", action: "cycle focus header / body / detail" },
+      { keys: "j / k", action: "scroll detail pane (when focused)" },
       { keys: "↑ ↓ ← →", action: "navigate within focused section" },
       { keys: "g / G", action: "first / last branch in stack (body)" },
       { keys: "pgup / pgdn", action: "previous / next stack (body)" },

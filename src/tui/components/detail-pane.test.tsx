@@ -95,4 +95,86 @@ describe("DetailPane", () => {
     expect(lastFrame()).toContain("no branch selected");
     unmount();
   });
+
+  test("renders the markdown description between worktree and commits", () => {
+    const { lastFrame, unmount } = render(
+      <DetailPane
+        branch="feat/a"
+        prCell={undefined}
+        syncStatus="up-to-date"
+        commitsCell={{
+          status: "loaded",
+          commits: [{ sha: "abc1234", subject: "Add cache" }],
+        }}
+        worktree={undefined}
+        description={"reduce upstream calls\n\n- cache reads"}
+        width={60}
+      />,
+    );
+    const frame = lastFrame() ?? "";
+    expect(frame).toContain("reduce upstream calls");
+    expect(frame).toContain("• cache reads");
+    expect(frame).toContain("abc1234 Add cache");
+    unmount();
+  });
+
+  test("overflow marker row carries the j/k navigation hint", () => {
+    const commits = Array.from({ length: 12 }, (_, i) => ({
+      sha: `sha${i}00`,
+      subject: `commit ${i}`,
+    }));
+    const { lastFrame, unmount } = render(
+      <DetailPane
+        branch="feat/a"
+        prCell={undefined}
+        syncStatus="up-to-date"
+        commitsCell={{ status: "loaded", commits }}
+        worktree={undefined}
+        description="a description line"
+        width={60}
+      />,
+    );
+    const frame = lastFrame() ?? "";
+    expect(frame).toContain("more");
+    expect(frame).toContain("j/k for navigation");
+    unmount();
+  });
+
+  test("scrollY reaches description rows pushed out of the viewport", () => {
+    const commits = Array.from({ length: 12 }, (_, i) => ({
+      sha: `sha${i}00`,
+      subject: `commit ${i}`,
+    }));
+    const { lastFrame, unmount } = render(
+      <DetailPane
+        branch="feat/a"
+        prCell={undefined}
+        syncStatus="up-to-date"
+        commitsCell={{ status: "loaded", commits }}
+        worktree={undefined}
+        description="the description"
+        width={60}
+        scrollY={3}
+      />,
+    );
+    const frame = lastFrame() ?? "";
+    expect(frame).toContain("↑");
+    expect(frame).toContain("commit");
+    unmount();
+  });
+
+  test("no description leaves the pane unchanged", () => {
+    const { lastFrame, unmount } = render(
+      <DetailPane
+        branch="feat/a"
+        prCell={undefined}
+        syncStatus="up-to-date"
+        commitsCell={{ status: "loaded", commits: [] }}
+        worktree={undefined}
+        width={60}
+      />,
+    );
+    expect(lastFrame() ?? "").not.toContain("j/k");
+    unmount();
+  });
 });

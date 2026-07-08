@@ -25,7 +25,7 @@ import {
 } from "./state/navigation.ts";
 import { copyToClipboard } from "./lib/clipboard.ts";
 import { gh, listPrsForBranch } from "../lib/gh.ts";
-import { runGitCommand, setStackArchived } from "../lib/stack.ts";
+import { getAllNodes, runGitCommand, setStackArchived } from "../lib/stack.ts";
 import { HeaderBox } from "./components/header-box.tsx";
 import { StackMap } from "./components/stack-map.tsx";
 import { DetailPane } from "./components/detail-pane.tsx";
@@ -660,12 +660,12 @@ export function App(props: AppProps): React.ReactElement {
 
     if (state.focusedSection === "detail") {
       const { scrollX: dx, scrollY: dy } = state.detailScroll;
-      if (key.upArrow) {
+      if (key.upArrow || input === "k") {
         dispatch({
           type: "DETAIL_SCROLL",
           viewport: { scrollX: dx, scrollY: Math.max(0, dy - 1) },
         });
-      } else if (key.downArrow) {
+      } else if (key.downArrow || input === "j") {
         dispatch({
           type: "DETAIL_SCROLL",
           viewport: { scrollX: dx, scrollY: dy + 1 },
@@ -774,6 +774,15 @@ export function App(props: AppProps): React.ReactElement {
   }
 
   const focusedBranch = state.cursor?.branch ?? null;
+  const focusedDescription = React.useMemo(() => {
+    if (!focusedBranch) return undefined;
+    for (const tree of state.allTrees) {
+      for (const node of getAllNodes(tree)) {
+        if (node.branch === focusedBranch) return node.description;
+      }
+    }
+    return undefined;
+  }, [focusedBranch, state.allTrees]);
   const stackNames = state.trees.map((t: StackTree) => t.stackName);
 
   return (
@@ -867,6 +876,8 @@ export function App(props: AppProps): React.ReactElement {
               scrollX={state.detailScroll.scrollX}
               scrollY={state.detailScroll.scrollY}
               primaryColor={primaryColor}
+              description={focusedDescription}
+              width={termSize.cols}
             />
           </>
         )}
