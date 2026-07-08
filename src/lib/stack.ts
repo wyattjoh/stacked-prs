@@ -273,22 +273,34 @@ export async function computeSyncStatus(
   return "diverged";
 }
 
-/** Run `git config --get-regexp <pattern>`, return parsed lines as [key, value] pairs. */
+/**
+ * Run `git config -z --get-regexp <pattern>`, return parsed [key, value]
+ * pairs. NUL-separated records put the key before the first newline, so
+ * multi-line values (e.g. branch.<name>.description) survive parsing.
+ */
 export async function gitConfigGetRegexp(
   dir: string,
   pattern: string,
 ): Promise<Array<[string, string]>> {
-  const result = await gitConfig(dir, "--get-regexp", pattern);
-  if (!result) return [];
+  const { code, stdout } = await runGitCommandRaw(
+    dir,
+    "config",
+    "-z",
+    "--get-regexp",
+    pattern,
+  );
+  if (code !== 0 || stdout.length === 0) return [];
 
-  return result
-    .split("\n")
-    .filter((line) => line.trim().length > 0)
-    .map((line) => {
-      const spaceIndex = line.indexOf(" ");
-      const key = line.slice(0, spaceIndex);
-      const value = line.slice(spaceIndex + 1);
-      return [key, value] as [string, string];
+  return stdout
+    .split("\0")
+    .filter((record) => record.length > 0)
+    .map((record) => {
+      const newlineIndex = record.indexOf("\n");
+      if (newlineIndex === -1) return [record, ""] as [string, string];
+      return [
+        record.slice(0, newlineIndex),
+        record.slice(newlineIndex + 1),
+      ] as [string, string];
     });
 }
 

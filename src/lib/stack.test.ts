@@ -11,6 +11,7 @@ import {
   getAllNodes,
   getAllStackTrees,
   getBaseBranch,
+  gitConfigGetRegexp,
   getLandedBranches,
   getLandedParents,
   getLandedPrs,
@@ -95,6 +96,41 @@ describe("stack", () => {
       expect(step2Name.code).toBe(0);
       expect(step2Name.stdout).toBe("my-stack");
     });
+  });
+});
+
+describe("gitConfigGetRegexp", () => {
+  test("round-trips multi-line config values", async () => {
+    await using repo = await createTestRepo();
+    const description = "first line with detail\nsecond line\n\n- a bullet";
+    await runGit(
+      repo.dir,
+      "config",
+      "branch.main.description",
+      description,
+    );
+
+    const entries = await gitConfigGetRegexp(
+      repo.dir,
+      "^branch\\.main\\.description$",
+    );
+    expect(entries).toEqual([["branch.main.description", description]]);
+  });
+
+  test("parses multiple records when one value is multi-line", async () => {
+    await using repo = await createTestRepo();
+    await runGit(repo.dir, "config", "branch.main.stack-name", "alpha");
+    await runGit(
+      repo.dir,
+      "config",
+      "branch.main.description",
+      "line one\nline two",
+    );
+
+    const entries = await gitConfigGetRegexp(repo.dir, "^branch\\.main\\.");
+    const byKey = new Map(entries);
+    expect(byKey.get("branch.main.stack-name")).toBe("alpha");
+    expect(byKey.get("branch.main.description")).toBe("line one\nline two");
   });
 });
 
