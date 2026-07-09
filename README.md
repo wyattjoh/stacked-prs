@@ -295,7 +295,8 @@ always lists every stack with an `archived` flag.
 
 ### `/stacked-prs checkout`
 
-Open a status-style branch picker and check out the selected stack branch:
+Open a status-style branch picker and check out the selected stack or base
+branch:
 
 ```
 stacked-prs checkout
@@ -303,9 +304,16 @@ stacked-prs checkout --all
 stacked-prs checkout --archived
 ```
 
-Use up/down to move the cursor. Press Enter to run `git checkout <branch>`, or
-press Esc/Ctrl-C to abort without changing branches. The picker accepts the same
-display options as `status`, including `--pr`.
+Use up/down to move the cursor, Page Up/Page Down to jump between stacks, and
+Home/End to jump to the top or bottom of the list. Type to fuzzy-filter the
+branch list; Backspace edits the query and Ctrl-U clears it. Press Enter to run
+`git checkout <branch>`, or press Esc/Ctrl-C to abort without changing branches.
+The selected row overrides status colors with white text. The picker accepts the
+same display options as `status`, including `--pr`. It renders inline in the
+current terminal scrollback, leaving the final picker frame visible with
+checkout or abort output below it. When the ladder is taller than the terminal,
+the picker keeps a viewport-sized window around the selected row. The picker
+includes the base branch shown at the bottom of the ladder.
 
 ### `/stacked-prs archive`
 

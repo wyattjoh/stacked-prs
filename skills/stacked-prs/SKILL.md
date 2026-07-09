@@ -543,8 +543,16 @@ notice). The TUI's two write operations are `L` (land) and `A` (archive).
 Open an interactive branch picker that renders the same ladder output as
 `status`, prefixes the selected branch row with a cursor, and runs
 `git checkout <branch>` when Enter is pressed. Esc or Ctrl-C aborts without
-changing branches. This is a local working-tree operation, not a stack rewrite,
-so the picker itself is the confirmation surface.
+changing branches. Up/Down moves one branch, Page Up/Page Down jumps between
+stacks, and Home/End jumps to the top or bottom of the list. Printable typing
+updates a fuzzy filter, Backspace edits it, and Ctrl-U clears it. The selected
+row is rendered in white text, overriding the status colors on that row. The
+picker renders inline in the current terminal scrollback and leaves the final
+frame visible with checkout or abort output below it. When the ladder is taller
+than the terminal, it keeps a viewport-sized window around the selected row. The
+picker includes the base branch shown at the bottom of the ladder. This is a
+local working-tree operation, not a stack rewrite, so the picker itself is the
+confirmation surface.
 
 Use the same display scoping as `status`: on a non-default branch it defaults to
 the current stack, on the default branch it defaults to `--all`, and flags like
@@ -717,9 +725,14 @@ ${CLAUDE_PLUGIN_ROOT}/skills/stacked-prs/scripts/stacked-prs checkout \
 ```
 
 Renders the same ladder as `status`, lets the user move a `>` cursor with
-up/down, and runs `git checkout <branch>` on Enter. Esc or Ctrl-C aborts. The
-branch list excludes landed tombstone rows because those refs no longer exist
-locally.
+Up/Down, jump between stacks with Page Up/Page Down, jump to list edges with
+Home/End, fuzzy-filter by typing printable characters, edit the filter with
+Backspace, clear it with Ctrl-U, override status colors on the selected row with
+white text, and run `git checkout <branch>` on Enter. Esc or Ctrl-C aborts. The
+picker renders inline in the current terminal scrollback and clips tall ladders
+to the terminal viewport around the selected row. The branch list includes the
+base branch and excludes landed tombstone rows because those refs no longer
+exist locally.
 
 ### `restack`
 

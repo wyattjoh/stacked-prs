@@ -341,9 +341,13 @@ showing a plan and waiting for user confirmation: any `git push`, `git rebase`,
 Read-only operations (`git status`, `git log`, `git fetch`, `gh pr list|view`,
 `gh repo view`, `cli.ts status`, `cli.ts verify-refs`, `cli.ts nav --dry-run`,
 `cli.ts restack --json`) run without confirmation. `cli.ts checkout` is a local
-interactive branch switch: the terminal picker is the confirmation surface and
-then it runs one `git checkout <branch>`. Preserve this distinction when editing
-the runbook.
+interactive branch switch: the inline terminal picker is the confirmation
+surface, keeps tall ladders clipped to the terminal viewport around the selected
+row, tracks terminal columns so wrapped lines are included in inline redraw
+cursor movement, overrides status colors on the selected row with white text,
+supports Up/Down, Page Up/Page Down, Home/End navigation, and type-to-filter
+fuzzy search, and then runs one `git checkout <branch>`. Preserve this
+distinction when editing the runbook.
 
 ## Development rules
 

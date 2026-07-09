@@ -19,9 +19,11 @@ import {
 } from "./commands/status.ts";
 import {
   checkoutBranch,
-  moveCheckoutSelection,
+  filterCheckoutBranches,
+  moveCheckoutSelectionForKey,
   parseCheckoutKeypress,
-  renderCheckoutDisplay,
+  renderCheckoutFrame,
+  renderCheckoutFrameUpdate,
   visibleCheckoutBranches,
 } from "./commands/checkout.ts";
 import { restack } from "./commands/restack.ts";
@@ -215,6 +217,14 @@ async function writeStdout(text: string): Promise<void> {
   await Deno.stdout.write(new TextEncoder().encode(text));
 }
 
+function checkoutViewportSize(): { rows: number; columns: number } {
+  try {
+    return Deno.consoleSize();
+  } catch {
+    return { rows: 24, columns: 80 };
+  }
+}
+
 async function readCheckoutKeypress(): Promise<
   ReturnType<typeof parseCheckoutKeypress>
 > {
@@ -222,6 +232,10 @@ async function readCheckoutKeypress(): Promise<
   const read = await Deno.stdin.read(buffer);
   if (read === null) return "abort";
   return parseCheckoutKeypress(buffer.subarray(0, read));
+}
+
+function removeLastSearchCharacter(query: string): string {
+  return Array.from(query).slice(0, -1).join("");
 }
 
 async function promptForCheckoutBranch(
@@ -233,13 +247,26 @@ async function promptForCheckoutBranch(
     Deno.exit(1);
   }
 
-  let selectedIndex = selectedCheckoutIndex(status, branches);
-  const ENTER_ALT_SCREEN = "\x1b[?1049h";
-  const LEAVE_ALT_SCREEN = "\x1b[?1049l";
+  let searchQuery = "";
+  let filteredBranches = filterCheckoutBranches(
+    branches,
+    searchQuery,
+  );
+  let selectedIndex = selectedCheckoutIndex(status, filteredBranches);
   const HIDE_CURSOR = "\x1b[?25l";
   const SHOW_CURSOR = "\x1b[?25h";
-  const CLEAR_SCREEN = "\x1b[2J\x1b[H";
-  const FOOTER = "Up/Down select  Enter checkout  Esc/Ctrl-C abort";
+  let frameLineCount = 0;
+
+  const updateFilter = (preferredBranch: string | undefined) => {
+    filteredBranches = filterCheckoutBranches(
+      branches,
+      searchQuery,
+    );
+    const preferredIndex = preferredBranch === undefined
+      ? -1
+      : filteredBranches.indexOf(preferredBranch);
+    selectedIndex = preferredIndex >= 0 ? preferredIndex : 0;
+  };
 
   let restored = false;
   const restore = () => {
@@ -252,7 +279,6 @@ async function promptForCheckoutBranch(
     }
     try {
       Deno.stdout.writeSync(new TextEncoder().encode(SHOW_CURSOR));
-      Deno.stdout.writeSync(new TextEncoder().encode(LEAVE_ALT_SCREEN));
     } catch {
       // ignore
     }
@@ -263,37 +289,84 @@ async function promptForCheckoutBranch(
   };
 
   const render = async () => {
-    const selectedBranch = branches[selectedIndex];
-    await writeStdout(
-      `${CLEAR_SCREEN}${
-        renderCheckoutDisplay(status.display, branches, selectedBranch)
-      }\n\n${FOOTER}`,
-    );
+    const selectedBranch = filteredBranches[selectedIndex];
+    const viewport = checkoutViewportSize();
+    const renderOptions = {
+      viewportRows: viewport.rows,
+      viewportColumns: viewport.columns,
+    };
+    const frame = frameLineCount === 0
+      ? renderCheckoutFrame(
+        status.display,
+        filteredBranches,
+        selectedBranch,
+        {
+          ...renderOptions,
+          query: searchQuery,
+          matchCount: filteredBranches.length,
+          totalCount: branches.length,
+        },
+      )
+      : renderCheckoutFrameUpdate(
+        frameLineCount,
+        status.display,
+        filteredBranches,
+        selectedBranch,
+        {
+          ...renderOptions,
+          query: searchQuery,
+          matchCount: filteredBranches.length,
+          totalCount: branches.length,
+        },
+      );
+    frameLineCount = frame.lineCount;
+    await writeStdout(frame.text);
   };
 
   try {
     Deno.addSignalListener("SIGINT", onSignal);
     Deno.addSignalListener("SIGTERM", onSignal);
     Deno.stdin.setRaw(true);
-    await writeStdout(`${ENTER_ALT_SCREEN}${HIDE_CURSOR}`);
+    await writeStdout(HIDE_CURSOR);
     await render();
     while (true) {
       const key = await readCheckoutKeypress();
       if (key === "abort") return null;
-      if (key === "enter") return branches[selectedIndex];
-      if (key === "up") {
-        selectedIndex = moveCheckoutSelection(
-          selectedIndex,
-          -1,
-          branches.length,
-        );
+      if (key === "enter") {
+        if (filteredBranches.length === 0) continue;
+        return filteredBranches[selectedIndex];
+      }
+      if (typeof key === "object") {
+        const selectedBranch = filteredBranches[selectedIndex];
+        searchQuery += key.value;
+        updateFilter(selectedBranch);
         await render();
-      } else if (key === "down") {
-        selectedIndex = moveCheckoutSelection(
-          selectedIndex,
-          1,
-          branches.length,
-        );
+        continue;
+      }
+      if (key === "backspace") {
+        if (searchQuery.length === 0) continue;
+        const selectedBranch = filteredBranches[selectedIndex];
+        searchQuery = removeLastSearchCharacter(searchQuery);
+        updateFilter(selectedBranch);
+        await render();
+        continue;
+      }
+      if (key === "clear-search") {
+        if (searchQuery.length === 0) continue;
+        const selectedBranch = filteredBranches[selectedIndex];
+        searchQuery = "";
+        updateFilter(selectedBranch);
+        await render();
+        continue;
+      }
+      const nextIndex = moveCheckoutSelectionForKey(
+        status,
+        filteredBranches,
+        selectedIndex,
+        key,
+      );
+      if (nextIndex !== selectedIndex) {
+        selectedIndex = nextIndex;
         await render();
       }
     }
