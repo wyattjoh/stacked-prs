@@ -341,8 +341,9 @@ git branch --edit-description feat/api-cache
 
 When set, `status` shows the dimmed first line under the branch (`--description`
 prints it in full), and the TUI detail pane renders it for the focused branch.
-Scroll the focused detail pane with `j` and `k`. Descriptions are stored in
-git's native `branch.<name>.description` config key, are local to the
+Scroll the focused detail pane with `j` and `k`. The `serve` browser view
+renders the full markdown description below each branch label. Descriptions are
+stored in git's native `branch.<name>.description` config key, are local to the
 repository, and are cleaned up automatically when the branch is deleted.
 
 Descriptions are also the source of truth for PR bodies. `submit` creates a
@@ -383,7 +384,8 @@ where each repository is rooted at its base branch and every stack descends off
 a shared trunk, or pick a single stack to see each repository's branches drawn
 as a vertical lane. Every branch row shows its sync status, a PR badge that
 links to the pull request when available, and a marker for the currently
-checked-out branch. Each stack's branch rows are tinted in that stack's color
+checked-out branch. Branch descriptions render as muted markdown blocks below
+their branch labels. Each stack's branch rows are tinted in that stack's color
 (alternating subtly row to row) so you can tell at a glance where one stack's
 branches end and the next begins; the checked-out row gets a stronger tint.
 Hovering a branch row brightens it and highlights its graph dot, making it easy

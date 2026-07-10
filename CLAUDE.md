@@ -191,8 +191,12 @@ muted relative time of the stack's most recent commit (for example
 `StackStatus.latestCommitAt` ISO timestamp; `latestCommitAt` is the max
 committer date across the stack's branch refs (computed once via
 `getLatestCommitDate` in `src/lib/stack.ts`, `null` when no ref resolves) and
-flows into the serve payload through the `stripStatusAnsi` spread. Branch rows
-are zebra-tinted in their stack's own color at alternating opacity (a faint
+flows into the serve payload through the `stripStatusAnsi` spread. Serve also
+ships server-rendered `descriptionHtml` and `descriptionSummary` so the browser
+client stays parser-free, and renders descriptions expanded below branch labels.
+Because descriptions make rows taller, graph rails and node dots stay anchored
+to the fixed label-row center rather than the full row midpoint. Branch rows are
+zebra-tinted in their stack's own color at alternating opacity (a faint
 `hexToRgba(stackColor, ~0.05/0.02)` background) so each stack reads as one color
 band and neighboring rows stay separable; the checked-out row uses a stronger
 fill (~0.13, no accent bar) to stand out above the zebra. Tints full-bleed to
