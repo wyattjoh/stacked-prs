@@ -1,4 +1,5 @@
 import * as colors from "@std/fmt/colors";
+import stringWidth from "string-width";
 
 /**
  * One styled run of inline markdown text.
@@ -20,12 +21,15 @@ export type MdBlock =
   | { kind: "list"; items: MdSpan[][] };
 
 const INLINE_RE =
-  /(\*\*([^*\n]+)\*\*)|(\*([^*\s][^*\n]*?)\*)|(`([^`\n]+)`)|(\[([^\]\n]+)\]\(([^)\s]+)\))/;
+  /(\*\*([^*\n]+)\*\*)|(\*([^*\s][^*\n]*?)\*)|(`([^`\n]+)`)|((?<!\!)\[([^\]\n]+)\]\(([^)\s]+)\))/;
 
 /**
  * Parse supported inline markdown forms into styled spans.
  *
  * Unsupported or unmatched syntax is returned as literal text.
+ *
+ * @param text Raw inline markdown text.
+ * @returns Styled spans for the supported inline subset.
  */
 export function parseInline(text: string): MdSpan[] {
   const spans: MdSpan[] = [];
@@ -56,6 +60,9 @@ export function parseInline(text: string): MdSpan[] {
  *
  * Consecutive non-empty non-list lines become one paragraph with soft wraps
  * collapsed to spaces. Flat `-` and `*` list items become list blocks.
+ *
+ * @param source Raw markdown source.
+ * @returns Parsed paragraph and flat-list blocks.
  */
 export function parseMarkdown(source: string): MdBlock[] {
   const blocks: MdBlock[] = [];
@@ -79,7 +86,7 @@ export function parseMarkdown(source: string): MdBlock[] {
 
   for (const raw of source.split("\n")) {
     const line = raw.trimEnd();
-    const bullet = line.match(/^\s*[-*]\s+(.*)$/);
+    const bullet = line.match(/^[-*]\s+(.*)$/);
     if (line.trim() === "") {
       flushParagraph();
       flushList();
@@ -99,6 +106,9 @@ export function parseMarkdown(source: string): MdBlock[] {
 
 /**
  * Return the first non-empty line from raw markdown source.
+ *
+ * @param source Raw markdown source.
+ * @returns The trimmed first non-empty source line, or an empty string.
  */
 export function firstLine(source: string): string {
   for (const line of source.split("\n")) {
@@ -111,6 +121,9 @@ export function firstLine(source: string): string {
  * Flatten inline markdown to plain text.
  *
  * Link spans become `text (url)`.
+ *
+ * @param text Raw inline markdown text.
+ * @returns Plain text with link targets preserved in parentheses.
  */
 export function stripInline(text: string): string {
   return parseInline(text)
@@ -132,6 +145,10 @@ function spanToAnsi(span: MdSpan, dim: boolean): string {
 
 /**
  * Render inline markdown to ANSI-styled text.
+ *
+ * @param text Raw inline markdown text.
+ * @param opts Rendering options.
+ * @returns ANSI-styled terminal text.
  */
 export function renderInlineAnsi(
   text: string,
@@ -175,6 +192,28 @@ function wordSpans(spans: MdSpan[]): MdSpan[] {
   return words;
 }
 
+function splitSpanToWidth(span: MdSpan, width: number): MdSpan[] {
+  if (stringWidth(span.text) <= width) return [span];
+
+  const chunks: MdSpan[] = [];
+  let text = "";
+  let used = 0;
+  const graphemes = new Intl.Segmenter(undefined, { granularity: "grapheme" })
+    .segment(span.text);
+  for (const { segment } of graphemes) {
+    const segmentWidth = stringWidth(segment);
+    if (text.length > 0 && used + segmentWidth > width) {
+      chunks.push({ ...span, text });
+      text = "";
+      used = 0;
+    }
+    text += segment;
+    used += segmentWidth;
+  }
+  if (text.length > 0) chunks.push({ ...span, text });
+  return chunks;
+}
+
 function wrapSpans(spans: MdSpan[], width: number): MdSpan[][] {
   const words = wordSpans(spans);
   if (words.length === 0) return [[{ text: "" }]];
@@ -184,17 +223,29 @@ function wrapSpans(spans: MdSpan[], width: number): MdSpan[][] {
   let used = 0;
 
   for (const word of words) {
-    const separatorWidth = line.length === 0 ? 0 : 1;
-    const needed = used + separatorWidth + word.text.length;
+    const wordWidth = stringWidth(word.text);
+    const needed = used + (line.length === 0 ? 0 : 1) + wordWidth;
     if (line.length > 0 && needed > width) {
       lines.push(line);
       line = [];
       used = 0;
     }
 
-    if (line.length > 0) appendSpan(line, { text: " " });
-    appendSpan(line, word);
-    used += (used === 0 ? 0 : 1) + word.text.length;
+    if (wordWidth <= width) {
+      if (line.length > 0) {
+        appendSpan(line, { text: " " });
+        used += 1;
+      }
+      appendSpan(line, word);
+      used += wordWidth;
+      continue;
+    }
+
+    for (const chunk of splitSpanToWidth(word, width)) {
+      if (line.length > 0) lines.push(line);
+      line = [chunk];
+      used = stringWidth(chunk.text);
+    }
   }
 
   if (line.length > 0) lines.push(line);
@@ -206,6 +257,10 @@ function wrapSpans(spans: MdSpan[], width: number): MdSpan[][] {
  *
  * Blank lines between blocks are represented by empty arrays. Bullet prefixes
  * are included as plain spans at the beginning of each item line.
+ *
+ * @param source Raw markdown source.
+ * @param width Maximum terminal display width in columns.
+ * @returns Styled span lines wrapped to the requested display width.
  */
 export function wrapMarkdown(source: string, width: number): MdSpan[][] {
   const lines: MdSpan[][] = [];
@@ -232,6 +287,11 @@ export function wrapMarkdown(source: string, width: number): MdSpan[][] {
 
 /**
  * Render markdown as ANSI-styled lines wrapped to `width` columns.
+ *
+ * @param source Raw markdown source.
+ * @param width Maximum terminal display width in columns.
+ * @param opts Rendering options.
+ * @returns ANSI-styled terminal lines.
  */
 export function renderAnsiLines(
   source: string,
@@ -271,6 +331,9 @@ function spanToHtml(span: MdSpan): string {
 
 /**
  * Render markdown to escaped HTML for the serve UI.
+ *
+ * @param source Raw markdown source.
+ * @returns Escaped HTML containing only the supported markdown subset.
  */
 export function renderHtml(source: string): string {
   return parseMarkdown(source)

@@ -1,6 +1,7 @@
 import { describe, it as test } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import * as colors from "@std/fmt/colors";
+import stringWidth from "string-width";
 import {
   firstLine,
   parseInline,
@@ -51,6 +52,15 @@ describe("parseMarkdown", () => {
   test("unsupported syntax stays literal", () => {
     expect(parseMarkdown("# not a heading")).toEqual([
       { kind: "paragraph", spans: [{ text: "# not a heading" }] },
+    ]);
+    expect(parseMarkdown("![alt](https://x.test/image.png)")).toEqual([
+      {
+        kind: "paragraph",
+        spans: [{ text: "![alt](https://x.test/image.png)" }],
+      },
+    ]);
+    expect(parseMarkdown("  - nested item")).toEqual([
+      { kind: "paragraph", spans: [{ text: "- nested item" }] },
     ]);
   });
 });
@@ -112,6 +122,18 @@ describe("wrapMarkdown", () => {
       [{ text: "three" }],
       [{ text: "four" }],
     ]);
+  });
+
+  test("wraps by terminal columns and splits overlong tokens", () => {
+    const lines = wrapMarkdown("界界界 abcdef", 4);
+    const textLines = lines.map((line) =>
+      line.map((span) => span.text).join("")
+    );
+
+    expect(textLines).toEqual(["界界", "界", "abcd", "ef"]);
+    for (const line of textLines) {
+      expect(stringWidth(line)).toBeLessThanOrEqual(4);
+    }
   });
 });
 

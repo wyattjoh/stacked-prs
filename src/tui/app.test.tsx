@@ -6,6 +6,7 @@ import {
   addBranch,
   createTestRepo,
   makeMockDir,
+  runGit,
 } from "../lib/testdata/helpers.ts";
 import { setBaseBranch, setStackNode } from "../lib/stack.ts";
 import { writeFixture } from "../lib/gh.ts";
@@ -168,6 +169,39 @@ describe(
         stdin.write("q");
         await new Promise((r) => setTimeout(r, 50));
         expect(exitCode).toBe(0);
+      } finally {
+        unmount();
+      }
+    });
+
+    test("j and k scroll a focused branch description", async () => {
+      await using repo = await createTestRepo();
+      await using _mock = await makeMockDir();
+      await addBranch(repo.dir, "feat/a", "main");
+      await setStackNode(repo.dir, "feat/a", "alpha", "main");
+      await setBaseBranch(repo.dir, "alpha", "main");
+      await runGit(
+        repo.dir,
+        "config",
+        "branch.feat/a.description",
+        "summary\n\n- item one\n- item two\n- item three\n- item four",
+      );
+
+      const { stdin, lastFrame, unmount } = render(<App dir={repo.dir} />);
+      try {
+        await new Promise((resolve) => setTimeout(resolve, 300));
+        expect(lastFrame()).not.toContain("item three");
+
+        stdin.write("\t");
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        stdin.write("j");
+        await new Promise((resolve) => setTimeout(resolve, 50));
+        expect(lastFrame()).toContain("item three");
+        expect(lastFrame()).toContain("↑ 1 more");
+
+        stdin.write("k");
+        await new Promise((resolve) => setTimeout(resolve, 50));
+        expect(lastFrame()).not.toContain("↑ 1 more");
       } finally {
         unmount();
       }

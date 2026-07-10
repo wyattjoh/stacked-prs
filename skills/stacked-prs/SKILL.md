@@ -525,8 +525,10 @@ Show current stack state. **No confirmation needed** (read-only).
    written with `git branch --edit-description <branch>` or
    `git config branch.<name>.description "..."`), `status` shows the dimmed
    first line under the branch; add `--description` to print descriptions in
-   full. Setting a description is a plain metadata config write and needs no
-   confirmation gate. The tooling itself never writes this key unprompted.
+   full. The supported markdown subset is bold, italic, inline code, links,
+   paragraphs, and flat bullet lists; unsupported syntax stays literal. Setting
+   a description is a plain metadata config write and needs no confirmation
+   gate. The tooling itself never writes this key unprompted.
 
 #### Interactive view
 
@@ -720,16 +722,17 @@ grouped by base branch in the terminal. On the default branch, plain `status`
 behaves like `--all`; on other branches it stays scoped to the current stack
 unless `--all` is passed. Descriptions are markdown from the native
 `branch.<name>.description` key, shown first-line by default, in full with
-`--description`, and always raw in `--json`. Pass `--interactive` / `-i` to
-launch the read-only TUI. Without `--all`, it starts on the current stack,
-except on the default branch where it starts on the all-stacks view. The TUI
-renders every stack as a horizontal tree with per-stack colors, PR state, sync
-status, and a live commit detail pane. PR metadata is opt-in: pass `--pr` / `-p`
-to load PRs from GitHub; otherwise status stays local-only and skips PR
-fetching. Pass `--theme light` or `--theme dark` to override auto-detection.
-Archived stacks are hidden from the `--all` view by default; pass `--archived`
-to include them (`--json` always includes every stack with an `archived` flag,
-and the TUI toggles them with the `a` key).
+`--description`, and always raw in `--json`. Rendering supports bold, italic,
+inline code, links, paragraphs, and flat bullet lists; unsupported syntax stays
+literal. Pass `--interactive` / `-i` to launch the read-only TUI. Without
+`--all`, it starts on the current stack, except on the default branch where it
+starts on the all-stacks view. The TUI renders every stack as a horizontal tree
+with per-stack colors, PR state, sync status, and a live commit detail pane. PR
+metadata is opt-in: pass `--pr` / `-p` to load PRs from GitHub; otherwise status
+stays local-only and skips PR fetching. Pass `--theme light` or `--theme dark`
+to override auto-detection. Archived stacks are hidden from the `--all` view by
+default; pass `--archived` to include them (`--json` always includes every stack
+with an `archived` flag, and the TUI toggles them with the `a` key).
 
 ### `checkout`
 
