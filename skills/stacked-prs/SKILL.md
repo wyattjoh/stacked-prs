@@ -7,7 +7,7 @@ description: >-
   stack", "stack PRs", "stacked branches", "push to stack", "dependent PRs",
   "chained branches", "rebase my stack", "sync stack", "submit stack",
   "land stack", "import stack", "split branch", "fold branch".
-argument-hint: "[init|create|insert|split|fold|move|sync|restack|submit|status|pr|land|import|clean|archive]"
+argument-hint: "[init|create|insert|split|fold|move|sync|restack|submit|status|checkout|pr|land|import|clean|archive]"
 allowed-tools: >-
   Bash(git *), Bash(gh *),
   Bash(${CLAUDE_PLUGIN_ROOT}/skills/stacked-prs/scripts/stacked-prs *),
@@ -538,6 +538,31 @@ Claude. Press `a` to toggle whether archived stacks are shown, and `A` to
 archive or unarchive the focused stack (applied immediately, with a status
 notice). The TUI's two write operations are `L` (land) and `A` (archive).
 
+### `checkout`
+
+Open an interactive branch picker that renders the same ladder output as
+`status`, prefixes the selected branch row with a cursor, and runs
+`git checkout <branch>` when Enter is pressed. Esc or Ctrl-C aborts without
+changing branches. Up/Down moves one branch, Page Up/Page Down jumps between
+stacks, and Home/End jumps to the top or bottom of the list. Printable typing
+updates a fuzzy filter, Backspace edits it, and Ctrl-U clears it. The selected
+row is rendered in white text, overriding the status colors on that row. The
+current branch starts selected when it is visible, including when it is the
+stack base; otherwise the first candidate is selected. Split escape and UTF-8
+input sequences are buffered, and unsupported escape sequences are ignored. The
+picker renders inline in the current terminal scrollback and leaves the final
+frame visible with checkout or abort output below it. When the ladder is taller
+than the terminal, it keeps a viewport-sized window around the selected row,
+counting wrapped ladder and prompt rows. Terminal dimensions are re-read on
+every redraw, so a resize is reflected after the next handled keypress. The
+picker includes the base branch shown at the bottom of the ladder. This is a
+local working-tree operation, not a stack rewrite, so the picker itself is the
+confirmation surface.
+
+Use the same display scoping as `status`: on a non-default branch it defaults to
+the current stack, on the default branch it defaults to `--all`, and the `--all`
+/ `-a`, `--stack-name`, `--archived`, and `--pr` / `-p` flags carry over.
+
 ### `land`
 
 Handle cleanup after a PR merges. Auto-splits the stack if landing creates
@@ -570,6 +595,8 @@ Two supported shapes are handled by `executeLandFromCli` (in
 Read-only operations (`cli.ts status`, `cli.ts land --dry-run --json`) run
 without confirmation. The `cli.ts land` command itself requires no separate
 confirmation step -- the plan is built and executed in one call.
+`cli.ts checkout` is also unplanned: it renders an interactive picker and only
+runs `git checkout <branch>` after the user presses Enter.
 
 ### `clean`
 
@@ -639,6 +666,7 @@ git/gh mutation).
 - `stacked-prs status`
 - `stacked-prs status --json`
 - `stacked-prs status --interactive` / `-i`
+- `stacked-prs checkout` (local branch switch after interactive selection)
 - `stacked-prs nav --dry-run`
 - `stacked-prs verify-refs`
 - `stacked-prs restack --dry-run` (with or without `--json`)
@@ -693,6 +721,27 @@ otherwise status stays local-only and skips PR fetching. Pass `--theme light` or
 `--all` view by default; pass `--archived` to include them (`--json` always
 includes every stack with an `archived` flag, and the TUI toggles them with the
 `a` key).
+
+### `checkout`
+
+```bash
+${CLAUDE_PLUGIN_ROOT}/skills/stacked-prs/scripts/stacked-prs checkout \
+  [--stack-name=<name>] [--owner=<owner> --repo=<repo>] [--pr|-p] [--all|-a] [--archived]
+```
+
+Renders the same ladder as `status`, lets the user move a `>` cursor with
+Up/Down, jump between stacks with Page Up/Page Down, jump to list edges with
+Home/End, fuzzy-filter by typing printable characters, edit the filter with
+Backspace, clear it with Ctrl-U, override status colors on the selected row with
+white text, and run `git checkout <branch>` on Enter. Esc or Ctrl-C aborts. The
+current branch starts selected when it is visible, including the base branch.
+Split escape and UTF-8 input sequences are buffered; unsupported escape
+sequences are ignored. The picker renders inline in the current terminal
+scrollback and clips tall ladders to the terminal viewport around the selected
+row, counting physical rows created by wrapped ladder and prompt lines. It
+re-reads terminal dimensions on every redraw. The branch list includes the base
+branch and excludes landed tombstone rows because those refs no longer exist
+locally.
 
 ### `restack`
 

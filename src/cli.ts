@@ -11,7 +11,24 @@ import {
 import { gh, listPrsForBranch, resolveRepo, withPrIndex } from "./lib/gh.ts";
 import { withRefLoader } from "./lib/loaders.ts";
 import { prStateFrom } from "./commands/land.ts";
-import { getAllStackStatuses, getStackStatus } from "./commands/status.ts";
+import {
+  type AllStacksStatus,
+  getAllStackStatuses,
+  getStackStatus,
+  type StackStatus,
+} from "./commands/status.ts";
+import {
+  checkoutBranch,
+  checkoutInputSequenceLength,
+  type CheckoutKey,
+  filterCheckoutBranches,
+  initialCheckoutSelectionIndex,
+  moveCheckoutSelectionForKey,
+  parseCheckoutKeypress,
+  renderCheckoutFrame,
+  renderCheckoutFrameUpdate,
+  visibleCheckoutBranches,
+} from "./commands/checkout.ts";
 import { restack } from "./commands/restack.ts";
 import { buildNavPlan, executeNavAction } from "./lib/nav.ts";
 import { verifyRefs } from "./commands/verify-refs.ts";
@@ -135,6 +152,292 @@ async function shouldStatusAll(
     return currentBranch === await detectDefaultBranch(dir);
   } catch {
     return false;
+  }
+}
+
+interface CliStatusOptions {
+  loadPrs: boolean;
+  explicitAll: boolean;
+  stackName: string | undefined;
+  owner: string | undefined;
+  repo: string | undefined;
+  showArchived: boolean;
+}
+
+async function loadStatusForCli(
+  options: CliStatusOptions,
+): Promise<StackStatus | AllStacksStatus> {
+  let owner = options.owner;
+  let repo = options.repo;
+  if (options.loadPrs && (!owner || !repo)) {
+    try {
+      const resolved = await resolveRepo(owner, repo);
+      owner = resolved.owner;
+      repo = resolved.repo;
+    } catch {
+      // PR info will be unavailable, that's ok for status
+    }
+  }
+
+  const statusAll = await shouldStatusAll(
+    dir,
+    options.explicitAll,
+    options.stackName,
+  );
+  const runStatus = async () => {
+    if (statusAll) {
+      return await getAllStackStatuses(dir, owner, repo, {
+        loadPrs: options.loadPrs,
+        showArchived: options.showArchived,
+      });
+    }
+    const stackName = await resolveStackName(dir, options.stackName);
+    return await getStackStatus(dir, stackName, owner, repo, {
+      loadPrs: options.loadPrs,
+    });
+  };
+  return options.loadPrs && owner && repo
+    ? await withRefLoader(
+      dir,
+      () => withPrIndex(owner as string, repo as string, runStatus),
+    )
+    : await withRefLoader(dir, runStatus);
+}
+
+async function writeStdout(text: string): Promise<void> {
+  await Deno.stdout.write(new TextEncoder().encode(text));
+}
+
+function checkoutViewportSize(): { rows: number; columns: number } {
+  try {
+    return Deno.consoleSize();
+  } catch {
+    return { rows: 24, columns: 80 };
+  }
+}
+
+const CHECKOUT_ESCAPE_DELAY_MS = 30;
+
+function appendCheckoutInput(
+  existing: Uint8Array,
+  incoming: Uint8Array,
+): Uint8Array {
+  const combined = new Uint8Array(existing.length + incoming.length);
+  combined.set(existing);
+  combined.set(incoming, existing.length);
+  return combined;
+}
+
+function createCheckoutKeypressReader(): () => Promise<CheckoutKey> {
+  let buffered: Uint8Array = new Uint8Array();
+  let pendingRead: Promise<Uint8Array | null> | null = null;
+
+  const startRead = (): Promise<Uint8Array | null> => {
+    if (pendingRead !== null) return pendingRead;
+    pendingRead = (async () => {
+      const buffer = new Uint8Array(64);
+      const read = await Deno.stdin.read(buffer);
+      return read === null ? null : buffer.slice(0, read);
+    })();
+    return pendingRead;
+  };
+
+  const waitForInput = async (
+    escapePending: boolean,
+  ): Promise<Uint8Array | null | "timeout"> => {
+    const read = startRead();
+    if (!escapePending) {
+      const chunk = await read;
+      if (pendingRead === read) pendingRead = null;
+      return chunk;
+    }
+
+    let timeout: ReturnType<typeof setTimeout> | undefined;
+    const result = await Promise.race([
+      read.then((chunk) => ({ type: "read" as const, chunk })),
+      new Promise<{ type: "timeout" }>((resolve) => {
+        timeout = setTimeout(
+          () => resolve({ type: "timeout" }),
+          CHECKOUT_ESCAPE_DELAY_MS,
+        );
+      }),
+    ]);
+    if (result.type === "timeout") return "timeout";
+    clearTimeout(timeout);
+    if (pendingRead === read) pendingRead = null;
+    return result.chunk;
+  };
+
+  return async () => {
+    while (true) {
+      const sequenceLength = checkoutInputSequenceLength(buffered);
+      if (sequenceLength !== null) {
+        const sequence = buffered.slice(0, sequenceLength);
+        buffered = buffered.slice(sequenceLength);
+        return parseCheckoutKeypress(sequence);
+      }
+
+      const chunk = await waitForInput(buffered[0] === 0x1b);
+      if (chunk === "timeout" || chunk === null) {
+        if (buffered.length === 0) return "abort";
+        const sequence = buffered;
+        buffered = new Uint8Array();
+        return parseCheckoutKeypress(sequence);
+      }
+      buffered = appendCheckoutInput(buffered, chunk);
+    }
+  };
+}
+
+function removeLastSearchCharacter(query: string): string {
+  return Array.from(query).slice(0, -1).join("");
+}
+
+async function promptForCheckoutBranch(
+  status: StackStatus | AllStacksStatus,
+  branches: string[],
+  currentBranch: string | undefined,
+): Promise<string | null> {
+  if (!Deno.stdin.isTerminal() || !Deno.stdout.isTerminal()) {
+    console.error("checkout requires an interactive terminal.");
+    Deno.exit(1);
+  }
+
+  let searchQuery = "";
+  let filteredBranches = filterCheckoutBranches(
+    branches,
+    searchQuery,
+  );
+  let selectedIndex = initialCheckoutSelectionIndex(
+    filteredBranches,
+    currentBranch,
+  );
+  const HIDE_CURSOR = "\x1b[?25l";
+  const SHOW_CURSOR = "\x1b[?25h";
+  let frameLineCount = 0;
+  const readKeypress = createCheckoutKeypressReader();
+
+  const updateFilter = (preferredBranch: string | undefined) => {
+    filteredBranches = filterCheckoutBranches(
+      branches,
+      searchQuery,
+    );
+    const preferredIndex = preferredBranch === undefined
+      ? -1
+      : filteredBranches.indexOf(preferredBranch);
+    selectedIndex = preferredIndex >= 0 ? preferredIndex : 0;
+  };
+
+  let restored = false;
+  const restore = () => {
+    if (restored) return;
+    restored = true;
+    try {
+      Deno.stdin.setRaw(false);
+    } catch {
+      // ignore
+    }
+    try {
+      Deno.stdout.writeSync(new TextEncoder().encode(SHOW_CURSOR));
+    } catch {
+      // ignore
+    }
+  };
+  const onSignal = () => {
+    restore();
+    Deno.exit(130);
+  };
+
+  const render = async () => {
+    const selectedBranch = filteredBranches[selectedIndex];
+    const viewport = checkoutViewportSize();
+    const renderOptions = {
+      viewportRows: viewport.rows,
+      viewportColumns: viewport.columns,
+    };
+    const frame = frameLineCount === 0
+      ? renderCheckoutFrame(
+        status.display,
+        filteredBranches,
+        selectedBranch,
+        {
+          ...renderOptions,
+          query: searchQuery,
+          matchCount: filteredBranches.length,
+          totalCount: branches.length,
+        },
+      )
+      : renderCheckoutFrameUpdate(
+        frameLineCount,
+        status.display,
+        filteredBranches,
+        selectedBranch,
+        {
+          ...renderOptions,
+          query: searchQuery,
+          matchCount: filteredBranches.length,
+          totalCount: branches.length,
+        },
+      );
+    frameLineCount = frame.lineCount;
+    await writeStdout(frame.text);
+  };
+
+  try {
+    Deno.addSignalListener("SIGINT", onSignal);
+    Deno.addSignalListener("SIGTERM", onSignal);
+    Deno.stdin.setRaw(true);
+    await writeStdout(HIDE_CURSOR);
+    await render();
+    while (true) {
+      const key = await readKeypress();
+      if (key === "abort") return null;
+      if (key === "enter") {
+        if (filteredBranches.length === 0) continue;
+        return filteredBranches[selectedIndex];
+      }
+      if (typeof key === "object") {
+        const selectedBranch = filteredBranches[selectedIndex];
+        searchQuery += key.value;
+        updateFilter(selectedBranch);
+        await render();
+        continue;
+      }
+      if (key === "backspace") {
+        if (searchQuery.length === 0) continue;
+        const selectedBranch = filteredBranches[selectedIndex];
+        searchQuery = removeLastSearchCharacter(searchQuery);
+        updateFilter(selectedBranch);
+        await render();
+        continue;
+      }
+      if (key === "clear-search") {
+        if (searchQuery.length === 0) continue;
+        const selectedBranch = filteredBranches[selectedIndex];
+        searchQuery = "";
+        updateFilter(selectedBranch);
+        await render();
+        continue;
+      }
+      const nextIndex = moveCheckoutSelectionForKey(
+        status,
+        filteredBranches,
+        selectedIndex,
+        key,
+      );
+      if (nextIndex !== selectedIndex) {
+        selectedIndex = nextIndex;
+        await render();
+      }
+    }
+  } finally {
+    try {
+      Deno.removeSignalListener("SIGINT", onSignal);
+      Deno.removeSignalListener("SIGTERM", onSignal);
+    } catch {
+      // ignore
+    }
+    restore();
   }
 }
 
@@ -284,12 +587,13 @@ const command = new Command()
   )
   .action(async (options) => {
     const loadPrs = options.pr === true;
-    const statusAll = await shouldStatusAll(
-      dir,
-      options.all === true,
-      options.stackName,
-    );
+    const explicitAll = options.all === true;
     if (options.interactive) {
+      const statusAll = await shouldStatusAll(
+        dir,
+        explicitAll,
+        options.stackName,
+      );
       const initialTab = statusAll
         ? "all"
         : { stack: await resolveStackName(dir, options.stackName) } as const;
@@ -441,18 +745,6 @@ const command = new Command()
       Deno.exit(tuiExitCode);
     }
 
-    let owner = options.owner;
-    let repo = options.repo;
-    if (loadPrs && (!owner || !repo)) {
-      try {
-        const resolved = await resolveRepo(owner, repo);
-        owner = resolved.owner;
-        repo = resolved.repo;
-      } catch {
-        // PR info will be unavailable, that's ok for status
-      }
-    }
-
     // Install a repo-wide PR index so per-branch `listPrsForBranch`
     // calls inside `getStackStatus` / `getAllStackStatuses` all share
     // one `gh pr list` fetch instead of N per-branch round-trips. If
@@ -465,29 +757,72 @@ const command = new Command()
     // single `git cat-file --batch-check` subprocess instead of one
     // `git rev-parse` per ref. Status is read-only, so caching refs
     // for the scope of this handler is safe.
-    const runStatus = async () => {
-      if (statusAll) {
-        return await getAllStackStatuses(dir, owner, repo, {
-          loadPrs,
-          showArchived: options.archived === true,
-        });
-      }
-      const stackName = await resolveStackName(dir, options.stackName);
-      return await getStackStatus(dir, stackName, owner, repo, {
-        loadPrs,
-      });
-    };
-    const status = loadPrs && owner && repo
-      ? await withRefLoader(
-        dir,
-        () => withPrIndex(owner as string, repo as string, runStatus),
-      )
-      : await withRefLoader(dir, runStatus);
+    const status = await loadStatusForCli({
+      loadPrs,
+      explicitAll,
+      stackName: options.stackName,
+      owner: options.owner,
+      repo: options.repo,
+      showArchived: options.archived === true,
+    });
     if (options.json) {
       logJson(status);
     } else {
       console.log(status.display);
     }
+  })
+  // --- checkout ---
+  .command(
+    "checkout",
+    "Select a stack branch from status output and check it out",
+  )
+  .option(
+    "--stack-name <name:string>",
+    "Stack name (auto-detected from current branch)",
+  )
+  .option("--owner <owner:string>", "GitHub repo owner")
+  .option("--repo <repo:string>", "GitHub repo name")
+  .option("--pr, -p", "Load PR data from GitHub")
+  .option("--all, -a", "Show all stacks grouped by base branch")
+  .option("--archived", "Include archived stacks (hidden by default)")
+  .action(async (options) => {
+    const status = await loadStatusForCli({
+      loadPrs: options.pr === true,
+      explicitAll: options.all === true,
+      stackName: options.stackName,
+      owner: options.owner,
+      repo: options.repo,
+      showArchived: options.archived === true,
+    });
+
+    const branches = visibleCheckoutBranches(status, {
+      showArchived: options.archived === true,
+    });
+    if (branches.length === 0) {
+      console.log(status.display);
+      console.error("No stack branches available to checkout.");
+      Deno.exit(1);
+    }
+
+    const currentBranchResult = await runGitCommand(
+      dir,
+      "branch",
+      "--show-current",
+    );
+    const branch = await promptForCheckoutBranch(
+      status,
+      branches,
+      currentBranchResult.code === 0 ? currentBranchResult.stdout : undefined,
+    );
+    if (!branch) {
+      console.log("Aborted.");
+      Deno.exit(0);
+    }
+
+    const result = await checkoutBranch(dir, branch);
+    if (result.stdout) console.log(result.stdout);
+    if (result.stderr) console.error(result.stderr);
+    if (!result.ok) Deno.exit(result.code || 1);
   })
   // --- create ---
   .command("create <branch:string>", "Create a new branch in the stack")
