@@ -74,6 +74,7 @@ Stack metadata lives entirely in **local git config**:
 ```
 branch.<name>.stack-name          = my-stack
 branch.<name>.stack-parent        = main
+branch.<name>.description         = Markdown description
 stack.<stack-name>.merge-strategy = squash
 stack.<stack-name>.base-branch    = main
 ```
@@ -313,13 +314,28 @@ branch, and the selected row overrides status colors with white text. Split
 escape and UTF-8 input sequences are buffered; unsupported escape sequences are
 ignored. The picker accepts the status scoping and PR-loading flags:
 `--stack-name`, `--all` / `-a`, `--archived`, and `--pr` / `-p` (with optional
-`--owner` and `--repo`). It renders inline in the current terminal scrollback,
-leaving the final picker frame visible with checkout or abort output below it.
-When the ladder is taller than the terminal, the picker keeps a viewport-sized
-window around the selected row and counts physical rows created by wrapped
-ladder and prompt lines. Terminal dimensions are re-read on every redraw, so a
-resize is reflected after the next handled keypress. The picker includes the
-base branch shown at the bottom of the ladder.
+`--owner` and `--repo`), plus `--description`. It renders inline in the current
+terminal scrollback, leaving the final picker frame visible with checkout or
+abort output below it. When the ladder is taller than the terminal, the picker
+keeps a viewport-sized window around the selected row and counts physical rows
+created by wrapped ladder and prompt lines. Terminal dimensions are re-read on
+every redraw, so a resize is reflected after the next handled keypress. The
+picker includes the base branch shown at the bottom of the ladder.
+
+### Branch descriptions
+
+Give any stack branch an optional markdown description of what it is supposed to
+accomplish:
+
+```bash
+git branch --edit-description feat/api-cache
+```
+
+When set, `status` shows the dimmed first line under the branch (`--description`
+prints it in full), and the TUI detail pane renders it for the focused branch.
+Scroll the focused detail pane with `j` and `k`. Descriptions are stored in
+git's native `branch.<name>.description` config key, are local to the
+repository, and are cleaned up automatically when the branch is deleted.
 
 ### `/stacked-prs archive`
 
@@ -357,6 +373,7 @@ Key bindings:
 - `↑`/`↓`/`←`/`→`: navigate branches (up/down in row order, left to parent,
   right to first child)
 - `tab` / `shift-tab`: cycle focus between header, stack map, and detail pane
+- `j` / `k`: scroll the detail pane when it is focused
 - `g` / `G`: first / last branch in the current stack
 - `pgup` / `pgdn`: previous / next stack
 - `r`: refresh all
@@ -446,19 +463,19 @@ deno run --allow-run=git,gh --allow-env --allow-read \
   src/cli.ts <subcommand> [flags]
 ```
 
-| Subcommand                                    | Purpose                                                                |
-| --------------------------------------------- | ---------------------------------------------------------------------- |
-| `cli.ts status [--json] [--all]`              | Ladder output (or JSON) with PR info and sync status                   |
-| `cli.ts checkout [--all]`                     | Interactive status-style branch picker that runs `git checkout`        |
-| `cli.ts create <branch> [--create-worktree]`  | Create a child branch; auto-inits stack when on default branch         |
-| `cli.ts restack [--json]`                     | Segment-based tree rebase; handles conflicts across segments           |
-| `cli.ts nav [--dry-run]`                      | Builds and executes navigation comment plans                           |
-| `cli.ts verify-refs`                          | Checks branch ancestry after rebase, outputs repair commands           |
-| `cli.ts import-discover`                      | Discovers branch trees between a branch and main                       |
-| `cli.ts submit [--dry-run] [--force]`         | Plan (with `--dry-run`) or run submit: push + PR create/edit + nav     |
-| `cli.ts sync [--dry-run] [--force]`           | Fetch + ff bases + prune merged PRs + restack + push across all stacks |
-| `cli.ts pr [--branch=<name>] [--print]`       | Open the branch's PR in the browser via `gh pr view --web`             |
-| `cli.ts land [--dry-run] [--json] [--resume]` | Land a merged PR; plan only with `--dry-run`, resume after conflicts   |
+| Subcommand                                            | Purpose                                                                |
+| ----------------------------------------------------- | ---------------------------------------------------------------------- |
+| `cli.ts status [--json] [--all] [--description]`      | Ladder output (or JSON) with PR info, sync status, and descriptions    |
+| `cli.ts checkout [--all] [--description]`             | Interactive status-style branch picker that runs `git checkout`        |
+| `cli.ts create <branch> [--create-worktree]`          | Create a child branch; auto-inits stack when on default branch         |
+| `cli.ts restack [--json]`                             | Segment-based tree rebase; handles conflicts across segments           |
+| `cli.ts nav [--dry-run]`                              | Builds and executes navigation comment plans                           |
+| `cli.ts verify-refs`                                  | Checks branch ancestry after rebase, outputs repair commands           |
+| `cli.ts import-discover`                              | Discovers branch trees between a branch and main                       |
+| `cli.ts submit [--dry-run] [--force]`                 | Plan (with `--dry-run`) or run submit: push + PR create/edit + nav     |
+| `cli.ts sync [--dry-run] [--force]`                   | Fetch + ff bases + prune merged PRs + restack + push across all stacks |
+| `cli.ts pr [--branch=<name>] [--print]`               | Open the branch's PR in the browser via `gh pr view --web`             |
+| `cli.ts land [--dry-run] [--json] [--resume]`         | Land a merged PR; plan only with `--dry-run`, resume after conflicts   |
 
 `--stack-name` auto-detects from the current branch's git config when omitted.
 `--owner` and `--repo` auto-detect from `gh repo view` when omitted.

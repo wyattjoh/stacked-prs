@@ -34,6 +34,7 @@ src/
 │   ├── submit-plan.ts          # Computes the full submit plan (consumed by submit.ts)
 │   ├── colors.ts               # Per-stack color assignment (shared by TUI and clean output)
 │   ├── ansi.ts                 # ANSI escape code helpers
+│   ├── markdown.ts             # Markdown subset parser + ANSI/Ink-span renderers
 │   └── testdata/helpers.ts     # Test utilities (createTestRepo, addBranch, commitFile)
 ├── commands/                   # One file per `cli.ts <name>` subcommand
 │   ├── clean.ts                # Stale config detection and removal
@@ -113,21 +114,26 @@ Subcommands: `status` (add `--interactive`/`-i` to launch the TUI), `checkout`,
 `archive`. `lib/config.ts` and `lib/submit-plan.ts` are libraries shared across
 commands; import their functions directly.
 
-`submit` wraps `computeSubmitPlan` with an execution path: force-push, then
-`gh pr create|edit|ready` per branch, then apply nav comments. `sync` iterates
-every stack returned by `getAllStackTrees`: it fetches every base once,
-fast-forwards local base branches when safe (warning on divergence), prunes
-branches whose PRs merged on GitHub (reparenting children and retargeting their
-PR bases), then composes `restack` + force-push per stack. It stops at the first
-failure. `sync` skips stacks marked archived (`stack.<name>.archived`), listing
-them under `archivedSkipped` in the plan, unless `--archived` is passed.
-`archive` toggles that flag (a single config write, no confirmation gate);
-defaults to the current branch's stack when no name is given. `pr` is a thin
-lookup over `gh pr list` that delegates browser-opening to `gh pr view --web`.
-Both `submit` and `sync` share a tri-modal CLI shape: `--dry-run` prints the
-plan only, default (no flags) prompts `[y/N]`, and `--force` executes without
-prompting. This matches the SKILL.md confirmation-gate philosophy: Claude uses
-`--dry-run` to inspect, then `--force` after approval.
+Branch descriptions come from the native `branch.<name>.description` key via
+`readAllBranchStackConfig`; that helper uses NUL-separated `--get-regexp`
+parsing so multi-line values survive. `status` renders the first line by default
+and the full markdown body with `--description`. The TUI renders the full
+description in its detail pane. `submit` wraps `computeSubmitPlan` with an
+execution path: force-push, then `gh pr create|edit|ready` per branch, then
+apply nav comments. `sync` iterates every stack returned by `getAllStackTrees`:
+it fetches every base once, fast-forwards local base branches when safe (warning
+on divergence), prunes branches whose PRs merged on GitHub (reparenting children
+and retargeting their PR bases), then composes `restack` + force-push per stack.
+It stops at the first failure. `sync` skips stacks marked archived
+(`stack.<name>.archived`), listing them under `archivedSkipped` in the plan,
+unless `--archived` is passed. `archive` toggles that flag (a single config
+write, no confirmation gate); defaults to the current branch's stack when no
+name is given. `pr` is a thin lookup over `gh pr list` that delegates
+browser-opening to `gh pr view --web`. Both `submit` and `sync` share a
+tri-modal CLI shape: `--dry-run` prints the plan only, default (no flags)
+prompts `[y/N]`, and `--force` executes without prompting. This matches the
+SKILL.md confirmation-gate philosophy: Claude uses `--dry-run` to inspect, then
+`--force` after approval.
 
 ## Architecture
 
@@ -185,11 +191,12 @@ can be continued across process invocations.
 | `src/lib/gh.ts`                   | Library only, not a CLI                                               | Imported by scripts needing GitHub data                                 |
 | `src/lib/config.ts`               | Library: metadata mutations (insert/fold/move/split/land cleanup)     | Imported by commands that mutate stack metadata                         |
 | `src/lib/submit-plan.ts`          | Library: submit planning (consumed by `submit.ts`)                    | Imported by `commands/submit.ts` and tests                              |
+| `src/lib/markdown.ts`             | Markdown subset parser + ANSI/Ink-span renderers                      | Imported by status and TUI description renderers                        |
 | `src/commands/clean.ts`           | Stale config detection and removal                                    | `cli.ts clean [--force] [--json]`                                       |
 | `src/commands/archive.ts`         | Toggle a stack's archived flag (`stack.<name>.archived`)              | `cli.ts archive [<stack>] [--unarchive] [--json]`                       |
 | `src/commands/create.ts`          | Branch creation with optional worktree                                | `cli.ts create <branch> [flags]`                                        |
-| `src/commands/checkout.ts`        | Pure checkout picker helpers and `git checkout <branch>` wrapper      | `cli.ts checkout [--all]`                                               |
-| `src/commands/status.ts`          | Read stack state + PR info                                            | `cli.ts status [--json]`                                                |
+| `src/commands/checkout.ts`        | Pure checkout picker helpers and `git checkout <branch>` wrapper      | `cli.ts checkout [--all] [--description]`                               |
+| `src/commands/status.ts`          | Read stack state + PR info                                            | `cli.ts status [--description] [--json]`                                |
 | `src/commands/restack.ts`         | Per-branch topological rebase                                         | `cli.ts restack [--dry-run] [--json] [--resume]`                        |
 | `src/commands/nav.ts`             | Navigation comments                                                   | `cli.ts nav [--dry-run]`                                                |
 | `src/commands/verify-refs.ts`     | Post-rebase verification                                              | `cli.ts verify-refs`                                                    |
@@ -211,6 +218,7 @@ can be continued across process invocations.
 ```
 branch.<name>.stack-name           # Which stack this branch belongs to
 branch.<name>.stack-parent         # Parent branch name (or the base branch, e.g. "main")
+branch.<name>.description          # (Optional, native git key) markdown description; rendered by status and the TUI
 stack.<stack-name>.merge-strategy  # "merge" or "squash"
 stack.<stack-name>.base-branch     # Base branch name, e.g. "main" or "master"
 stack.<stack-name>.resume-state    # Transient JSON for in-progress restack recovery
@@ -293,6 +301,7 @@ Keyboard navigation:
 - `g`/`G`: first / last branch in the current stack.
 - `pgup`/`pgdn`: previous / next stack.
 - `tab` / `shift-tab`: cycle focus (header / body / detail pane).
+- `j` / `k`: scroll the detail pane when it is focused.
 - `?`: toggle help overlay (rendered inline inside the main Box rather than as a
   separate root, so Ink's log-update tracking stays correct after close).
 - `p`: open focused PR in browser.
@@ -357,7 +366,7 @@ this distinction when editing the runbook.
 - Scripts must use **explicit Deno permissions** (`--allow-run=git`, etc.).
 - `src/lib/` holds shared libraries with no CLI mapping (e.g. `stack.ts`,
   `gh.ts`, `cleanup.ts`, `config.ts`, `submit-plan.ts`, `worktrees.ts`,
-  `colors.ts`, `ansi.ts`). Do not add CLI entry points to them.
+  `colors.ts`, `ansi.ts`, `markdown.ts`). Do not add CLI entry points to them.
 - `src/commands/` holds one file per `cli.ts <name>` subcommand. If a helper is
   shared by more than one command, it belongs in `src/lib/`, not
   `src/commands/`.
