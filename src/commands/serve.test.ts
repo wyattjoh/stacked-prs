@@ -4,9 +4,11 @@ import { join, normalize } from "@std/path";
 import {
   addBranch,
   createTestRepo,
+  makeMockDir,
   makeTempDir,
   runGit,
 } from "../lib/testdata/helpers.ts";
+import { writeFixture } from "../lib/gh.ts";
 import { setBaseBranch, setStackArchived, setStackNode } from "../lib/stack.ts";
 import {
   buildServeBranchGraph,
@@ -161,6 +163,72 @@ describe("buildServeStatus", () => {
 });
 
 describe("loadRepositoryStatuses", () => {
+  test("keeps concurrent repository PR indexes isolated", async () => {
+    await using repoA = await createTestRepo();
+    await using repoB = await createTestRepo();
+    await using mock = await makeMockDir();
+
+    for (
+      const [repo, stackName, remote] of [
+        [repoA, "stack-a", "https://github.com/acme/repo-a.git"],
+        [repoB, "stack-b", "https://github.com/acme/repo-b.git"],
+      ] as const
+    ) {
+      await addBranch(repo.dir, "feature/shared", "main");
+      await setStackNode(
+        repo.dir,
+        "feature/shared",
+        stackName,
+        "main",
+      );
+      await setBaseBranch(repo.dir, stackName, "main");
+      await runGit(repo.dir, "remote", "add", "origin", remote);
+    }
+
+    const prFields =
+      "number,url,state,isDraft,createdAt,title,headRefName,baseRefName";
+    const writePrIndex = async (
+      repo: string,
+      number: number,
+    ): Promise<void> => {
+      await writeFixture(
+        mock.path,
+        [
+          "pr",
+          "list",
+          "--repo",
+          `acme/${repo}`,
+          "--state",
+          "all",
+          "--limit",
+          "500",
+          "--json",
+          prFields,
+        ],
+        [{
+          number,
+          url: `https://github.com/acme/${repo}/pull/${number}`,
+          state: "OPEN",
+          isDraft: false,
+          createdAt: "2026-07-09T00:00:00Z",
+          title: repo,
+          headRefName: "feature/shared",
+          baseRefName: "main",
+        }],
+      );
+    };
+    await writePrIndex("repo-a", 101);
+    await writePrIndex("repo-b", 202);
+
+    const results = await loadRepositoryStatuses([
+      { name: "a", path: repoA.dir },
+      { name: "b", path: repoB.dir },
+    ], { concurrency: 2 });
+
+    expect(results[0].status?.stacks[0].branches[0].pr?.number).toBe(101);
+    expect(results[1].status?.stacks[0].branches[0].pr?.number).toBe(202);
+  });
+
   test("fires onStart before onSettled per repo and returns results in input order", async () => {
     await using repoA = await createTestRepo();
     await using repoB = await createTestRepo();

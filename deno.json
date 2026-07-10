@@ -27,7 +27,7 @@
     "check": "deno fmt --check && deno lint && deno check src/cli.ts",
     "test": "deno test --allow-run --allow-env --allow-read --allow-write --parallel src/",
     "tui": "deno run --allow-run=git,gh,pbcopy --allow-env --allow-read src/cli.ts status --interactive",
-    "install": "deno install --global --force --config $(pwd)/deno.json --allow-run=git,gh,pbcopy,open --allow-env --allow-read --allow-net -n stacked-prs $(pwd)/src/cli.ts",
+    "install": "deno install --global --force --config $(pwd)/deno.json --allow-run=git,gh,pbcopy,open,xdg-open,cmd --allow-env --allow-read --allow-net -n stacked-prs $(pwd)/src/cli.ts",
     "compile:macos": "deno compile --config deno.json --include src/commands/serve.css --include src/commands/serve.client.js --allow-run=git,gh,pbcopy,open --allow-env --allow-read --allow-net -o stacked-prs src/cli.ts",
     "compile:linux": "deno compile --config deno.json --include src/commands/serve.css --include src/commands/serve.client.js --allow-run=git,gh,xclip,wl-copy,xdg-open --allow-env --allow-read --allow-net -o stacked-prs src/cli.ts"
   },

@@ -120,12 +120,16 @@ jobs:
         include:
           - target: aarch64-apple-darwin
             clipboard: pbcopy
+            browser: open
           - target: x86_64-apple-darwin
             clipboard: pbcopy
+            browser: open
           - target: aarch64-unknown-linux-gnu
             clipboard: xclip,wl-copy
+            browser: xdg-open
           - target: x86_64-unknown-linux-gnu
             clipboard: xclip,wl-copy
+            browser: xdg-open
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
@@ -141,9 +145,10 @@ jobs:
             --config deno.json \
             --include src/commands/serve.css \
             --include src/commands/serve.client.js \
-            --allow-run=git,gh,${{ matrix.clipboard }} \
+            --allow-run=git,gh,${{ matrix.clipboard }},${{ matrix.browser }} \
             --allow-env \
             --allow-read \
+            --allow-net \
             --target ${{ matrix.target }} \
             -o stacked-prs \
             src/cli.ts

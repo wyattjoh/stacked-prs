@@ -94,7 +94,7 @@ deno test --allow-env --allow-read src/tui/components/stack-band.test.tsx
 deno task check
 
 # Invoke a CLI subcommand directly
-deno run --allow-run=git,gh,open --allow-env --allow-read --allow-net \
+deno run --allow-run=git,gh,open,xdg-open,cmd --allow-env --allow-read --allow-net \
   src/cli.ts status --json
 
 # Launch the interactive TUI from this repo

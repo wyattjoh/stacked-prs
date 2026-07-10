@@ -5,10 +5,9 @@ import {
   getAllStackStatuses,
   type StackStatus,
 } from "./status.ts";
-import { createPrIndex, type PrIndex, setActivePrIndex } from "../lib/gh.ts";
+import { createPrIndex, type PrIndex } from "../lib/gh.ts";
 import { type LaneTreeNode, layoutLanes } from "../lib/graph.ts";
 import { runGitCommand } from "../lib/stack.ts";
-import { withRefLoader } from "../lib/loaders.ts";
 import { firstLine, renderHtml, stripInline } from "../lib/markdown.ts";
 import { Hono } from "hono";
 import { html, raw } from "hono/html";
@@ -751,13 +750,7 @@ async function withOptionalPrIndex<T>(
 ): Promise<T> {
   if (!github) return await fn(null);
   const index = await createPrIndex(github.owner, github.repo);
-  if (!index) return await fn(null);
-  const dispose = setActivePrIndex(index);
-  try {
-    return await fn(index);
-  } finally {
-    dispose();
-  }
+  return await fn(index);
 }
 
 /** Maximum number of repositories loaded concurrently by the serve routes. */
@@ -773,12 +766,14 @@ async function loadRepositoryStatus(
       : "not-github";
     const status = await withOptionalPrIndex(github, async (index) => {
       prMetadata = index ? "loaded" : prMetadata;
-      return await withRefLoader(
+      return await getAllStackStatuses(
         repository.path,
-        () =>
-          getAllStackStatuses(repository.path, github?.owner, github?.repo, {
-            loadPrs: index !== null,
-          }),
+        github?.owner,
+        github?.repo,
+        {
+          loadPrs: index !== null,
+          ...(index ? { prIndex: index } : {}),
+        },
       );
     });
     return {

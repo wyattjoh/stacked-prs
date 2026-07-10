@@ -13,7 +13,7 @@ import {
   type StackTree,
   type SyncStatus,
 } from "../lib/stack.ts";
-import { listPrsForBranch } from "../lib/gh.ts";
+import { listPrsForBranch, type PrIndex, selectBestPr } from "../lib/gh.ts";
 import { type LaneTreeNode, layoutLanes } from "../lib/graph.ts";
 import { ansiColor } from "../lib/ansi.ts";
 import {
@@ -99,6 +99,8 @@ export async function queryPr(
 
 export interface StatusOptions {
   loadPrs?: boolean;
+  /** Repository-local PR snapshot used instead of the process-global index. */
+  prIndex?: PrIndex;
   showArchived?: boolean;
   /**
    * Run `git fetch origin <base>` before computing sync status so the
@@ -477,7 +479,11 @@ async function buildStackStatus(
           node.branch,
           parent === tree.baseBranch ? baseSyncRef : parent,
         );
-      const pr = loadPrs ? await queryPr(node.branch, owner, repo) : null;
+      const pr = loadPrs
+        ? opts.prIndex
+          ? selectBestPr(opts.prIndex.byHead.get(node.branch) ?? [])
+          : await queryPr(node.branch, owner, repo)
+        : null;
 
       const { depth, isLastChild } = depthMap.get(node.branch) ?? {
         depth: 0,

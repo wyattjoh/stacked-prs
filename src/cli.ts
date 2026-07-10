@@ -1,4 +1,4 @@
-#!/usr/bin/env -S deno run --allow-run=git,gh,open --allow-env --allow-read --allow-net
+#!/usr/bin/env -S deno run --allow-run=git,gh,open,xdg-open,cmd --allow-env --allow-read --allow-net
 import { Command } from "@cliffy/command";
 import { Confirm } from "@cliffy/prompt";
 import pluginMeta from "../.claude-plugin/plugin.json" with { type: "json" };

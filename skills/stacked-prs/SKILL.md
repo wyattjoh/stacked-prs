@@ -618,8 +618,7 @@ confirmation surface.
 Use the same display scoping as `status`: on a non-default branch it defaults to
 the current stack, on the default branch it defaults to `--all`, and the `--all`
 / `-a`, `--stack-name`, `--archived`, `--pr` / `-p`, `--fetch`, and
-`--description` flags
-carry over.
+`--description` flags carry over.
 
 ### `serve`
 
@@ -648,7 +647,9 @@ configured stacks. **No confirmation needed** (read-only).
 Use `--port <number>` to choose a specific port, `--host <host>` to bind a
 specific interface, `--no-open` to print the URL without launching a browser,
 `--no-watch` to disable live updates, and `--poll-interval <seconds>` to set the
-PR poll cadence (default 60, 0 disables polling).
+PR poll cadence (default 60, 0 disables polling). Use `--debug` to print the
+repository and trigger reason before each live refresh, including the relevant
+Git file category or PR poll interval.
 
 ### `land`
 
@@ -722,10 +723,10 @@ full git-config schema.
 
 Mark a stack as archived (or clear the flag with `--unarchive`). An archived
 stack keeps all of its config but is hidden by default from `status`, TUI, and
-`serve` views, and is skipped by `sync`. Explicit single-stack
-operations such as `status --stack-name`, `submit`, `restack`, `land`, and
-`clean` continue to work regardless of archive state. **No confirmation needed**
-(single config write, no git/gh mutation).
+`serve` views, and is skipped by `sync`. Explicit single-stack operations such
+as `status --stack-name`, `submit`, `restack`, `land`, and `clean` continue to
+work regardless of archive state. **No confirmation needed** (single config
+write, no git/gh mutation).
 
 **Flags:** `[<stack>]` (defaults to the current branch's stack), `--unarchive`,
 `--json`
@@ -815,10 +816,9 @@ stays local-only and skips PR fetching. Pass `--theme light` or `--theme dark`
 to override auto-detection. Archived stacks are hidden from the `--all` view by
 default; pass `--archived` to include them (`--json` always includes every stack
 with an `archived` flag, and the TUI toggles them with the `a` key). Root
-branches compare against
-`origin/<base>` when that remote-tracking ref exists, falling back to the local
-base branch otherwise; pass `--fetch` to refresh the ref first. Fetch failures
-degrade to warnings on stderr.
+branches compare against `origin/<base>` when that remote-tracking ref exists,
+falling back to the local base branch otherwise; pass `--fetch` to refresh the
+ref first. Fetch failures degrade to warnings on stderr.
 
 ### `checkout`
 
@@ -847,7 +847,7 @@ locally.
 ```bash
 ${CLAUDE_PLUGIN_ROOT}/skills/stacked-prs/scripts/stacked-prs serve \
   [folders...] [--host <host>] [--port <port>] [--no-open] \
-  [--no-watch] [--poll-interval <seconds>]
+  [--no-watch] [--poll-interval <seconds>] [--debug]
 ```
 
 Starts a local browser UI for the provided repository folders. Relative folders
@@ -866,7 +866,9 @@ remembered across reloads). The view updates live by default (a `.git` file
 watch plus GitHub polling re-render changed repositories with a toast); pass
 `--no-watch` to disable it or `--poll-interval <seconds>` to change the PR poll
 cadence (0 disables polling). Branch descriptions render expanded as muted
-markdown blocks under each branch.
+markdown blocks under each branch. Pass `--debug` to print the repository and
+trigger reason before each live refresh, including the relevant Git file
+category or PR poll interval.
 
 ### `restack`
 
@@ -1048,9 +1050,9 @@ ${CLAUDE_PLUGIN_ROOT}/skills/stacked-prs/scripts/stacked-prs archive \
 
 Sets (or clears with `--unarchive`) `stack.<name>.archived`. Defaults to the
 current branch's stack when no name is given. Archived stacks are hidden by
-default from `status`/TUI/`serve` views and skipped by `sync`; reveal
-them with `--archived` (CLI), the `a` key (TUI), or the "Show archived" switch
-(`serve`). Explicit single-stack operations still work on archived stacks.
+default from `status`/TUI/`serve` views and skipped by `sync`; reveal them with
+`--archived` (CLI), the `a` key (TUI), or the "Show archived" switch (`serve`).
+Explicit single-stack operations still work on archived stacks.
 
 ### `init`
 

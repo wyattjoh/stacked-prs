@@ -551,7 +551,7 @@ metadata mutations. You generally do not need to run them directly, but they can
 be useful for debugging. All commands go through a single entry point:
 
 ```bash
-deno run --allow-run=git,gh,open --allow-env --allow-read --allow-net \
+deno run --allow-run=git,gh,open,xdg-open,cmd --allow-env --allow-read --allow-net \
   src/cli.ts <subcommand> [flags]
 ```
 
