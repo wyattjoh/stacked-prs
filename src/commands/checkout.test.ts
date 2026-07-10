@@ -11,8 +11,10 @@ import { setBaseBranch, setStackNode } from "../lib/stack.ts";
 import {
   CHECKOUT_FOOTER,
   checkoutBranch,
+  checkoutInputSequenceLength,
   filterCheckoutBranches,
   fuzzyCheckoutMatch,
+  initialCheckoutSelectionIndex,
   moveCheckoutSelection,
   moveCheckoutSelectionForKey,
   parseCheckoutKeypress,
@@ -91,6 +93,25 @@ describe("parseCheckoutKeypress", () => {
       "end",
     );
   });
+
+  test("ignores unsupported escape sequences without aborting", () => {
+    expect(parseCheckoutKeypress(new TextEncoder().encode("\x1b[C"))).toBe(
+      "other",
+    );
+    expect(parseCheckoutKeypress(new TextEncoder().encode("\x1b[D"))).toBe(
+      "other",
+    );
+  });
+
+  test("waits for complete escape and UTF-8 input sequences", () => {
+    const encode = (value: string) => new TextEncoder().encode(value);
+
+    expect(checkoutInputSequenceLength(encode("\x1b"))).toBe(null);
+    expect(checkoutInputSequenceLength(encode("\x1b["))).toBe(null);
+    expect(checkoutInputSequenceLength(encode("\x1b[A"))).toBe(3);
+    expect(checkoutInputSequenceLength(encode("a\x1b[A"))).toBe(1);
+    expect(checkoutInputSequenceLength(encode("ø"))).toBe(2);
+  });
 });
 
 describe("checkout fuzzy filtering", () => {
@@ -121,6 +142,15 @@ describe("checkout fuzzy filtering", () => {
 });
 
 describe("moveCheckoutSelection", () => {
+  test("initially selects the current stack or base branch", () => {
+    const branches = ["feature/b", "feature/a", "main"];
+
+    expect(initialCheckoutSelectionIndex(branches, "feature/a")).toBe(1);
+    expect(initialCheckoutSelectionIndex(branches, "main")).toBe(2);
+    expect(initialCheckoutSelectionIndex(branches, "unknown")).toBe(0);
+    expect(initialCheckoutSelectionIndex(branches, undefined)).toBe(0);
+  });
+
   test("moves within bounds without wrapping", () => {
     expect(moveCheckoutSelection(0, -1, 3)).toBe(0);
     expect(moveCheckoutSelection(0, 1, 3)).toBe(1);
@@ -337,6 +367,35 @@ describe("inline checkout frame rendering", () => {
     expect(initial.lineCount).toBe(10);
     expect(update.text.startsWith("\x1b[10A\x1b[J")).toBe(true);
     expect(update.lineCount).toBe(10);
+  });
+
+  test("clips wrapped rows and picker chrome to the physical viewport", () => {
+    const wrappedDisplay = [
+      "◯      feature/01-with-a-long-name  up-to-date",
+      "◯      feature/02-with-a-long-name  up-to-date",
+      "◯      feature/03-with-a-long-name  up-to-date",
+      "◯      feature/04-with-a-long-name  up-to-date",
+      "◉      main",
+    ].join("\n");
+    const wrappedBranches = [
+      "feature/01-with-a-long-name",
+      "feature/02-with-a-long-name",
+      "feature/03-with-a-long-name",
+      "feature/04-with-a-long-name",
+      "main",
+    ];
+
+    const frame = renderCheckoutFrame(
+      wrappedDisplay,
+      wrappedBranches,
+      "feature/03-with-a-long-name",
+      { viewportRows: 8, viewportColumns: 32 },
+    );
+
+    expect(frame.lineCount).toBeLessThanOrEqual(7);
+    expect(frame.text).toContain(
+      selectedRow("◯      feature/03-with-a-long-name  up-to-date"),
+    );
   });
 
   test("limits tall picker frames to the terminal viewport around the selected branch", () => {

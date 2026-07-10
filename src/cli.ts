@@ -19,7 +19,10 @@ import {
 } from "./commands/status.ts";
 import {
   checkoutBranch,
+  checkoutInputSequenceLength,
+  type CheckoutKey,
   filterCheckoutBranches,
+  initialCheckoutSelectionIndex,
   moveCheckoutSelectionForKey,
   parseCheckoutKeypress,
   renderCheckoutFrame,
@@ -201,18 +204,6 @@ async function loadStatusForCli(
     : await withRefLoader(dir, runStatus);
 }
 
-function selectedCheckoutIndex(
-  status: StackStatus | AllStacksStatus,
-  branches: string[],
-): number {
-  const stacks = "stacks" in status ? status.stacks : [status];
-  const current = stacks.flatMap((stack) => stack.branches).find((branch) =>
-    branch.isCurrent && branches.includes(branch.branch)
-  );
-  if (!current) return 0;
-  return branches.indexOf(current.branch);
-}
-
 async function writeStdout(text: string): Promise<void> {
   await Deno.stdout.write(new TextEncoder().encode(text));
 }
@@ -225,13 +216,77 @@ function checkoutViewportSize(): { rows: number; columns: number } {
   }
 }
 
-async function readCheckoutKeypress(): Promise<
-  ReturnType<typeof parseCheckoutKeypress>
-> {
-  const buffer = new Uint8Array(8);
-  const read = await Deno.stdin.read(buffer);
-  if (read === null) return "abort";
-  return parseCheckoutKeypress(buffer.subarray(0, read));
+const CHECKOUT_ESCAPE_DELAY_MS = 30;
+
+function appendCheckoutInput(
+  existing: Uint8Array,
+  incoming: Uint8Array,
+): Uint8Array {
+  const combined = new Uint8Array(existing.length + incoming.length);
+  combined.set(existing);
+  combined.set(incoming, existing.length);
+  return combined;
+}
+
+function createCheckoutKeypressReader(): () => Promise<CheckoutKey> {
+  let buffered: Uint8Array = new Uint8Array();
+  let pendingRead: Promise<Uint8Array | null> | null = null;
+
+  const startRead = (): Promise<Uint8Array | null> => {
+    if (pendingRead !== null) return pendingRead;
+    pendingRead = (async () => {
+      const buffer = new Uint8Array(64);
+      const read = await Deno.stdin.read(buffer);
+      return read === null ? null : buffer.slice(0, read);
+    })();
+    return pendingRead;
+  };
+
+  const waitForInput = async (
+    escapePending: boolean,
+  ): Promise<Uint8Array | null | "timeout"> => {
+    const read = startRead();
+    if (!escapePending) {
+      const chunk = await read;
+      if (pendingRead === read) pendingRead = null;
+      return chunk;
+    }
+
+    let timeout: ReturnType<typeof setTimeout> | undefined;
+    const result = await Promise.race([
+      read.then((chunk) => ({ type: "read" as const, chunk })),
+      new Promise<{ type: "timeout" }>((resolve) => {
+        timeout = setTimeout(
+          () => resolve({ type: "timeout" }),
+          CHECKOUT_ESCAPE_DELAY_MS,
+        );
+      }),
+    ]);
+    if (result.type === "timeout") return "timeout";
+    clearTimeout(timeout);
+    if (pendingRead === read) pendingRead = null;
+    return result.chunk;
+  };
+
+  return async () => {
+    while (true) {
+      const sequenceLength = checkoutInputSequenceLength(buffered);
+      if (sequenceLength !== null) {
+        const sequence = buffered.slice(0, sequenceLength);
+        buffered = buffered.slice(sequenceLength);
+        return parseCheckoutKeypress(sequence);
+      }
+
+      const chunk = await waitForInput(buffered[0] === 0x1b);
+      if (chunk === "timeout" || chunk === null) {
+        if (buffered.length === 0) return "abort";
+        const sequence = buffered;
+        buffered = new Uint8Array();
+        return parseCheckoutKeypress(sequence);
+      }
+      buffered = appendCheckoutInput(buffered, chunk);
+    }
+  };
 }
 
 function removeLastSearchCharacter(query: string): string {
@@ -241,6 +296,7 @@ function removeLastSearchCharacter(query: string): string {
 async function promptForCheckoutBranch(
   status: StackStatus | AllStacksStatus,
   branches: string[],
+  currentBranch: string | undefined,
 ): Promise<string | null> {
   if (!Deno.stdin.isTerminal() || !Deno.stdout.isTerminal()) {
     console.error("checkout requires an interactive terminal.");
@@ -252,10 +308,14 @@ async function promptForCheckoutBranch(
     branches,
     searchQuery,
   );
-  let selectedIndex = selectedCheckoutIndex(status, filteredBranches);
+  let selectedIndex = initialCheckoutSelectionIndex(
+    filteredBranches,
+    currentBranch,
+  );
   const HIDE_CURSOR = "\x1b[?25l";
   const SHOW_CURSOR = "\x1b[?25h";
   let frameLineCount = 0;
+  const readKeypress = createCheckoutKeypressReader();
 
   const updateFilter = (preferredBranch: string | undefined) => {
     filteredBranches = filterCheckoutBranches(
@@ -330,7 +390,7 @@ async function promptForCheckoutBranch(
     await writeStdout(HIDE_CURSOR);
     await render();
     while (true) {
-      const key = await readCheckoutKeypress();
+      const key = await readKeypress();
       if (key === "abort") return null;
       if (key === "enter") {
         if (filteredBranches.length === 0) continue;
@@ -744,10 +804,19 @@ const command = new Command()
       Deno.exit(1);
     }
 
-    const branch = await promptForCheckoutBranch(status, branches);
+    const currentBranchResult = await runGitCommand(
+      dir,
+      "branch",
+      "--show-current",
+    );
+    const branch = await promptForCheckoutBranch(
+      status,
+      branches,
+      currentBranchResult.code === 0 ? currentBranchResult.stdout : undefined,
+    );
     if (!branch) {
       console.log("Aborted.");
-      return;
+      Deno.exit(0);
     }
 
     const result = await checkoutBranch(dir, branch);

@@ -80,7 +80,6 @@ const SYNC_STATUSES = [
 
 const ESCAPE = "\x1b";
 const CLEAR_TO_END = "\x1b[J";
-const CHECKOUT_FOOTER_ROWS = 3;
 const CHECKOUT_VIEWPORT_SAFETY_ROWS = 1;
 
 function stripAnsi(text: string): string {
@@ -229,6 +228,19 @@ export function moveCheckoutSelection(
   return Math.min(branchCount - 1, Math.max(0, currentIndex + delta));
 }
 
+/**
+ * Choose the current branch when it is selectable, including the stack base,
+ * and otherwise fall back to the first checkout candidate.
+ */
+export function initialCheckoutSelectionIndex(
+  branches: string[],
+  currentBranch: string | undefined,
+): number {
+  if (currentBranch === undefined) return 0;
+  const currentIndex = branches.indexOf(currentBranch);
+  return currentIndex >= 0 ? currentIndex : 0;
+}
+
 function moveCheckoutSelectionByStack(
   status: StackStatus | AllStacksStatus,
   branches: string[],
@@ -295,6 +307,40 @@ function isPrintableInput(sequence: string): boolean {
   return true;
 }
 
+function utf8CodePointLength(firstByte: number): number {
+  if (firstByte < 0x80) return 1;
+  if ((firstByte & 0xe0) === 0xc0) return 2;
+  if ((firstByte & 0xf0) === 0xe0) return 3;
+  if ((firstByte & 0xf8) === 0xf0) return 4;
+  return 1;
+}
+
+/**
+ * Return the byte length of the first complete terminal input sequence, or
+ * null when more bytes are needed to distinguish Esc from an escape sequence.
+ */
+export function checkoutInputSequenceLength(
+  bytes: Uint8Array,
+): number | null {
+  if (bytes.length === 0) return null;
+  if (bytes[0] !== 0x1b) {
+    const length = utf8CodePointLength(bytes[0]);
+    return bytes.length >= length ? length : null;
+  }
+  if (bytes.length === 1) return null;
+
+  if (bytes[1] === 0x5b) {
+    for (let index = 2; index < bytes.length; index++) {
+      if (bytes[index] >= 0x40 && bytes[index] <= 0x7e) return index + 1;
+    }
+    return null;
+  }
+  if (bytes[1] === 0x4f) return bytes.length >= 3 ? 3 : null;
+
+  const altCharacterLength = utf8CodePointLength(bytes[1]);
+  return bytes.length >= altCharacterLength + 1 ? altCharacterLength + 1 : null;
+}
+
 function parseCsiKey(sequence: string): { code: string; final: string } | null {
   if (!sequence.startsWith(`${ESCAPE}[`)) return null;
   const payload = sequence.slice(2);
@@ -343,7 +389,7 @@ export function parseCheckoutKeypress(bytes: Uint8Array): CheckoutKey {
       matchesCsiKey(csiKey, "~", ["4", "8"]) ||
       matchesCsiKey(csiKey, "F", ["", "4", "8"])
     ) return "end";
-    return "abort";
+    return sequence === ESCAPE ? "abort" : "other";
   }
   if (isPrintableInput(sequence)) return { type: "input", value: sequence };
   return "other";
@@ -392,10 +438,14 @@ function renderedLineCount(
 
 function checkoutStatusLineBudget(
   options: CheckoutRenderOptions | undefined,
+  searchLine: string,
 ): number | undefined {
   const rows = options?.viewportRows;
   if (rows === undefined || !Number.isFinite(rows)) return undefined;
-  const available = Math.floor(rows) - CHECKOUT_FOOTER_ROWS -
+  const columns = options?.viewportColumns;
+  const chromeRows = 1 + renderedLineCount(searchLine, columns) +
+    renderedLineCount(CHECKOUT_FOOTER, columns);
+  const available = Math.floor(rows) - chromeRows -
     CHECKOUT_VIEWPORT_SAFETY_ROWS;
   return Math.max(1, available);
 }
@@ -411,25 +461,51 @@ function selectedDisplayLineIndex(
   return index >= 0 ? index : 0;
 }
 
-function clamp(value: number, min: number, max: number): number {
-  return Math.min(max, Math.max(min, value));
-}
-
 function renderCheckoutDisplayWindow(
   display: string,
   selectedBranch: string | undefined,
   options: CheckoutRenderOptions | undefined,
+  searchLine: string,
 ): string {
-  const budget = checkoutStatusLineBudget(options);
+  const budget = checkoutStatusLineBudget(options, searchLine);
   if (budget === undefined) return display;
 
   const lines = display.split("\n");
-  if (lines.length <= budget) return display;
+  const lineRows = lines.map((line) =>
+    renderedLineCount(`  ${line}`, options?.viewportColumns)
+  );
+  if (lineRows.reduce((total, rows) => total + rows, 0) <= budget) {
+    return display;
+  }
 
   const selectedLine = selectedDisplayLineIndex(lines, selectedBranch);
-  const maxStart = Math.max(0, lines.length - budget);
-  const start = clamp(selectedLine - Math.floor(budget / 2), 0, maxStart);
-  return lines.slice(start, start + budget).join("\n");
+  let start = selectedLine;
+  let end = selectedLine + 1;
+  let usedRows = lineRows[selectedLine];
+  let rowsAbove = 0;
+  let rowsBelow = 0;
+
+  while (true) {
+    const aboveRows = start > 0 ? lineRows[start - 1] : undefined;
+    const belowRows = end < lines.length ? lineRows[end] : undefined;
+    const aboveFits = aboveRows !== undefined && usedRows + aboveRows <= budget;
+    const belowFits = belowRows !== undefined && usedRows + belowRows <= budget;
+    if (!aboveFits && !belowFits) break;
+
+    if (aboveFits && (!belowFits || rowsAbove <= rowsBelow)) {
+      start -= 1;
+      usedRows += aboveRows;
+      rowsAbove += aboveRows;
+      continue;
+    }
+    if (belowRows !== undefined) {
+      end += 1;
+      usedRows += belowRows;
+      rowsBelow += belowRows;
+    }
+  }
+
+  return lines.slice(start, end).join("\n");
 }
 
 function renderCheckoutSearchLine(
@@ -458,6 +534,7 @@ export function renderCheckoutFrame(
   options?: CheckoutRenderOptions,
 ): CheckoutRenderFrame {
   const query = options?.query ?? "";
+  const searchLine = renderCheckoutSearchLine(options);
   const displayBody = query.length > 0
     ? filterCheckoutDisplay(display, branches)
     : display;
@@ -465,13 +542,12 @@ export function renderCheckoutFrame(
     displayBody,
     selectedBranch,
     options,
+    searchLine,
   );
   const renderedDisplay = windowedDisplay.length === 0
     ? colors.dim("No matches")
     : renderCheckoutDisplay(windowedDisplay, branches, selectedBranch);
-  const text = `${renderedDisplay}\n\n${
-    renderCheckoutSearchLine(options)
-  }\n${CHECKOUT_FOOTER}\n`;
+  const text = `${renderedDisplay}\n\n${searchLine}\n${CHECKOUT_FOOTER}\n`;
   return {
     text,
     lineCount: renderedLineCount(text, options?.viewportColumns),

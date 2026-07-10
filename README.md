@@ -308,12 +308,18 @@ Use up/down to move the cursor, Page Up/Page Down to jump between stacks, and
 Home/End to jump to the top or bottom of the list. Type to fuzzy-filter the
 branch list; Backspace edits the query and Ctrl-U clears it. Press Enter to run
 `git checkout <branch>`, or press Esc/Ctrl-C to abort without changing branches.
-The selected row overrides status colors with white text. The picker accepts the
-same display options as `status`, including `--pr`. It renders inline in the
-current terminal scrollback, leaving the final picker frame visible with
-checkout or abort output below it. When the ladder is taller than the terminal,
-the picker keeps a viewport-sized window around the selected row. The picker
-includes the base branch shown at the bottom of the ladder.
+The current branch starts selected when it is visible, including the base
+branch, and the selected row overrides status colors with white text. Split
+escape and UTF-8 input sequences are buffered; unsupported escape sequences are
+ignored. The picker accepts the status scoping and PR-loading flags:
+`--stack-name`, `--all` / `-a`, `--archived`, and `--pr` / `-p` (with optional
+`--owner` and `--repo`). It renders inline in the current terminal scrollback,
+leaving the final picker frame visible with checkout or abort output below it.
+When the ladder is taller than the terminal, the picker keeps a viewport-sized
+window around the selected row and counts physical rows created by wrapped
+ladder and prompt lines. Terminal dimensions are re-read on every redraw, so a
+resize is reflected after the next handled keypress. The picker includes the
+base branch shown at the bottom of the ladder.
 
 ### `/stacked-prs archive`
 
