@@ -273,22 +273,34 @@ export async function computeSyncStatus(
   return "diverged";
 }
 
-/** Run `git config --get-regexp <pattern>`, return parsed lines as [key, value] pairs. */
+/**
+ * Run `git config -z --get-regexp <pattern>`, return parsed [key, value]
+ * pairs. NUL-separated records put the key before the first newline, so
+ * multi-line values (e.g. branch.<name>.description) survive parsing.
+ */
 export async function gitConfigGetRegexp(
   dir: string,
   pattern: string,
 ): Promise<Array<[string, string]>> {
-  const result = await gitConfig(dir, "--get-regexp", pattern);
-  if (!result) return [];
+  const { code, stdout } = await runGitCommandRaw(
+    dir,
+    "config",
+    "-z",
+    "--get-regexp",
+    pattern,
+  );
+  if (code !== 0 || stdout.length === 0) return [];
 
-  return result
-    .split("\n")
-    .filter((line) => line.trim().length > 0)
-    .map((line) => {
-      const spaceIndex = line.indexOf(" ");
-      const key = line.slice(0, spaceIndex);
-      const value = line.slice(spaceIndex + 1);
-      return [key, value] as [string, string];
+  return stdout
+    .split("\0")
+    .filter((record) => record.length > 0)
+    .map((record) => {
+      const newlineIndex = record.indexOf("\n");
+      if (newlineIndex === -1) return [record, ""] as [string, string];
+      return [
+        record.slice(0, newlineIndex),
+        record.slice(newlineIndex + 1),
+      ] as [string, string];
     });
 }
 
@@ -369,6 +381,8 @@ export interface StackNode {
   children: StackNode[];
   /** True when this branch has been landed. Source: stack.<stackName>.landed-branches or legacy branch.<name>.stack-merged. */
   merged?: boolean;
+  /** Raw markdown from git's native branch.<name>.description key. */
+  description?: string;
 }
 
 export interface StackTree {
@@ -636,10 +650,12 @@ export interface BranchStackEntry {
   parent?: string;
   merged?: boolean;
   order?: number;
+  /** Raw markdown from git's native branch.<name>.description key. */
+  description?: string;
 }
 
 /**
- * Scan every `branch.<name>.stack-*` key in the repo in a single git
+ * Scan every `branch.<name>.stack-*` key and branch description in a single git
  * subprocess and parse the result into a per-branch entry map. Cheap to
  * call once at the top of a planner; callers that previously issued
  * N parallel `git config branch.<b>.stack-*` lookups should use this
@@ -648,14 +664,20 @@ export interface BranchStackEntry {
 export async function readAllBranchStackConfig(
   dir: string,
 ): Promise<Map<string, BranchStackEntry>> {
-  const entries = await gitConfigGetRegexp(dir, "^branch\\..*\\.stack-");
+  const entries = await gitConfigGetRegexp(
+    dir,
+    "^branch\\..*\\.(stack-|description)",
+  );
   const out = new Map<string, BranchStackEntry>();
   for (const [key, value] of entries) {
-    const match = key.match(/^branch\.(.+)\.stack-(name|parent|merged|order)$/);
+    const match = key.match(
+      /^branch\.(.+)\.(?:stack-(name|parent|merged|order)|(description))$/,
+    );
     if (!match) continue;
-    const [, branch, field] = match;
+    const [, branch, field, descriptionKey] = match;
     const entry = out.get(branch) ?? {};
-    if (field === "name") entry.stackName = value;
+    if (descriptionKey) entry.description = value;
+    else if (field === "name") entry.stackName = value;
     else if (field === "parent") entry.parent = value;
     else if (field === "merged") entry.merged = value === "true";
     else if (field === "order") entry.order = Number(value);
@@ -801,12 +823,14 @@ export async function getStackTree(
   // branches whose live config was wiped on `branch -D`).
   const buildNode = (branch: string): StackNode => {
     const children = (childrenMap.get(branch) ?? []).map(buildNode);
+    const description = branchConfig.get(branch)?.description;
     return {
       branch,
       stackName: resolvedStackName!,
       parent: branchParents.get(branch)!,
       children,
       ...(mergedFlags.get(branch) ? { merged: true } : {}),
+      ...(description ? { description } : {}),
     };
   };
 

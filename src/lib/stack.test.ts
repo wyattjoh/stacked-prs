@@ -21,7 +21,9 @@ import {
   getStackArchived,
   getStackTree,
   getSubtree,
+  gitConfigGetRegexp,
   listAllStacks,
+  readAllBranchStackConfig,
   removeStackBranch,
   renderTree,
   runGitCommand,
@@ -95,6 +97,41 @@ describe("stack", () => {
       expect(step2Name.code).toBe(0);
       expect(step2Name.stdout).toBe("my-stack");
     });
+  });
+});
+
+describe("gitConfigGetRegexp", () => {
+  test("round-trips multi-line config values", async () => {
+    await using repo = await createTestRepo();
+    const description = "first line with detail\nsecond line\n\n- a bullet";
+    await runGit(
+      repo.dir,
+      "config",
+      "branch.main.description",
+      description,
+    );
+
+    const entries = await gitConfigGetRegexp(
+      repo.dir,
+      "^branch\\.main\\.description$",
+    );
+    expect(entries).toEqual([["branch.main.description", description]]);
+  });
+
+  test("parses multiple records when one value is multi-line", async () => {
+    await using repo = await createTestRepo();
+    await runGit(repo.dir, "config", "branch.main.stack-name", "alpha");
+    await runGit(
+      repo.dir,
+      "config",
+      "branch.main.description",
+      "line one\nline two",
+    );
+
+    const entries = await gitConfigGetRegexp(repo.dir, "^branch\\.main\\.");
+    const byKey = new Map(entries);
+    expect(byKey.get("branch.main.stack-name")).toBe("alpha");
+    expect(byKey.get("branch.main.description")).toBe("line one\nline two");
   });
 });
 
@@ -356,6 +393,72 @@ describe("getStackTree", () => {
     expect(tree.stackName).toBe("current-stack");
     expect(tree.roots).toHaveLength(1);
     expect(tree.roots[0].branch).toBe("feature/current");
+  });
+});
+
+describe("branch descriptions", () => {
+  test("readAllBranchStackConfig captures description", async () => {
+    await using repo = await createTestRepo();
+    await runGit(repo.dir, "config", "branch.main.stack-name", "alpha");
+    await runGit(repo.dir, "config", "branch.main.stack-parent", "base");
+    await runGit(
+      repo.dir,
+      "config",
+      "branch.main.description",
+      "does the thing\nwith **detail**",
+    );
+
+    const entries = await readAllBranchStackConfig(repo.dir);
+    expect(entries.get("main")?.description).toBe(
+      "does the thing\nwith **detail**",
+    );
+  });
+
+  test("getStackTree populates StackNode.description", async () => {
+    await using repo = await createTestRepo();
+    await addBranch(repo.dir, "feat/a", "main");
+    await runGit(repo.dir, "config", "branch.feat/a.stack-name", "alpha");
+    await runGit(repo.dir, "config", "branch.feat/a.stack-parent", "main");
+    await runGit(repo.dir, "config", "stack.alpha.base-branch", "main");
+    await runGit(
+      repo.dir,
+      "config",
+      "branch.feat/a.description",
+      "adds the api client",
+    );
+
+    const tree = await getStackTree(repo.dir, "alpha");
+    expect(tree.roots[0].description).toBe("adds the api client");
+  });
+
+  test("a description on a non-stack branch creates no phantom membership", async () => {
+    await using repo = await createTestRepo();
+    await addBranch(repo.dir, "feat/a", "main");
+    await addBranch(repo.dir, "loose", "main");
+    await runGit(repo.dir, "config", "branch.feat/a.stack-name", "alpha");
+    await runGit(repo.dir, "config", "branch.feat/a.stack-parent", "main");
+    await runGit(repo.dir, "config", "stack.alpha.base-branch", "main");
+    await runGit(
+      repo.dir,
+      "config",
+      "branch.loose.description",
+      "not in a stack",
+    );
+
+    const tree = await getStackTree(repo.dir, "alpha");
+    const branches = getAllNodes(tree).map((n) => n.branch);
+    expect(branches).toEqual(["feat/a"]);
+  });
+
+  test("undescribed branches carry no description field", async () => {
+    await using repo = await createTestRepo();
+    await addBranch(repo.dir, "feat/a", "main");
+    await runGit(repo.dir, "config", "branch.feat/a.stack-name", "alpha");
+    await runGit(repo.dir, "config", "branch.feat/a.stack-parent", "main");
+    await runGit(repo.dir, "config", "stack.alpha.base-branch", "main");
+
+    const tree = await getStackTree(repo.dir, "alpha");
+    expect("description" in tree.roots[0]).toBe(false);
   });
 });
 

@@ -17,6 +17,11 @@ import {
   detectTheme,
   readColorOverrides,
 } from "../lib/colors.ts";
+import {
+  firstLine,
+  renderAnsiLines,
+  renderInlineAnsi,
+} from "../lib/markdown.ts";
 
 export type { SyncStatus };
 
@@ -38,6 +43,8 @@ export interface BranchStatus {
   pr: PrInfo | null;
   syncStatus: SyncStatus;
   isCurrent: boolean;
+  /** Raw markdown from git's native branch.<name>.description key. */
+  description?: string;
 }
 
 export interface StackStatus {
@@ -64,6 +71,7 @@ interface RenderRow {
   syncStatus: SyncStatus;
   isCurrent: boolean;
   merged: boolean;
+  description?: string;
 }
 
 async function getCurrentBranch(dir: string): Promise<string> {
@@ -82,7 +90,14 @@ export async function queryPr(
 export interface StatusOptions {
   loadPrs?: boolean;
   showArchived?: boolean;
+  /**
+   * Render each branch's full markdown description in the ladder instead of
+   * the dimmed first line. Set by `status --description`.
+   */
+  fullDescriptions?: boolean;
 }
+
+const DESCRIPTION_WRAP_WIDTH = 72;
 
 /** Walk the tree DFS and compute depth + isLastChild for each node. */
 function computeDepths(
@@ -321,6 +336,33 @@ function renderRow(
     : `${leftColored}${branchColored}`;
 }
 
+function renderDescriptionLines(
+  row: RenderRow,
+  colorMap: Map<string, string>,
+  rootStackNames: string[],
+  graphWidth: number,
+  fullDescriptions: boolean,
+): string[] {
+  if (!row.description) return [];
+  const stackColor = ansiColor(colorMap.get(row.stackName) ?? "cyan");
+  const trunk = renderPrefixColumns(
+    row.pipeCount,
+    row.rootIndex,
+    row.stackName,
+    rootStackNames,
+    colorMap,
+    row.merged,
+  );
+  const rail = stackColor(row.merged ? colors.dim("│") : "│");
+  const pad = " ".repeat(
+    Math.max(0, graphWidth - row.pipeCount * 2 - 1) + 2,
+  );
+  const body = fullDescriptions
+    ? renderAnsiLines(row.description, DESCRIPTION_WRAP_WIDTH, { dim: true })
+    : [renderInlineAnsi(firstLine(row.description), { dim: true })];
+  return body.map((text) => `${trunk}${rail}${pad}${text}`);
+}
+
 function renderBaseRow(
   baseBranch: string,
   rootCount: number,
@@ -346,6 +388,7 @@ function renderStackDisplay(
   branches: BranchStatus[],
   colorMap: Map<string, string>,
   currentBranch: string,
+  fullDescriptions: boolean,
 ): string {
   const branchByName = new Map(
     branches.map((branch) => [branch.branch, branch]),
@@ -365,6 +408,7 @@ function renderStackDisplay(
       syncStatus: branch.syncStatus,
       isCurrent: branch.isCurrent,
       merged: row.merged,
+      description: branch.description,
     };
   });
 
@@ -382,9 +426,21 @@ function renderStackDisplay(
     rootCount > 0 ? rootCount + 1 : 1,
   ) + 2;
   const branchWidth = Math.max(maxBranchWidth, tree.baseBranch.length);
-  const lines = rows.map((row) =>
-    renderRow(row, colorMap, rootStackNames, graphWidth, branchWidth)
-  );
+  const lines: string[] = [];
+  for (const row of rows) {
+    lines.push(
+      renderRow(row, colorMap, rootStackNames, graphWidth, branchWidth),
+    );
+    lines.push(
+      ...renderDescriptionLines(
+        row,
+        colorMap,
+        rootStackNames,
+        graphWidth,
+        fullDescriptions,
+      ),
+    );
+  }
   lines.push(
     renderBaseRow(
       tree.baseBranch,
@@ -441,12 +497,19 @@ async function buildStackStatus(
         pr,
         syncStatus,
         isCurrent: node.branch === currentBranch,
+        ...(node.description ? { description: node.description } : {}),
       };
     }),
   );
 
   const colorMap = await resolveStackColors(dir, [tree.stackName]);
-  const display = renderStackDisplay(tree, branches, colorMap, currentBranch);
+  const display = renderStackDisplay(
+    tree,
+    branches,
+    colorMap,
+    currentBranch,
+    opts.fullDescriptions === true,
+  );
 
   return {
     stackName: tree.stackName,
@@ -533,6 +596,7 @@ export async function getAllStackStatuses(
         branches,
         colorMap,
         currentBranch,
+        opts.fullDescriptions === true,
       );
     })
     .join("\n\n");
