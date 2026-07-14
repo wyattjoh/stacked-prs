@@ -7,7 +7,7 @@ import {
   tryResolveRef,
 } from "./stack.ts";
 import type { MergeStrategy } from "./stack.ts";
-import { type GhPrListInfo, listPrsForBranch } from "./gh.ts";
+import { getPrBody, type GhPrListInfo, listPrsForBranch } from "./gh.ts";
 import { buildNavPlan } from "./nav.ts";
 import type { NavAction } from "./nav.ts";
 
@@ -36,6 +36,28 @@ export interface BranchSubmitPlan {
    * step uses `desiredDraft` directly).
    */
   draftAction: "to-draft" | "to-ready" | "none";
+  /**
+   * Raw markdown from git's native `branch.<name>.description` key. When
+   * present, it is the source of truth for the PR body: creation uses it as
+   * the body, and later submits overwrite the PR body on drift. Absent when
+   * the branch has no description; such branches keep gh's `--fill` behavior
+   * and their PR bodies are never touched.
+   */
+  description?: string;
+  /**
+   * PR title used at creation, derived from the subject of the oldest commit
+   * unique to the branch. Only set for `action: "create"` with a description
+   * present (the `--fill` path derives its own title). Titles are set once
+   * and never updated on later submits.
+   */
+  title?: string;
+  /**
+   * Body operation for this branch's PR. "set" when a new PR will be created
+   * with the description as its body; "update" when an existing open PR's
+   * body differs from the description (whitespace-normalized) and will be
+   * overwritten; "none" otherwise.
+   */
+  bodyAction: "set" | "update" | "none";
 }
 
 export interface NavCommentPlan {
@@ -76,6 +98,38 @@ async function computeNeedsPush(dir: string, branch: string): Promise<boolean> {
   if (local === null) return false;
   if (remote === null) return true;
   return local !== remote;
+}
+
+/**
+ * Normalize a PR body / branch description for drift comparison. GitHub
+ * stores bodies with CRLF line endings and often a trailing newline; neither
+ * difference should count as drift.
+ */
+function normalizeBody(body: string): string {
+  return body.replaceAll("\r\n", "\n").trim();
+}
+
+/**
+ * Subject of the oldest commit unique to `branch` relative to `parent`. Used
+ * as the PR title when a branch description supplies the body (matching the
+ * commit-derived spirit of gh's `--fill`). Falls back to the branch name when
+ * the range is empty or unreadable.
+ */
+async function oldestCommitSubject(
+  dir: string,
+  parent: string,
+  branch: string,
+): Promise<string> {
+  const result = await runGitCommand(
+    dir,
+    "log",
+    "--reverse",
+    "--format=%s",
+    `${parent}..${branch}`,
+  );
+  if (result.code !== 0) return branch;
+  const first = result.stdout.split("\n")[0]?.trim();
+  return first || branch;
 }
 
 function toNavCommentPlan(action: NavAction): NavCommentPlan {
@@ -161,6 +215,28 @@ export async function computeSubmitPlan(
         draftAction = "none";
       }
 
+      // Branch descriptions are the source of truth for PR bodies. A new PR
+      // gets the description as its body ("set"); an existing open PR whose
+      // body has drifted from the description gets overwritten ("update").
+      // Branches without a description keep gh's `--fill` behavior and are
+      // never body-edited. Closed/merged PRs are left alone.
+      let bodyAction: BranchSubmitPlan["bodyAction"] = "none";
+      let title: string | undefined;
+      if (b.description !== undefined) {
+        if (action === "create") {
+          bodyAction = "set";
+          title = await oldestCommitSubject(dir, effParent, b.branch);
+        } else if (pr && pr.state === "OPEN") {
+          const liveBody = await getPrBody(pr.number, { owner, repo });
+          if (
+            liveBody !== null &&
+            normalizeBody(liveBody) !== normalizeBody(b.description)
+          ) {
+            bodyAction = "update";
+          }
+        }
+      }
+
       return {
         branch: b.branch,
         parent: effParent,
@@ -170,6 +246,9 @@ export async function computeSubmitPlan(
         needsPush,
         desiredDraft,
         draftAction,
+        ...(b.description !== undefined ? { description: b.description } : {}),
+        ...(title !== undefined ? { title } : {}),
+        bodyAction,
       };
     }),
   );
@@ -180,7 +259,8 @@ export async function computeSubmitPlan(
 
   const isNoOp =
     branchPlans.every((b) =>
-      b.action === "none" && b.draftAction === "none" && !b.needsPush
+      b.action === "none" && b.draftAction === "none" &&
+      b.bodyAction === "none" && !b.needsPush
     ) && navComments.length === 0;
 
   return {

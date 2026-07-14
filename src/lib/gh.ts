@@ -216,6 +216,35 @@ export async function listPrsForBranch(
 }
 
 /**
+ * Fetch a single PR's body via `gh pr view`. Bodies are deliberately kept
+ * out of `GhPrListInfo` and the repo-wide PR index (they would bloat the
+ * shared `gh pr list` payload every status/TUI load pays for); the submit
+ * planner fetches them lazily, only for branches that carry a description
+ * and already have an open PR. Returns null when the lookup fails so
+ * callers can degrade to "no body change planned".
+ */
+export async function getPrBody(
+  number: number,
+  opts: { owner: string; repo: string } & GhOptions,
+): Promise<string | null> {
+  try {
+    const raw = await gh(
+      "pr",
+      "view",
+      String(number),
+      "--repo",
+      `${opts.owner}/${opts.repo}`,
+      "--json",
+      "body",
+    );
+    const parsed = JSON.parse(raw) as { body?: string };
+    return typeof parsed.body === "string" ? parsed.body : "";
+  } catch {
+    return null;
+  }
+}
+
+/**
  * In-memory snapshot of every PR in a single repo. Built by one
  * `gh pr list --state all` round-trip so any number of per-branch
  * lookups in one CLI invocation share the same payload.

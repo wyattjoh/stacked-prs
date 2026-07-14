@@ -1519,6 +1519,7 @@ const command = new Command()
           `Pushed ${result.pushedBranches.length}, ` +
           `created ${result.prsCreated.length} PR(s), ` +
           `retargeted ${result.prsBaseUpdated.length}, ` +
+          `updated ${result.prsBodyUpdated.length} body(ies), ` +
           `flipped ${result.draftTransitions.length} draft(s), ` +
           `${result.navCommentsApplied} nav comment(s).`,
       );

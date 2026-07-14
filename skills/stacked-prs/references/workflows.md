@@ -46,6 +46,8 @@ git checkout main
 git pull
 stacked-prs create feat/login-api      # auto-inits a new stack from main
 # ... edit files, commit normally ...
+# Optional: describe the branch; submit uses this as the PR body.
+git branch --edit-description feat/login-api
 
 # 2. Add a dependent branch on top.
 stacked-prs create feat/login-ui       # child of feat/login-api
@@ -86,8 +88,8 @@ you> y
 claude> [runs cli.ts create --force]
 
 you> /stacked-prs submit
-claude> [runs submit --dry-run, shows push list, PR create/update, draft transitions,
-         nav comments]
+claude> [runs submit --dry-run, shows push list, PR create/update, body syncs from
+         branch descriptions, draft transitions, nav comments]
         Proceed? (y/N)
 you> y
 claude> [runs cli.ts submit --force, reports PR URLs]

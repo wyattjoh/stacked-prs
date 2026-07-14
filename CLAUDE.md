@@ -118,22 +118,29 @@ Branch descriptions come from the native `branch.<name>.description` key via
 `readAllBranchStackConfig`; that helper uses NUL-separated `--get-regexp`
 parsing so multi-line values survive. `status` renders the first line by default
 and the full markdown body with `--description`. The TUI renders the full
-description in its detail pane. `submit` wraps `computeSubmitPlan` with an
-execution path: force-push, then `gh pr create|edit|ready` per branch, then
-apply nav comments. `sync` iterates every stack returned by `getAllStackTrees`:
-it fetches every base once, fast-forwards local base branches when safe (warning
-on divergence), prunes branches whose PRs merged on GitHub (reparenting children
-and retargeting their PR bases), then composes `restack` + force-push per stack.
-It stops at the first failure. `sync` skips stacks marked archived
-(`stack.<name>.archived`), listing them under `archivedSkipped` in the plan,
-unless `--archived` is passed. `archive` toggles that flag (a single config
-write, no confirmation gate); defaults to the current branch's stack when no
-name is given. `pr` is a thin lookup over `gh pr list` that delegates
-browser-opening to `gh pr view --web`. Both `submit` and `sync` share a
-tri-modal CLI shape: `--dry-run` prints the plan only, default (no flags)
-prompts `[y/N]`, and `--force` executes without prompting. This matches the
-SKILL.md confirmation-gate philosophy: Claude uses `--dry-run` to inspect, then
-`--force` after approval.
+description in its detail pane. Descriptions are also the source of truth for PR
+bodies: `computeSubmitPlan` plans `bodyAction: "set"` (create with the
+description as `--body` and the oldest commit subject as `--title`) or
+`"update"` (overwrite an open PR's drifted body; comparison is
+CRLF/trim-normalized, and the live body is fetched lazily via `getPrBody`, not
+the PR index). Branches without a description keep `--fill` and are never
+body-edited; titles are never updated after creation. `submit` wraps
+`computeSubmitPlan` with an execution path: force-push, then
+`gh pr create|edit|ready` per branch (base retarget and body sync share one
+`gh pr edit`), then apply nav comments. `sync` iterates every stack returned by
+`getAllStackTrees`: it fetches every base once, fast-forwards local base
+branches when safe (warning on divergence), prunes branches whose PRs merged on
+GitHub (reparenting children and retargeting their PR bases), then composes
+`restack` + force-push per stack. It stops at the first failure. `sync` skips
+stacks marked archived (`stack.<name>.archived`), listing them under
+`archivedSkipped` in the plan, unless `--archived` is passed. `archive` toggles
+that flag (a single config write, no confirmation gate); defaults to the current
+branch's stack when no name is given. `pr` is a thin lookup over `gh pr list`
+that delegates browser-opening to `gh pr view --web`. Both `submit` and `sync`
+share a tri-modal CLI shape: `--dry-run` prints the plan only, default (no
+flags) prompts `[y/N]`, and `--force` executes without prompting. This matches
+the SKILL.md confirmation-gate philosophy: Claude uses `--dry-run` to inspect,
+then `--force` after approval.
 
 ## Architecture
 
@@ -218,7 +225,7 @@ can be continued across process invocations.
 ```
 branch.<name>.stack-name           # Which stack this branch belongs to
 branch.<name>.stack-parent         # Parent branch name (or the base branch, e.g. "main")
-branch.<name>.description          # (Optional, native git key) markdown description; rendered by status and the TUI
+branch.<name>.description          # (Optional, native git key) markdown description; rendered by status/TUI and used by submit as the PR body
 stack.<stack-name>.merge-strategy  # "merge" or "squash"
 stack.<stack-name>.base-branch     # Base branch name, e.g. "main" or "master"
 stack.<stack-name>.resume-state    # Transient JSON for in-progress restack recovery

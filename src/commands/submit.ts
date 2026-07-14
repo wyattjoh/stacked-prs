@@ -8,6 +8,7 @@ export interface SubmitExecutionResult {
   pushedBranches: string[];
   prsCreated: Array<{ branch: string; number: number; url: string }>;
   prsBaseUpdated: Array<{ branch: string; number: number; newBase: string }>;
+  prsBodyUpdated: Array<{ branch: string; number: number }>;
   draftTransitions: Array<{
     branch: string;
     number: number;
@@ -23,6 +24,7 @@ function emptyResult(): SubmitExecutionResult {
     pushedBranches: [],
     prsCreated: [],
     prsBaseUpdated: [],
+    prsBodyUpdated: [],
     draftTransitions: [],
     navCommentsApplied: 0,
   };
@@ -80,34 +82,58 @@ export async function executeSubmit(
         b.parent,
         "--head",
         b.branch,
-        "--fill",
       ];
+      // A branch description is the source of truth for the PR body. Without
+      // one, gh's --fill derives title and body from commits as before.
+      if (b.description !== undefined) {
+        createArgs.push("--title", b.title ?? b.branch);
+        createArgs.push("--body", b.description);
+      } else {
+        createArgs.push("--fill");
+      }
       if (b.desiredDraft) createArgs.push("--draft");
       const output = (await gh(...createArgs)).trim();
       const number = parsePrNumberFromUrl(output);
       if (number !== undefined) {
         result.prsCreated.push({ branch: b.branch, number, url: output });
       }
-      // Newly created PRs already match desiredDraft via --draft (or not), so
-      // there is no draft transition to apply.
+      // Newly created PRs already match desiredDraft via --draft (or not) and
+      // got their body at creation, so there is no draft or body transition
+      // to apply.
       continue;
     }
 
-    if (b.action === "update-base" && b.pr) {
+    // Base retarget and body sync share one `gh pr edit` call when both are
+    // planned for the same PR.
+    const editFlags: string[] = [];
+    if (b.action === "update-base") {
+      editFlags.push("--base", b.parent);
+    }
+    if (b.bodyAction === "update" && b.description !== undefined) {
+      editFlags.push("--body", b.description);
+    }
+    if (editFlags.length > 0 && b.pr) {
       await gh(
         "pr",
         "edit",
         String(b.pr.number),
         "--repo",
         `${owner}/${repo}`,
-        "--base",
-        b.parent,
+        ...editFlags,
       );
-      result.prsBaseUpdated.push({
-        branch: b.branch,
-        number: b.pr.number,
-        newBase: b.parent,
-      });
+      if (b.action === "update-base") {
+        result.prsBaseUpdated.push({
+          branch: b.branch,
+          number: b.pr.number,
+          newBase: b.parent,
+        });
+      }
+      if (b.bodyAction === "update") {
+        result.prsBodyUpdated.push({
+          branch: b.branch,
+          number: b.pr.number,
+        });
+      }
     }
 
     if (b.draftAction === "to-draft" && b.pr) {
@@ -196,7 +222,10 @@ export function renderSubmitPlan(plan: SubmitPlan): string {
     lines.push("  Create PRs:");
     for (const b of creates) {
       const draftTag = b.desiredDraft ? " [draft]" : "";
-      lines.push(`    ${b.branch}  base=${b.parent}${draftTag}`);
+      const bodyTag = b.bodyAction === "set"
+        ? ` [title: "${b.title ?? b.branch}", body from branch description]`
+        : "";
+      lines.push(`    ${b.branch}  base=${b.parent}${draftTag}${bodyTag}`);
     }
   }
 
@@ -210,6 +239,17 @@ export function renderSubmitPlan(plan: SubmitPlan): string {
       lines.push(
         `    #${b.pr!.number}  ${b.pr!.baseRefName} -> ${b.parent}`,
       );
+    }
+  }
+
+  const bodyUpdates = plan.branches.filter((b) =>
+    b.bodyAction === "update" && b.pr
+  );
+  if (bodyUpdates.length > 0) {
+    lines.push("");
+    lines.push("  Update PR body (from branch description):");
+    for (const b of bodyUpdates) {
+      lines.push(`    #${b.pr!.number} ${b.branch}`);
     }
   }
 
