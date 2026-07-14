@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.6.0](https://github.com/wyattjoh/stacked-prs/compare/stacked-prs-v2.5.0...stacked-prs-v2.6.0) (2026-07-14)
+
+
+### Features
+
+* add serve command for browser-based stack visualization ([#38](https://github.com/wyattjoh/stacked-prs/issues/38)) ([719589a](https://github.com/wyattjoh/stacked-prs/commit/719589a80e5acc12d2bf109f805ddef0bf823bde))
+
 ## [2.5.0](https://github.com/wyattjoh/stacked-prs/compare/stacked-prs-v2.4.2...stacked-prs-v2.5.0) (2026-07-14)
 
 
