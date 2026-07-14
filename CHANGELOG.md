@@ -1,5 +1,15 @@
 # Changelog
 
+## [2.5.0](https://github.com/wyattjoh/stacked-prs/compare/stacked-prs-v2.4.2...stacked-prs-v2.5.0) (2026-07-14)
+
+
+### Features
+
+* add archive command for stack metadata ([#33](https://github.com/wyattjoh/stacked-prs/issues/33)) ([13e7894](https://github.com/wyattjoh/stacked-prs/commit/13e7894b19fead5eddff2483053a69ddeb01bbf7))
+* add branch descriptions ([#36](https://github.com/wyattjoh/stacked-prs/issues/36)) ([3dce8fe](https://github.com/wyattjoh/stacked-prs/commit/3dce8fe28ac67a1d99482ba50995df99b7625de7))
+* add interactive checkout command ([#35](https://github.com/wyattjoh/stacked-prs/issues/35)) ([47cc884](https://github.com/wyattjoh/stacked-prs/commit/47cc8842c059a67b211766d0ee7729bef771eb04))
+* **submit:** use branch descriptions as PR bodies ([#37](https://github.com/wyattjoh/stacked-prs/issues/37)) ([004636c](https://github.com/wyattjoh/stacked-prs/commit/004636ca4fcdb60c5319855476c97476e7a9652c))
+
 ## [2.4.2](https://github.com/wyattjoh/stacked-prs/compare/stacked-prs-v2.4.1...stacked-prs-v2.4.2) (2026-05-14)
 
 
