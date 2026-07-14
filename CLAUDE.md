@@ -150,9 +150,9 @@ that delegates browser-opening to `gh pr view --web`. Both `submit` and `sync`
 share a tri-modal CLI shape: `--dry-run` prints the plan only, default (no
 flags) prompts `[y/N]`, and `--force` executes without prompting. This matches
 the SKILL.md confirmation-gate philosophy: Claude uses `--dry-run` to inspect,
-then `--force` after approval. `serve` is a read-only local browser view: it binds a
-Hono HTTP server (`createServeApp`, served via `Deno.serve(app.fetch)`), opens
-the platform browser, resolves the provided repository folder arguments
+then `--force` after approval. `serve` is a read-only local browser view: it
+binds a Hono HTTP server (`createServeApp`, served via `Deno.serve(app.fetch)`),
+opens the platform browser, resolves the provided repository folder arguments
 (defaulting to the current working directory), and renders status metadata by
 reusing `getAllStackStatuses`. The browser loads via a Server-Sent Events route
 (`/api/status/stream`): `createServeApp` emits an `init` event (the full repo
