@@ -12,6 +12,26 @@ import { setBaseBranch, setStackNode } from "../lib/stack.ts";
 import { writeFixture } from "../lib/gh.ts";
 import { App } from "./app.tsx";
 
+/**
+ * Poll `lastFrame()` until `predicate` holds or the timeout elapses. The TUI's
+ * initial `loadLocal` runs several git subprocesses whose latency varies with
+ * system load, so a fixed sleep races; this waits on the rendered result
+ * instead.
+ */
+async function waitForFrame(
+  lastFrame: () => string | undefined,
+  predicate: (frame: string) => boolean,
+  timeoutMs = 5000,
+): Promise<string> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const frame = lastFrame() ?? "";
+    if (predicate(frame)) return frame;
+    await new Promise((r) => setTimeout(r, 20));
+  }
+  return lastFrame() ?? "";
+}
+
 describe(
   "App integration",
   { sanitizeResources: false, sanitizeOps: false },
@@ -61,9 +81,10 @@ describe(
 
       const { lastFrame, unmount } = render(<App dir={repo.dir} />);
       try {
-        await new Promise((r) => setTimeout(r, 300));
-
-        const frame = lastFrame() ?? "";
+        const frame = await waitForFrame(
+          lastFrame,
+          (f) => f.includes("no PR") && !f.includes("loading"),
+        );
         expect(frame).toContain("Stack: alpha");
         expect(frame).toContain("feat/a");
         expect(frame).toContain("no PR");
