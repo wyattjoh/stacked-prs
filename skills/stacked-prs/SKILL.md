@@ -117,6 +117,27 @@ Reviewers read commits one at a time. Within a branch:
 Stacks limit diff size at the PR level; commits tell the story of _how_ each PR
 makes its change.
 
+### Branch descriptions
+
+Git's native `branch.<name>.description` key (markdown, written with
+`git branch --edit-description <branch>` or
+`git config branch.<name>.description "..."`) is the source of truth for the
+branch's PR body. `submit` uses it verbatim as the body when creating the PR and
+overwrites the body of the existing open PR whenever the two drift, so edits
+made directly on GitHub do not survive the next submit.
+
+Treat the description as a living document:
+
+- Write it when the branch is created and update it in the same session as any
+  change that alters the branch's purpose or scope.
+- Follow the target repository's PR template and conventions; the description
+  ships as the PR body unchanged.
+- Branches without a description fall back to gh's `--fill` behavior (body from
+  commit messages) and their PR bodies are never touched by submit.
+
+Setting a description is a plain metadata config write and needs no confirmation
+gate.
+
 ## Sub-commands
 
 If no argument is provided, assess the current context (branch, dirty state,
@@ -180,6 +201,11 @@ Create a new branch in the stack off the current branch. Backed by
 Review-Ready Stacks": confirm the new branch's intended scope is self-contained
 and would not leave the current (parent) branch in a CI-failing state. If the
 user's plan would violate the rule, flag it and suggest a better split.
+
+**After creating**, offer to set the branch's description
+(`git config branch.<name>.description "..."`). It becomes the PR body on submit
+(see "Branch descriptions"), so writing it at creation time keeps the eventual
+PR ready from the first submit.
 
 1. Run `cli.ts create <branch> --dry-run [flags]` to compute the plan. The
    output lists the resolved case (child / auto-init / auto-init-worktree) and
@@ -456,6 +482,16 @@ for review. All other PRs in the stack are kept as drafts so they cannot be
 merged out of order. The submit plan reconciles drift on every run via the
 `desiredDraft` and `draftAction` fields per branch.
 
+**Body policy:** The branch description (`branch.<name>.description`) is the
+source of truth for the PR body (see "Branch descriptions"). New PRs for
+described branches are created with the description as the body and the oldest
+commit's subject as the title (`bodyAction: "set"`); existing open PRs whose
+body has drifted from the description are overwritten (`bodyAction:
+"update"`),
+discarding any manual GitHub-side edits. Branches without a description use gh's
+`--fill` and are never body-edited. Titles are set once at creation and never
+updated.
+
 `cli.ts submit` has three modes:
 
 - `--dry-run`: compute and print the plan without mutating anything.
@@ -475,9 +511,13 @@ not a live (non-tombstoned) member of the stack.
 3. **Present full plan:**
    - Git: branches to force-push.
    - GitHub: PRs to create (branches with action "create"; show base + flag
-     `--draft` for any branch where `desiredDraft` is true).
+     `--draft` for any branch where `desiredDraft` is true, plus the derived
+     title when `bodyAction` is "set").
    - GitHub: PRs to update base (branches with action "update-base"; show old ->
      new base).
+   - GitHub: PR bodies to overwrite from branch descriptions (branches with
+     `bodyAction: "update"`; call out that GitHub-side manual edits will be
+     lost).
    - GitHub: PRs to flip draft state (branches with `draftAction` of "to-draft"
      or "to-ready"; show the transition and the reason, e.g. "parent is feat/a,
      not main").
@@ -487,10 +527,12 @@ not a live (non-tombstoned) member of the stack.
      opened, even though the dry-run plan doesn't list it.
 4. **Wait for confirmation.**
 5. Run `cli.ts submit --force --stack-name=<name>` to execute. The CLI pushes
-   with `--force-with-lease`, then creates/edits PRs via `gh pr create|edit`,
-   flips draft state via `gh pr ready` / `gh pr ready --undo`, and finally
-   rebuilds the nav plan against the live PR set (so freshly-created PRs are
-   included) and posts/updates nav comments.
+   with `--force-with-lease`, then creates/edits PRs via `gh pr create|edit`
+   (body and title from the branch description where present, `--fill`
+   otherwise; base retarget and body sync share one `gh pr edit` call), flips
+   draft state via `gh pr ready` / `gh pr ready --undo`, and finally rebuilds
+   the nav plan against the live PR set (so freshly-created PRs are included)
+   and posts/updates nav comments.
 6. Report the PR URLs from the CLI output.
 
 ### `pr`
@@ -528,7 +570,9 @@ Show current stack state. **No confirmation needed** (read-only).
    full. The supported markdown subset is bold, italic, inline code, links,
    paragraphs, and flat bullet lists; unsupported syntax stays literal. Setting
    a description is a plain metadata config write and needs no confirmation
-   gate. The tooling itself never writes this key unprompted.
+   gate. The tooling itself never writes this key unprompted. Descriptions are
+   also the source of truth for PR bodies on `submit`; see "Branch
+   descriptions".
 
 #### Interactive view
 
@@ -846,14 +890,17 @@ ${CLAUDE_PLUGIN_ROOT}/skills/stacked-prs/scripts/stacked-prs submit \
 ```
 
 Runs the full submit flow: force-pushes branches, creates or edits PRs (with
-`--draft` derived from the stack's shape), flips draft state when needed, and
+`--draft` derived from the stack's shape; title and body from the branch
+description when set, `--fill` otherwise), syncs open PR bodies that have
+drifted from their branch descriptions, flips draft state when needed, and
 applies the nav comment plan. `--dry-run` prints the plan without mutating
-(combine with `--json` for the raw `SubmitPlan` shape: per-branch actions, an
-`isNoOp` flag, an optional `scope.only` field, and nav comment plan); with no
-flags the CLI prints the plan and prompts `[y/N]`; `--force` skips the prompt.
-`--only=<branch>` restricts per-branch ops (push, create, edit, draft flips) to
-a single live branch in the stack while leaving the nav comment rebuild
-stack-wide; the CLI errors out if the branch is not a live member.
+(combine with `--json` for the raw `SubmitPlan` shape: per-branch actions
+including `bodyAction`/`title`/`description`, an `isNoOp` flag, an optional
+`scope.only` field, and nav comment plan); with no flags the CLI prints the plan
+and prompts `[y/N]`; `--force` skips the prompt. `--only=<branch>` restricts
+per-branch ops (push, create, edit, body sync, draft flips) to a single live
+branch in the stack while leaving the nav comment rebuild stack-wide; the CLI
+errors out if the branch is not a live member.
 
 ### `sync`
 

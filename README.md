@@ -337,6 +337,13 @@ Scroll the focused detail pane with `j` and `k`. Descriptions are stored in
 git's native `branch.<name>.description` config key, are local to the
 repository, and are cleaned up automatically when the branch is deleted.
 
+Descriptions are also the source of truth for PR bodies. `submit` creates a
+described branch's PR with the description as the body (title from the oldest
+commit's subject) and overwrites the open PR's body whenever it drifts from the
+description, so keep the description current instead of editing the PR on
+GitHub. Branches without a description keep gh's `--fill` behavior and their PR
+bodies are never touched.
+
 ### `/stacked-prs archive`
 
 Mark a stack as archived when you are done with it but want to keep its

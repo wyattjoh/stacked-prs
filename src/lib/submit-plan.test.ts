@@ -418,3 +418,175 @@ describe("computeSubmitPlan", () => {
     expect(plan.isNoOp).toBe(false);
   });
 });
+
+describe("computeSubmitPlan body actions", () => {
+  test("plans body set with a derived title for creates with a description", async () => {
+    await using repo = await createTestRepo();
+    await using _mock = await makeMockDir();
+    await addBranch(repo.dir, "feat/a", "main");
+    await addBranch(repo.dir, "feat/b", "feat/a");
+
+    await setBaseBranch(repo.dir, "my-stack", "main");
+    await setStackNode(repo.dir, "feat/a", "my-stack", "main");
+    await setStackNode(repo.dir, "feat/b", "my-stack", "feat/a");
+    await runGit(
+      repo.dir,
+      "config",
+      "branch.feat/a.description",
+      "## Problem\n\nBody text.",
+    );
+
+    const plan = await computeSubmitPlan(repo.dir, "my-stack", "o", "r");
+
+    const a = plan.branches.find((b) => b.branch === "feat/a")!;
+    expect(a.action).toBe("create");
+    expect(a.bodyAction).toBe("set");
+    expect(a.description).toBe("## Problem\n\nBody text.");
+    // addBranch commits a single file with subject "add feat-a.txt".
+    expect(a.title).toBe("add feat-a.txt");
+
+    const b = plan.branches.find((n) => n.branch === "feat/b")!;
+    expect(b.bodyAction).toBe("none");
+    expect(b.description).toBeUndefined();
+    expect(b.title).toBeUndefined();
+  });
+
+  test("plans body update when an open PR body drifts from the description", async () => {
+    await using repo = await createTestRepo();
+    await using mock = await makeMockDir();
+    await addBranch(repo.dir, "feat/a", "main");
+
+    await setBaseBranch(repo.dir, "my-stack", "main");
+    await setStackNode(repo.dir, "feat/a", "my-stack", "main");
+    await runGit(
+      repo.dir,
+      "config",
+      "branch.feat/a.description",
+      "fresh body",
+    );
+
+    await writeFixture(
+      mock.path,
+      ["pr", "list", "--head", "feat/a", "--repo", "o/r"],
+      [{
+        number: 10,
+        url: "https://github.com/o/r/pull/10",
+        title: "feat: a",
+        state: "OPEN",
+        isDraft: false,
+        baseRefName: "main",
+      }],
+    );
+    await writeFixture(
+      mock.path,
+      ["pr", "view", "10", "--repo", "o/r"],
+      { body: "stale body" },
+    );
+
+    const plan = await computeSubmitPlan(repo.dir, "my-stack", "o", "r");
+
+    expect(plan.branches[0].action).toBe("none");
+    expect(plan.branches[0].bodyAction).toBe("update");
+    expect(plan.isNoOp).toBe(false);
+  });
+
+  test("normalized body match keeps the plan a no-op", async () => {
+    await using repo = await createTestRepo();
+    await using mock = await makeMockDir();
+    await using bare = await makeTempDir("bare-");
+    await addBranch(repo.dir, "feat/a", "main");
+    await runGit(repo.dir, "init", "--bare", "-q", bare.path);
+    await runGit(repo.dir, "remote", "add", "origin", bare.path);
+    await runGit(repo.dir, "push", "origin", "feat/a");
+
+    await setBaseBranch(repo.dir, "my-stack", "main");
+    await setStackNode(repo.dir, "feat/a", "my-stack", "main");
+    await runGit(
+      repo.dir,
+      "config",
+      "branch.feat/a.description",
+      "line one\nline two",
+    );
+
+    await writeFixture(
+      mock.path,
+      ["pr", "list", "--head", "feat/a", "--repo", "o/r"],
+      [{
+        number: 10,
+        url: "https://github.com/o/r/pull/10",
+        title: "feat: a",
+        state: "OPEN",
+        isDraft: false,
+        baseRefName: "main",
+      }],
+    );
+    // GitHub stores CRLF line endings and a trailing newline; neither counts
+    // as drift.
+    await writeFixture(
+      mock.path,
+      ["pr", "view", "10", "--repo", "o/r"],
+      { body: "line one\r\nline two\r\n" },
+    );
+
+    const tree: StackTree = {
+      stackName: "my-stack",
+      baseBranch: "main",
+      mergeStrategy: undefined,
+      archived: false,
+      roots: [{
+        branch: "feat/a",
+        stackName: "my-stack",
+        parent: "main",
+        children: [],
+      }],
+    };
+    const navBody = generateNavMarkdown(tree, new Map([["feat/a", 10]]), 10);
+    await writeFixture(
+      mock.path,
+      ["api", "repos/o/r/issues/10/comments"],
+      [{ id: 500, body: navBody }],
+    );
+
+    const plan = await computeSubmitPlan(repo.dir, "my-stack", "o", "r");
+
+    expect(plan.branches[0].bodyAction).toBe("none");
+    expect(plan.isNoOp).toBe(true);
+  });
+
+  test("leaves non-open PRs alone even when the body drifts", async () => {
+    await using repo = await createTestRepo();
+    await using mock = await makeMockDir();
+    await addBranch(repo.dir, "feat/a", "main");
+
+    await setBaseBranch(repo.dir, "my-stack", "main");
+    await setStackNode(repo.dir, "feat/a", "my-stack", "main");
+    await runGit(
+      repo.dir,
+      "config",
+      "branch.feat/a.description",
+      "fresh body",
+    );
+
+    await writeFixture(
+      mock.path,
+      ["pr", "list", "--head", "feat/a", "--repo", "o/r"],
+      [{
+        number: 10,
+        url: "https://github.com/o/r/pull/10",
+        title: "feat: a",
+        state: "MERGED",
+        isDraft: false,
+        baseRefName: "main",
+      }],
+    );
+    await writeFixture(
+      mock.path,
+      ["pr", "view", "10", "--repo", "o/r"],
+      { body: "stale body" },
+    );
+
+    const plan = await computeSubmitPlan(repo.dir, "my-stack", "o", "r");
+
+    expect(plan.branches[0].bodyAction).toBe("none");
+  });
+});

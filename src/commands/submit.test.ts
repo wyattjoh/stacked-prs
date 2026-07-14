@@ -459,4 +459,227 @@ describe("executeSubmit", () => {
     expect(plan.branches.find((b) => b.branch === "feat/landed"))
       .toBeUndefined();
   });
+
+  test("creates PRs with title and body from the branch description", async () => {
+    await using repo = await createTestRepo();
+    await using _mock = await makeMockDir();
+    await using log = makeCallLog();
+    await addBranch(repo.dir, "feat/a", "main");
+    await setBaseBranch(repo.dir, "my-stack", "main");
+    await setStackNode(repo.dir, "feat/a", "my-stack", "main");
+    await runGitCommand(
+      repo.dir,
+      "config",
+      "branch.feat/a.description",
+      "## Problem\n\nBody text.",
+    );
+
+    const bare = await makeTempDir("bare-");
+    await runGitCommand(repo.dir, "init", "--bare", "-q", bare.path);
+    await runGitCommand(repo.dir, "remote", "add", "origin", bare.path);
+
+    const plan = await computeSubmitPlan(repo.dir, "my-stack", "o", "r");
+    const result = await executeSubmit(repo.dir, plan, "o", "r");
+    expect(result.ok).toBe(true);
+
+    const createCall = log.calls.find((c) =>
+      c[0] === "pr" && c[1] === "create"
+    )!;
+    expect(createCall).toContain("--title");
+    expect(createCall).toContain("add feat-a.txt");
+    expect(createCall).toContain("--body");
+    expect(createCall).toContain("## Problem\n\nBody text.");
+    expect(createCall).not.toContain("--fill");
+
+    await bare[Symbol.asyncDispose]();
+  });
+
+  test("updates an open PR body when the description drifts", async () => {
+    await using repo = await createTestRepo();
+    await using mock = await makeMockDir();
+    await using log = makeCallLog();
+    await using bare = await makeTempDir("bare-");
+    await addBranch(repo.dir, "feat/a", "main");
+    await runGitCommand(repo.dir, "init", "--bare", "-q", bare.path);
+    await runGitCommand(repo.dir, "remote", "add", "origin", bare.path);
+    await runGitCommand(repo.dir, "push", "origin", "feat/a");
+
+    await setBaseBranch(repo.dir, "my-stack", "main");
+    await setStackNode(repo.dir, "feat/a", "my-stack", "main");
+    await runGitCommand(
+      repo.dir,
+      "config",
+      "branch.feat/a.description",
+      "fresh body",
+    );
+
+    await writeFixture(
+      mock.path,
+      ["pr", "list", "--head", "feat/a", "--repo", "o/r"],
+      [{
+        number: 10,
+        url: "https://github.com/o/r/pull/10",
+        title: "feat: a",
+        state: "OPEN",
+        isDraft: false,
+        baseRefName: "main",
+      }],
+    );
+    await writeFixture(
+      mock.path,
+      ["pr", "view", "10", "--repo", "o/r"],
+      { body: "stale body" },
+    );
+
+    const plan = await computeSubmitPlan(repo.dir, "my-stack", "o", "r");
+    expect(plan.branches[0].bodyAction).toBe("update");
+
+    const result = await executeSubmit(repo.dir, plan, "o", "r");
+    expect(result.ok).toBe(true);
+    expect(result.prsBodyUpdated).toEqual([{ branch: "feat/a", number: 10 }]);
+
+    const editCalls = log.calls.filter((c) => c[0] === "pr" && c[1] === "edit");
+    expect(editCalls).toHaveLength(1);
+    expect(editCalls[0]).toEqual([
+      "pr",
+      "edit",
+      "10",
+      "--repo",
+      "o/r",
+      "--body",
+      "fresh body",
+    ]);
+  });
+
+  test("combines base retarget and body update into one pr edit call", async () => {
+    await using repo = await createTestRepo();
+    await using mock = await makeMockDir();
+    await using log = makeCallLog();
+    await using bare = await makeTempDir("bare-");
+    await addBranch(repo.dir, "feat/a", "main");
+    await addBranch(repo.dir, "feat/b", "feat/a");
+    await runGitCommand(repo.dir, "init", "--bare", "-q", bare.path);
+    await runGitCommand(repo.dir, "remote", "add", "origin", bare.path);
+    await runGitCommand(repo.dir, "push", "origin", "feat/a", "feat/b");
+
+    await setBaseBranch(repo.dir, "my-stack", "main");
+    await setStackNode(repo.dir, "feat/a", "my-stack", "main");
+    await setStackNode(repo.dir, "feat/b", "my-stack", "feat/a");
+    await runGitCommand(
+      repo.dir,
+      "config",
+      "branch.feat/b.description",
+      "fresh body",
+    );
+
+    await writeFixture(
+      mock.path,
+      ["pr", "list", "--head", "feat/a", "--repo", "o/r"],
+      [{
+        number: 10,
+        url: "https://github.com/o/r/pull/10",
+        title: "feat: a",
+        state: "OPEN",
+        isDraft: false,
+        baseRefName: "main",
+      }],
+    );
+    // feat/b's PR points at main but its parent is feat/a, and its body has
+    // drifted from the description: both fixes ride one `gh pr edit`.
+    await writeFixture(
+      mock.path,
+      ["pr", "list", "--head", "feat/b", "--repo", "o/r"],
+      [{
+        number: 20,
+        url: "https://github.com/o/r/pull/20",
+        title: "feat: b",
+        state: "OPEN",
+        isDraft: true,
+        baseRefName: "main",
+      }],
+    );
+    await writeFixture(
+      mock.path,
+      ["pr", "view", "20", "--repo", "o/r"],
+      { body: "stale body" },
+    );
+
+    const plan = await computeSubmitPlan(repo.dir, "my-stack", "o", "r");
+    const b = plan.branches.find((n) => n.branch === "feat/b")!;
+    expect(b.action).toBe("update-base");
+    expect(b.bodyAction).toBe("update");
+
+    const result = await executeSubmit(repo.dir, plan, "o", "r");
+    expect(result.ok).toBe(true);
+    expect(result.prsBaseUpdated).toEqual([
+      { branch: "feat/b", number: 20, newBase: "feat/a" },
+    ]);
+    expect(result.prsBodyUpdated).toEqual([{ branch: "feat/b", number: 20 }]);
+
+    const editCalls = log.calls.filter((c) => c[0] === "pr" && c[1] === "edit");
+    expect(editCalls).toHaveLength(1);
+    expect(editCalls[0]).toEqual([
+      "pr",
+      "edit",
+      "20",
+      "--repo",
+      "o/r",
+      "--base",
+      "feat/a",
+      "--body",
+      "fresh body",
+    ]);
+  });
+
+  test("renderSubmitPlan shows body actions", () => {
+    const pr = {
+      number: 20,
+      url: "https://github.com/o/r/pull/20",
+      state: "OPEN",
+      isDraft: false,
+      createdAt: "2026-01-01T00:00:00Z",
+      title: "feat: b",
+      headRefName: "feat/b",
+      baseRefName: "feat/a",
+    };
+    const plan = {
+      stackName: "s",
+      mergeStrategy: "merge" as const,
+      branches: [
+        {
+          branch: "feat/a",
+          parent: "main",
+          isCurrent: false,
+          pr: null,
+          action: "create" as const,
+          needsPush: true,
+          desiredDraft: false,
+          draftAction: "none" as const,
+          description: "body",
+          title: "feat: a",
+          bodyAction: "set" as const,
+        },
+        {
+          branch: "feat/b",
+          parent: "feat/a",
+          isCurrent: false,
+          pr,
+          action: "none" as const,
+          needsPush: false,
+          desiredDraft: true,
+          draftAction: "none" as const,
+          description: "body",
+          bodyAction: "update" as const,
+        },
+      ],
+      navComments: [],
+      isNoOp: false,
+    };
+    const rendered = renderSubmitPlan(plan);
+    expect(rendered).toContain(
+      'title: "feat: a", body from branch description',
+    );
+    expect(rendered).toContain("Update PR body (from branch description):");
+    expect(rendered).toContain("#20 feat/b");
+  });
 });
