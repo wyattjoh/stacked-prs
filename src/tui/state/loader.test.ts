@@ -2,8 +2,11 @@ import { describe, it as test } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import {
   addBranch,
+  commitFile,
   createTestRepo,
   makeMockDir,
+  makeTempDir,
+  runGit,
 } from "../../lib/testdata/helpers.ts";
 import {
   addLandedBranch,
@@ -28,6 +31,43 @@ describe("loadLocal", () => {
     expect(result.trees[0].stackName).toBe("alpha");
     expect(result.syncByBranch.get("feat/a")).toBeDefined();
     expect(result.allBranches).toContain("feat/a");
+    expect(result.fetchWarnings).toEqual([]);
+  });
+
+  test("compares roots against origin/<base> when the remote ref exists", async () => {
+    await using repo = await createTestRepo();
+    await using _mock = await makeMockDir();
+    await using bare = await makeTempDir("bare-");
+    await runGit(repo.dir, "init", "--bare", "-q", bare.path);
+    await runGit(repo.dir, "remote", "add", "origin", bare.path);
+    await runGit(repo.dir, "push", "origin", "main");
+    await addBranch(repo.dir, "feat/a", "main");
+    await setStackNode(repo.dir, "feat/a", "alpha", "main");
+    await setBaseBranch(repo.dir, "alpha", "main");
+
+    // Advance main, publish it, then rewind local main so only the
+    // remote-tracking ref knows about the upstream commit.
+    await runGit(repo.dir, "checkout", "main");
+    await commitFile(repo.dir, "upstream.txt", "upstream\n");
+    await runGit(repo.dir, "push", "origin", "main");
+    await runGit(repo.dir, "reset", "--hard", "HEAD~1");
+
+    const result = await loadLocal(repo.dir);
+    expect(result.syncByBranch.get("feat/a")).toBe("diverged");
+  });
+
+  test("fetch failure surfaces warnings without failing the load", async () => {
+    await using repo = await createTestRepo();
+    await using _mock = await makeMockDir();
+    await addBranch(repo.dir, "feat/a", "main");
+    await setStackNode(repo.dir, "feat/a", "alpha", "main");
+    await setBaseBranch(repo.dir, "alpha", "main");
+
+    // No origin remote configured, so the fetch fails.
+    const result = await loadLocal(repo.dir, { fetch: true });
+    expect(result.fetchWarnings).toHaveLength(1);
+    expect(result.fetchWarnings[0]).toContain("origin main");
+    expect(result.syncByBranch.get("feat/a")).toBe("up-to-date");
   });
 });
 

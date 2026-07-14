@@ -7,7 +7,7 @@ description: >-
   stack", "stack PRs", "stacked branches", "push to stack", "dependent PRs",
   "chained branches", "rebase my stack", "sync stack", "submit stack",
   "land stack", "import stack", "split branch", "fold branch".
-argument-hint: "[init|create|insert|split|fold|move|sync|restack|submit|status|checkout|pr|land|import|clean|archive]"
+argument-hint: "[init|create|insert|split|fold|move|sync|restack|submit|status|checkout|serve|pr|land|import|clean|archive]"
 allowed-tools: >-
   Bash(git *), Bash(gh *),
   Bash(${CLAUDE_PLUGIN_ROOT}/skills/stacked-prs/scripts/stacked-prs *),
@@ -563,7 +563,11 @@ Show current stack state. **No confirmation needed** (read-only).
    renders every configured stack grouped by base branch. Archived stacks are
    hidden; add `--archived` to include them. In the TUI, press `a` to toggle
    archived stacks (they render dimmed with an `(archived)` tag).
-4. Branch descriptions: when `branch.<name>.description` is set (markdown,
+4. Sync status compares each root branch against `origin/<base>` when that
+   remote-tracking ref exists (falling back to the local base branch when there
+   is no origin). Add `--fetch` to refresh the remote-tracking ref first; a
+   fetch failure prints a warning and falls back to the last-fetched ref.
+5. Branch descriptions: when `branch.<name>.description` is set (markdown,
    written with `git branch --edit-description <branch>` or
    `git config branch.<name>.description "..."`), `status` shows the dimmed
    first line under the branch; add `--description` to print descriptions in
@@ -613,8 +617,39 @@ confirmation surface.
 
 Use the same display scoping as `status`: on a non-default branch it defaults to
 the current stack, on the default branch it defaults to `--all`, and the `--all`
-/ `-a`, `--stack-name`, `--archived`, `--pr` / `-p`, and `--description` flags
-carry over.
+/ `-a`, `--stack-name`, `--archived`, `--pr` / `-p`, `--fetch`, and
+`--description` flags carry over.
+
+### `serve`
+
+Open a local browser view for explicit repository folders and visualize
+configured stacks. **No confirmation needed** (read-only).
+
+1. Run `cli.ts serve [folders...]`. If no folders are provided, the command uses
+   the current working directory as the only repository.
+2. The command starts a localhost server and opens the default browser.
+3. The browser renders branch relationships as a lane graph and includes the
+   same status metadata as the CLI for those repositories: stack name, base
+   branch, merge strategy, branch parentage, PR number/state/draft state when
+   available, sync status, current-branch markers, and expanded markdown branch
+   descriptions when `branch.<name>.description` is set.
+4. When multiple repositories have a stack with the same name, the top selector
+   can show that shared stack as one combined graph. Each repository appears as
+   the root node, then connects to its base branch, then to its stack branches.
+5. Repositories with no stacked-prs metadata are omitted from the browser view.
+6. Archived stacks are hidden by default; the header's "Show archived" switch
+   reveals them (dimmed, with an `(archived)` badge), and the choice persists
+   across reloads.
+7. The view updates live by default: the page watches each repository's `.git`
+   and polls GitHub, then re-renders the changed repository and shows a toast,
+   so no manual reload is needed.
+
+Use `--port <number>` to choose a specific port, `--host <host>` to bind a
+specific interface, `--no-open` to print the URL without launching a browser,
+`--no-watch` to disable live updates, and `--poll-interval <seconds>` to set the
+PR poll cadence (default 60, 0 disables polling). Use `--debug` to print the
+repository and trigger reason before each live refresh, including the relevant
+Git file category or PR poll interval.
 
 ### `land`
 
@@ -687,9 +722,11 @@ full git-config schema.
 ### `archive`
 
 Mark a stack as archived (or clear the flag with `--unarchive`). An archived
-stack keeps all of its config but is hidden by default from `status`, the TUI,
-and is skipped by `sync`. **No confirmation needed** (single config write, no
-git/gh mutation).
+stack keeps all of its config but is hidden by default from `status`, TUI, and
+`serve` views, and is skipped by `sync`. Explicit single-stack operations such
+as `status --stack-name`, `submit`, `restack`, `land`, and `clean` continue to
+work regardless of archive state. **No confirmation needed** (single config
+write, no git/gh mutation).
 
 **Flags:** `[<stack>]` (defaults to the current branch's stack), `--unarchive`,
 `--json`
@@ -697,7 +734,8 @@ git/gh mutation).
 1. Run `cli.ts archive [<stack>]` to archive, or
    `cli.ts archive [<stack>] --unarchive` to restore.
 2. Reveal archived stacks on demand: `cli.ts status --archived`,
-   `cli.ts sync --archived`, or the `a` key in the TUI.
+   `cli.ts sync --archived`, the `a` key in the TUI, or the "Show archived"
+   switch in the `serve` web UI.
 
 ## Confirmation Gate Rules
 
@@ -720,6 +758,7 @@ git/gh mutation).
 - `stacked-prs status --json`
 - `stacked-prs status --interactive` / `-i`
 - `stacked-prs checkout` (local branch switch after interactive selection)
+- `stacked-prs serve` (read-only local HTTP server and browser UI)
 - `stacked-prs nav --dry-run`
 - `stacked-prs verify-refs`
 - `stacked-prs restack --dry-run` (with or without `--json`)
@@ -757,7 +796,7 @@ provided.
 
 ```bash
 ${CLAUDE_PLUGIN_ROOT}/skills/stacked-prs/scripts/stacked-prs status \
-  [--stack-name=<name>] [--owner=<owner> --repo=<repo>] [--json] [--pr|-p] [--all] [--archived] [--description] [--interactive|-i] [--theme <theme>]
+  [--stack-name=<name>] [--owner=<owner> --repo=<repo>] [--json] [--pr|-p] [--all] [--archived] [--fetch] [--description] [--interactive|-i] [--theme <theme>]
 ```
 
 Returns human-readable ladder output by default. Pass `--json` for structured
@@ -776,14 +815,17 @@ metadata is opt-in: pass `--pr` / `-p` to load PRs from GitHub; otherwise status
 stays local-only and skips PR fetching. Pass `--theme light` or `--theme dark`
 to override auto-detection. Archived stacks are hidden from the `--all` view by
 default; pass `--archived` to include them (`--json` always includes every stack
-with an `archived` flag, and the TUI toggles them with the `a` key).
+with an `archived` flag, and the TUI toggles them with the `a` key). Root
+branches compare against `origin/<base>` when that remote-tracking ref exists,
+falling back to the local base branch otherwise; pass `--fetch` to refresh the
+ref first. Fetch failures degrade to warnings on stderr.
 
 ### `checkout`
 
 ```bash
 ${CLAUDE_PLUGIN_ROOT}/skills/stacked-prs/scripts/stacked-prs checkout \
   [--stack-name=<name>] [--owner=<owner> --repo=<repo>] [--pr|-p] \
-  [--all|-a] [--archived] [--description]
+  [--all|-a] [--archived] [--fetch] [--description]
 ```
 
 Renders the same ladder as `status`, lets the user move a `>` cursor with
@@ -799,6 +841,34 @@ row, counting physical rows created by wrapped ladder and prompt lines. It
 re-reads terminal dimensions on every redraw. The branch list includes the base
 branch and excludes landed tombstone rows because those refs no longer exist
 locally.
+
+### `serve`
+
+```bash
+${CLAUDE_PLUGIN_ROOT}/skills/stacked-prs/scripts/stacked-prs serve \
+  [folders...] [--host <host>] [--port <port>] [--no-open] \
+  [--no-watch] [--poll-interval <seconds>] [--debug]
+```
+
+Starts a local browser UI for the provided repository folders. Relative folders
+are resolved from the current working directory. When no folders are provided,
+the current working directory is used as the only repository. Each repository's
+stacks render using the same metadata returned by `status --all --pr`. PR
+metadata is best-effort: it is loaded when the repository's `origin` remote
+points at GitHub and `gh pr list` is available. If PR loading is unavailable,
+the view still renders local stack metadata. Each stack's name (and each
+repository header in the single-stack view) carries a muted relative time of the
+most recent commit on that stack, for example `2 days ago`. Stacks are ordered
+most-recent-commit first in both the overview and the switcher dropdown, and
+each switcher entry shows that relative time too. Archived stacks are hidden by
+default; a "Show archived" switch in the header reveals them (the preference is
+remembered across reloads). The view updates live by default (a `.git` file
+watch plus GitHub polling re-render changed repositories with a toast); pass
+`--no-watch` to disable it or `--poll-interval <seconds>` to change the PR poll
+cadence (0 disables polling). Branch descriptions render expanded as muted
+markdown blocks under each branch. Pass `--debug` to print the repository and
+trigger reason before each live refresh, including the relevant Git file
+category or PR poll interval.
 
 ### `restack`
 
@@ -980,8 +1050,9 @@ ${CLAUDE_PLUGIN_ROOT}/skills/stacked-prs/scripts/stacked-prs archive \
 
 Sets (or clears with `--unarchive`) `stack.<name>.archived`. Defaults to the
 current branch's stack when no name is given. Archived stacks are hidden by
-default from `status`/TUI and skipped by `sync`; reveal them with `--archived`
-(CLI) or the `a` key (TUI).
+default from `status`/TUI/`serve` views and skipped by `sync`; reveal them with
+`--archived` (CLI), the `a` key (TUI), or the "Show archived" switch (`serve`).
+Explicit single-stack operations still work on archived stacks.
 
 ### `init`
 

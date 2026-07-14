@@ -44,6 +44,8 @@ import type { PrInfo } from "./types.ts";
 export interface AppProps {
   dir: string;
   loadPrs?: boolean;
+  /** Fetch base branches from origin on initial load and manual refresh. */
+  fetch?: boolean;
   theme?: "light" | "dark";
   initialTab?: TabId;
   showArchived?: boolean;
@@ -110,7 +112,10 @@ export function App(props: AppProps): React.ReactElement {
 
   async function doInitialLoad(): Promise<void> {
     const theme = props.theme ?? detectTheme(Deno.env.get("COLORFGBG"));
-    const local = await loadLocal(props.dir);
+    const local = await loadLocal(props.dir, { fetch: props.fetch });
+    for (const warning of local.fetchWarnings) {
+      dispatch({ type: "ERROR_LOG", message: warning });
+    }
     const overrides = await readColorOverrides(
       local.trees.map((t) => t.stackName),
       runRunGit,

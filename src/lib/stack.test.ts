@@ -14,6 +14,7 @@ import {
   getLandedBranches,
   getLandedParents,
   getLandedPrs,
+  getLatestCommitDate,
   getLeaves,
   getLiveSubtreeRoots,
   getMergeStrategy,
@@ -43,6 +44,30 @@ describe("stack", () => {
     await setMergeStrategy(repo.dir, "my-stack", "squash");
     const strategy = await getMergeStrategy(repo.dir, "my-stack");
     expect(strategy).toBe("squash");
+  });
+
+  describe("getLatestCommitDate", () => {
+    test("returns the max committer date across branches", async () => {
+      await using repo = await createTestRepo();
+      await addBranch(repo.dir, "feat-a", "main");
+      await addBranch(repo.dir, "feat-b", "feat-a");
+
+      const both = await getLatestCommitDate(repo.dir, ["feat-a", "feat-b"]);
+      const onlyA = await getLatestCommitDate(repo.dir, ["feat-a"]);
+
+      expect(both).not.toBeNull();
+      expect(onlyA).not.toBeNull();
+      expect(Number.isNaN(Date.parse(both!))).toBe(false);
+      // The two-branch max is at least the feat-a-only value.
+      expect(Date.parse(both!) >= Date.parse(onlyA!)).toBe(true);
+    });
+
+    test("returns null for an empty list and for missing refs", async () => {
+      await using repo = await createTestRepo();
+      expect(await getLatestCommitDate(repo.dir, [])).toBeNull();
+      expect(await getLatestCommitDate(repo.dir, ["does-not-exist"]))
+        .toBeNull();
+    });
   });
 
   test("merge strategy: returns undefined for unset", async () => {

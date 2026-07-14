@@ -1,4 +1,4 @@
-#!/usr/bin/env -S deno run --allow-run=git,gh --allow-env
+#!/usr/bin/env -S deno run --allow-run=git,gh,open,xdg-open,cmd --allow-env --allow-read --allow-net
 import { Command } from "@cliffy/command";
 import { Confirm } from "@cliffy/prompt";
 import pluginMeta from "../.claude-plugin/plugin.json" with { type: "json" };
@@ -63,6 +63,12 @@ import { type ImportPlan, importStack } from "./commands/import.ts";
 import { getAllNodes } from "./lib/stack.ts";
 import { assignColors, detectTheme, readColorOverrides } from "./lib/colors.ts";
 import { ansiColor } from "./lib/ansi.ts";
+import {
+  formatServeReloadDebugMessage,
+  openBrowser,
+  resolveServeRepositories,
+  startServeServer,
+} from "./commands/serve.ts";
 
 /** Pretty-print a value as JSON with 2-space indent on stdout. */
 function logJson(value: unknown): void {
@@ -162,6 +168,7 @@ interface CliStatusOptions {
   owner: string | undefined;
   repo: string | undefined;
   showArchived: boolean;
+  fetch: boolean;
   fullDescriptions: boolean;
 }
 
@@ -190,12 +197,14 @@ async function loadStatusForCli(
       return await getAllStackStatuses(dir, owner, repo, {
         loadPrs: options.loadPrs,
         showArchived: options.showArchived,
+        fetch: options.fetch,
         fullDescriptions: options.fullDescriptions,
       });
     }
     const stackName = await resolveStackName(dir, options.stackName);
     return await getStackStatus(dir, stackName, owner, repo, {
       loadPrs: options.loadPrs,
+      fetch: options.fetch,
       fullDescriptions: options.fullDescriptions,
     });
   };
@@ -584,6 +593,10 @@ const command = new Command()
   .option("--all, -a", "Show all stacks grouped by base branch")
   .option("--archived", "Include archived stacks (hidden by default)")
   .option(
+    "--fetch",
+    "Fetch base branches from origin before computing sync status",
+  )
+  .option(
     "--description",
     "Show full branch descriptions in the ladder output",
   )
@@ -724,6 +737,7 @@ const command = new Command()
             dir,
             initialTab,
             loadPrs,
+            fetch: options.fetch === true,
             theme,
             showArchived: options.archived === true,
             onRequestExit: (code = 0) => {
@@ -771,8 +785,12 @@ const command = new Command()
       owner: options.owner,
       repo: options.repo,
       showArchived: options.archived === true,
+      fetch: options.fetch === true,
       fullDescriptions: options.description === true,
     });
+    for (const warning of status.fetchWarnings ?? []) {
+      console.error(`⚠ ${warning}`);
+    }
     if (options.json) {
       logJson(status);
     } else {
@@ -794,6 +812,10 @@ const command = new Command()
   .option("--all, -a", "Show all stacks grouped by base branch")
   .option("--archived", "Include archived stacks (hidden by default)")
   .option(
+    "--fetch",
+    "Fetch base branches from origin before computing sync status",
+  )
+  .option(
     "--description",
     "Show full branch descriptions in the ladder output",
   )
@@ -805,8 +827,12 @@ const command = new Command()
       owner: options.owner,
       repo: options.repo,
       showArchived: options.archived === true,
+      fetch: options.fetch === true,
       fullDescriptions: options.description === true,
     });
+    for (const warning of status.fetchWarnings ?? []) {
+      console.error(`⚠ ${warning}`);
+    }
 
     const branches = visibleCheckoutBranches(status, {
       showArchived: options.archived === true,
@@ -836,6 +862,72 @@ const command = new Command()
     if (result.stdout) console.log(result.stdout);
     if (result.stderr) console.error(result.stderr);
     if (!result.ok) Deno.exit(result.code || 1);
+  })
+  // --- serve ---
+  .command(
+    "serve [folders...:string]",
+    "Open a local browser view for provided repository folders",
+  )
+  .option("--host <host:string>", "Host to bind", { default: "127.0.0.1" })
+  .option("--port <port:number>", "Port to bind (0 chooses a free port)", {
+    default: 0,
+  })
+  .option("--no-open", "Do not open the browser automatically")
+  .option("--no-watch", "Disable live updates (file watch and PR polling)")
+  .option("--debug", "Print live refresh reasons to stderr")
+  .option(
+    "--poll-interval <seconds:number>",
+    "Seconds between PR status polls (0 disables polling)",
+    { default: 60 },
+  )
+  .action(async (options, ...folders: string[]) => {
+    const repositories = resolveServeRepositories(dir, folders);
+    const pollSeconds = options.pollInterval ?? 60;
+    const server = await startServeServer({
+      rootDir: dir,
+      repositories,
+      host: options.host ?? "127.0.0.1",
+      port: options.port ?? 0,
+      watch: {
+        enabled: options.watch !== false,
+        pollIntervalMs: Math.max(0, pollSeconds) * 1000,
+        debounceMs: 300,
+        debugLog: options.debug
+          ? (repo, reason) =>
+            console.error(formatServeReloadDebugMessage(repo, reason))
+          : undefined,
+      },
+    });
+
+    console.log(`Serving stacked-prs at ${server.url}`);
+    console.log("Press Ctrl+C to stop.");
+
+    if (options.open !== false) {
+      try {
+        await openBrowser(server.url);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        console.error(`Could not open browser automatically: ${message}`);
+      }
+    }
+
+    const onSignal = async () => {
+      await server.shutdown();
+      Deno.exit(130);
+    };
+
+    try {
+      Deno.addSignalListener("SIGINT", onSignal);
+      Deno.addSignalListener("SIGTERM", onSignal);
+      await server.finished;
+    } finally {
+      try {
+        Deno.removeSignalListener("SIGINT", onSignal);
+        Deno.removeSignalListener("SIGTERM", onSignal);
+      } catch {
+        // ignore
+      }
+    }
   })
   // --- create ---
   .command("create <branch:string>", "Create a new branch in the stack")

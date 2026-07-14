@@ -3,8 +3,10 @@ import { expect } from "@std/expect";
 import {
   addBranch,
   addTombstone,
+  commitFile,
   createTestRepo,
   makeMockDir,
+  makeTempDir,
   runGit,
 } from "../lib/testdata/helpers.ts";
 import {
@@ -23,7 +25,32 @@ function stripAnsi(text: string): string {
   return text.replaceAll(/\x1b\[[0-9;]*m/g, "");
 }
 
+/** Hook up a bare remote and publish `main` to `origin/main`. */
+async function wireOrigin(
+  repoDir: string,
+): Promise<AsyncDisposable & { path: string }> {
+  const bare = await makeTempDir("bare-");
+  await runGit(repoDir, "init", "--bare", "-q", bare.path);
+  await runGit(repoDir, "remote", "add", "origin", bare.path);
+  await runGit(repoDir, "push", "origin", "main");
+  return bare;
+}
+
 describe("getStackStatus", () => {
+  test("populates latestCommitAt from the stack's branches", async () => {
+    await using repo = await createTestRepo();
+    await using _mock = await makeMockDir();
+    await addBranch(repo.dir, "feat/a", "main");
+    await addBranch(repo.dir, "feat/b", "feat/a");
+    await setStackNode(repo.dir, "feat/a", "my-stack", "main");
+    await setStackNode(repo.dir, "feat/b", "my-stack", "feat/a");
+    await setBaseBranch(repo.dir, "my-stack", "main");
+
+    const status = await getStackStatus(repo.dir, "my-stack");
+    expect(status.latestCommitAt).not.toBeNull();
+    expect(Number.isNaN(Date.parse(status.latestCommitAt!))).toBe(false);
+  });
+
   test("returns tree-structured status with depth info for a forked tree (a -> b + c)", async () => {
     await using repo = await createTestRepo();
     await using _mock = await makeMockDir();
@@ -621,5 +648,86 @@ describe("getAllStackStatuses", () => {
     });
     expect(status.display).toContain("a/1");
     expect(status.display).toContain("b/1");
+  });
+});
+
+describe("sync status against origin base", () => {
+  test("compares roots against origin/<base> when the remote ref exists", async () => {
+    await using repo = await createTestRepo();
+    await using _mock = await makeMockDir();
+    await using _bare = await wireOrigin(repo.dir);
+    await addBranch(repo.dir, "feat/a", "main");
+    await setStackNode(repo.dir, "feat/a", "my-stack", "main");
+    await setBaseBranch(repo.dir, "my-stack", "main");
+
+    // Advance main, publish it, then rewind local main so only the
+    // remote-tracking ref knows about the upstream commit. Comparing
+    // against local main would report up-to-date; origin/main diverged.
+    await runGit(repo.dir, "checkout", "main");
+    await commitFile(repo.dir, "upstream.txt", "upstream\n");
+    await runGit(repo.dir, "push", "origin", "main");
+    await runGit(repo.dir, "reset", "--hard", "HEAD~1");
+
+    const status = await getStackStatus(repo.dir, "my-stack");
+    expect(status.branches[0].syncStatus).toBe("diverged");
+  });
+
+  test("falls back to the local base when origin/<base> does not exist", async () => {
+    await using repo = await createTestRepo();
+    await using _mock = await makeMockDir();
+    await addBranch(repo.dir, "feat/a", "main");
+    await setStackNode(repo.dir, "feat/a", "my-stack", "main");
+    await setBaseBranch(repo.dir, "my-stack", "main");
+
+    const status = await getStackStatus(repo.dir, "my-stack");
+    expect(status.branches[0].syncStatus).toBe("up-to-date");
+    expect(status.fetchWarnings).toBeUndefined();
+  });
+
+  test("fetch refreshes a stale remote-tracking ref before comparing", async () => {
+    await using repo = await createTestRepo();
+    await using _mock = await makeMockDir();
+    await using _bare = await wireOrigin(repo.dir);
+    await addBranch(repo.dir, "feat/a", "main");
+    await setStackNode(repo.dir, "feat/a", "my-stack", "main");
+    await setBaseBranch(repo.dir, "my-stack", "main");
+
+    const oldSha = await runGit(repo.dir, "rev-parse", "main");
+    await runGit(repo.dir, "checkout", "main");
+    await commitFile(repo.dir, "upstream.txt", "upstream\n");
+    await runGit(repo.dir, "push", "origin", "main");
+    await runGit(repo.dir, "reset", "--hard", "HEAD~1");
+    // Rewind the remote-tracking ref to simulate a repo that hasn't
+    // fetched since the upstream commit landed.
+    await runGit(repo.dir, "update-ref", "refs/remotes/origin/main", oldSha);
+
+    const stale = await getStackStatus(repo.dir, "my-stack");
+    expect(stale.branches[0].syncStatus).toBe("up-to-date");
+
+    const fetched = await getStackStatus(
+      repo.dir,
+      "my-stack",
+      undefined,
+      undefined,
+      { fetch: true },
+    );
+    expect(fetched.fetchWarnings).toEqual([]);
+    expect(fetched.branches[0].syncStatus).toBe("diverged");
+  });
+
+  test("fetch failure surfaces warnings without failing status", async () => {
+    await using repo = await createTestRepo();
+    await using _mock = await makeMockDir();
+    await addBranch(repo.dir, "feat/a", "main");
+    await setStackNode(repo.dir, "feat/a", "my-stack", "main");
+    await setBaseBranch(repo.dir, "my-stack", "main");
+
+    // No origin remote configured, so the fetch fails.
+    const status = await getAllStackStatuses(repo.dir, undefined, undefined, {
+      fetch: true,
+    });
+    expect(status.fetchWarnings).toHaveLength(1);
+    expect(status.fetchWarnings![0]).toContain("origin main");
+    expect(status.stacks[0].branches[0].syncStatus).toBe("up-to-date");
   });
 });

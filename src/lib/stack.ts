@@ -1,4 +1,4 @@
-import { getActiveRefLoader } from "./loaders.ts";
+import { getActiveRefLoader, invalidateRefs } from "./loaders.ts";
 
 export type MergeStrategy = "merge" | "squash";
 
@@ -45,6 +45,34 @@ export async function runGitCommand(
     stdout: result.stdout.trim(),
     stderr: result.stderr.trim(),
   };
+}
+
+/**
+ * Return the most recent committer date (ISO 8601, UTC `Z`) across the given
+ * branch names, or null when the list is empty or no ref resolves. Branches
+ * without a live ref (e.g. deleted landed branches) are skipped. Uses one
+ * `git for-each-ref` subprocess regardless of branch count.
+ */
+export async function getLatestCommitDate(
+  dir: string,
+  branches: string[],
+): Promise<string | null> {
+  if (branches.length === 0) return null;
+  const refs = branches.map((b) => `refs/heads/${b}`);
+  const { code, stdout } = await runGitCommand(
+    dir,
+    "for-each-ref",
+    "--format=%(committerdate:unix)",
+    ...refs,
+  );
+  if (code !== 0 || !stdout) return null;
+  let max = 0;
+  for (const line of stdout.split("\n")) {
+    const n = Number.parseInt(line.trim(), 10);
+    if (Number.isFinite(n) && n > max) max = n;
+  }
+  if (max === 0) return null;
+  return new Date(max * 1000).toISOString().replace(/\.\d{3}Z$/, "Z");
 }
 
 /** Run `git config` with given args, return trimmed stdout or undefined on failure. */
@@ -271,6 +299,45 @@ export async function computeSyncStatus(
   if (left === 0) return "up-to-date";
   if (right === 0) return "behind-parent";
   return "diverged";
+}
+
+/**
+ * Resolve the ref a stack root's sync status should compare against:
+ * `origin/<base>` when that remote-tracking ref exists (so a stale local
+ * base branch doesn't mask divergence from the remote), otherwise the local
+ * base branch name. Mirrors restack's rebase-target resolution.
+ */
+export async function resolveBaseSyncRef(
+  dir: string,
+  baseBranch: string,
+): Promise<string> {
+  const remoteRef = `origin/${baseBranch}`;
+  const sha = await tryResolveRef(dir, remoteRef);
+  return sha !== null ? remoteRef : baseBranch;
+}
+
+/**
+ * Fetch each distinct base branch from origin so remote-tracking refs are
+ * current before sync-status comparison. Best-effort: failures come back as
+ * warning strings instead of throwing, because callers (status, the TUI)
+ * treat a stale remote-tracking ref as acceptable degradation.
+ */
+export async function fetchBaseBranches(
+  dir: string,
+  baseBranches: Iterable<string>,
+): Promise<string[]> {
+  const warnings: string[] = [];
+  for (const base of new Set(baseBranches)) {
+    const { code, stderr } = await runGitCommand(dir, "fetch", "origin", base);
+    if (code !== 0) {
+      warnings.push(
+        `Failed to fetch origin ${base}: ${stderr || `exit code ${code}`}`,
+      );
+      continue;
+    }
+    invalidateRefs([`origin/${base}`, `refs/remotes/origin/${base}`]);
+  }
+  return warnings;
 }
 
 /**

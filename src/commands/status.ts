@@ -2,15 +2,19 @@ import * as colors from "@std/fmt/colors";
 import {
   computeSyncStatus,
   effectiveParent,
+  fetchBaseBranches,
   getAllNodes,
   getAllStackTrees,
+  getLatestCommitDate,
   getStackTree,
+  resolveBaseSyncRef,
   runGitCommand,
   type StackNode,
   type StackTree,
   type SyncStatus,
 } from "../lib/stack.ts";
-import { listPrsForBranch } from "../lib/gh.ts";
+import { listPrsForBranch, type PrIndex, selectBestPr } from "../lib/gh.ts";
+import { type LaneTreeNode, layoutLanes } from "../lib/graph.ts";
 import { ansiColor } from "../lib/ansi.ts";
 import {
   assignColors,
@@ -53,12 +57,18 @@ export interface StackStatus {
   mergeStrategy: string | undefined;
   archived: boolean;
   branches: BranchStatus[];
+  /** ISO 8601 of the most recent commit across the stack's branches, or null. */
+  latestCommitAt: string | null;
   display: string;
+  /** Fetch failures when `StatusOptions.fetch` was set; absent otherwise. */
+  fetchWarnings?: string[];
 }
 
 export interface AllStacksStatus {
   stacks: StackStatus[];
   display: string;
+  /** Fetch failures when `StatusOptions.fetch` was set; absent otherwise. */
+  fetchWarnings?: string[];
 }
 
 interface RenderRow {
@@ -89,7 +99,14 @@ export async function queryPr(
 
 export interface StatusOptions {
   loadPrs?: boolean;
+  /** Repository-local PR snapshot used instead of the process-global index. */
+  prIndex?: PrIndex;
   showArchived?: boolean;
+  /**
+   * Run `git fetch origin <base>` before computing sync status so the
+   * origin comparison reflects the current remote state.
+   */
+  fetch?: boolean;
   /**
    * Render each branch's full markdown description in the ladder instead of
    * the dimmed first line. Set by `status --description`.
@@ -120,6 +137,10 @@ function computeDepths(
   return result;
 }
 
+function toLaneNode(node: StackNode): LaneTreeNode<StackNode> {
+  return { value: node, children: node.children.map(toLaneNode) };
+}
+
 function flattenPostorder(tree: StackTree): Array<{
   branch: string;
   stackName: string;
@@ -128,46 +149,21 @@ function flattenPostorder(tree: StackTree): Array<{
   hasBranchingChildren: boolean;
   merged: boolean;
 }> {
-  const out: Array<{
-    branch: string;
-    stackName: string;
-    rootIndex: number;
-    pipeCount: number;
-    hasBranchingChildren: boolean;
-    merged: boolean;
-  }> = [];
-
-  const visit = (
-    node: StackNode,
-    rowPipeCount: number,
-    rootIndex: number,
-  ): void => {
-    const [primaryChild, ...secondaryChildren] = node.children;
-
-    if (primaryChild) {
-      visit(primaryChild, rowPipeCount, rootIndex);
-    }
-
-    for (const child of secondaryChildren) {
-      visit(child, rowPipeCount + 1, rootIndex);
-    }
-
-    out.push({
-      branch: node.branch,
-      stackName: node.stackName,
-      rootIndex,
-      pipeCount: rowPipeCount,
-      hasBranchingChildren: secondaryChildren.length > 0,
-      merged: node.merged === true,
-    });
-  };
-
-  // Preserve StackTree root order so the compact renderer follows the same
-  // parent/child/root ordering the TUI gets from getStackTree/getAllStackTrees.
-  for (let i = 0; i < tree.roots.length; i++) {
-    visit(tree.roots[i], i, i);
-  }
-  return out;
+  // Leaf-first orientation with each root starting in its own column is the
+  // ladder layout the compact renderer expects. Lane placement is shared with
+  // the browser serve view via layoutLanes (see lib/graph.ts).
+  const { rows } = layoutLanes(tree.roots.map(toLaneNode), {
+    orientation: "leaf-first",
+    rootLane: (rootIndex) => rootIndex,
+  });
+  return rows.map((row) => ({
+    branch: row.value.branch,
+    stackName: row.value.stackName,
+    rootIndex: row.rootIndex,
+    pipeCount: row.lane,
+    hasBranchingChildren: row.isFork,
+    merged: row.value.merged === true,
+  }));
 }
 
 function colorGraphText(
@@ -466,6 +462,7 @@ async function buildStackStatus(
   const depthMap = computeDepths(tree);
   const nodes = getAllNodes(tree);
   const loadPrs = opts.loadPrs === true;
+  const baseSyncRef = await resolveBaseSyncRef(dir, tree.baseBranch);
 
   const branches = await Promise.all(
     nodes.map(async (node): Promise<BranchStatus> => {
@@ -474,14 +471,19 @@ async function buildStackStatus(
       // is folded into the base, so the literal `node.parent` may be a
       // dangling name; rev-list then fails and the old code returned a
       // spurious "diverged". This matches the parent restack would target.
+      const parent = effectiveParent(tree, node);
       const syncStatus: SyncStatus = node.merged
         ? "landed"
         : await computeSyncStatus(
           dir,
           node.branch,
-          effectiveParent(tree, node),
+          parent === tree.baseBranch ? baseSyncRef : parent,
         );
-      const pr = loadPrs ? await queryPr(node.branch, owner, repo) : null;
+      const pr = loadPrs
+        ? opts.prIndex
+          ? selectBestPr(opts.prIndex.byHead.get(node.branch) ?? [])
+          : await queryPr(node.branch, owner, repo)
+        : null;
 
       const { depth, isLastChild } = depthMap.get(node.branch) ?? {
         depth: 0,
@@ -510,6 +512,10 @@ async function buildStackStatus(
     currentBranch,
     opts.fullDescriptions === true,
   );
+  const latestCommitAt = await getLatestCommitDate(
+    dir,
+    nodes.map((node) => node.branch),
+  );
 
   return {
     stackName: tree.stackName,
@@ -517,6 +523,7 @@ async function buildStackStatus(
     mergeStrategy: tree.mergeStrategy,
     archived: tree.archived,
     branches,
+    latestCommitAt,
     display,
   };
 }
@@ -533,7 +540,18 @@ export async function getStackStatus(
     getCurrentBranch(dir),
   ]);
 
-  return await buildStackStatus(dir, tree, currentBranch, owner, repo, opts);
+  const fetchWarnings = opts.fetch === true
+    ? await fetchBaseBranches(dir, [tree.baseBranch])
+    : undefined;
+  const status = await buildStackStatus(
+    dir,
+    tree,
+    currentBranch,
+    owner,
+    repo,
+    opts,
+  );
+  return fetchWarnings !== undefined ? { ...status, fetchWarnings } : status;
 }
 
 export async function getAllStackStatuses(
@@ -546,13 +564,18 @@ export async function getAllStackStatuses(
     getAllStackTrees(dir),
     getCurrentBranch(dir),
   ]);
+  const fetchWarnings = opts.fetch === true && trees.length > 0
+    ? await fetchBaseBranches(dir, trees.map((tree) => tree.baseBranch))
+    : undefined;
   const stacks = await Promise.all(
     trees.map((tree) =>
       buildStackStatus(dir, tree, currentBranch, owner, repo, opts)
     ),
   );
+  const withWarnings = (result: AllStacksStatus): AllStacksStatus =>
+    fetchWarnings !== undefined ? { ...result, fetchWarnings } : result;
   if (stacks.length === 0) {
-    return { stacks, display: "No stacks found." };
+    return withWarnings({ stacks, display: "No stacks found." });
   }
   const treeByStackName = new Map(
     trees.map((tree) => [tree.stackName, tree] as const),
@@ -568,7 +591,7 @@ export async function getAllStackStatuses(
     : stacks.filter((stack) => !stack.archived);
 
   if (displayStacks.length === 0) {
-    return { stacks, display: "No stacks found." };
+    return withWarnings({ stacks, display: "No stacks found." });
   }
 
   const sections = new Map<string, StackStatus[]>();
@@ -601,5 +624,5 @@ export async function getAllStackStatuses(
     })
     .join("\n\n");
 
-  return { stacks, display };
+  return withWarnings({ stacks, display });
 }

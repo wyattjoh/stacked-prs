@@ -55,8 +55,10 @@ if [ ! -x "$BIN" ] || [ "$CURRENT" != "$EXPECTED" ]; then
   deno compile \
     --config "$PLUGIN_ROOT/deno.json" \
     --lock "$PLUGIN_ROOT/deno.lock" \
-    --allow-run=git,gh,pbcopy,xclip,wl-copy \
-    --allow-env --allow-read --allow-write \
+    --include "$PLUGIN_ROOT/src/commands/serve.css" \
+    --include "$PLUGIN_ROOT/src/commands/serve.client.js" \
+    --allow-run=git,gh,pbcopy,xclip,wl-copy,open,xdg-open,cmd \
+    --allow-env --allow-read --allow-write --allow-net \
     -o "$BIN.tmp" \
     "$PLUGIN_ROOT/src/cli.ts"
 
